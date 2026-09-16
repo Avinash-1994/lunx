@@ -96,6 +96,7 @@ export class NativeWorker {
     constructor(poolSize?: number);
     /** Transform a single file using SWC (JS/TS) or LightningCSS (CSS). */
     transformSync(config: TransformConfig): TransformResult;
+    transformSync(code: string, filePath?: string): string;
     /** Parallel transform across all CPU cores. */
     batchTransform(items: TransformConfig[]): Promise<TransformResult[]>;
     processFile(filePath: string): null;
@@ -108,6 +109,20 @@ export function scanImports(code: string): string[];
 export function normalizePath(path: string): string;
 export function helloRust(): string;
 export function minifySync(code: string): string;
+
+export const engineUsed: 'native' | 'js';
+export function getOptimalParallelism(): number;
+export function benchmarkParallelism(itemCount: number): Record<string, number>;
+export function createInputKey(filePath: string, contentHash: string): string;
+export function createGraphKey(graphHash: string): string;
+export function createPlanKey(planHash: string, target: string): string;
+export function createArtifactKey(artifactId: string, target: string): string;
+
+export class PluginRuntime {
+    constructor();
+    verifyPlugin(wasmBytes: Buffer): boolean;
+    execute(wasmBytes: Buffer, input: string, timeoutMs: number): string;
+}
 
 /**
  * Phase 2.2 — LightningCSS hoisted as top-level N-API export.

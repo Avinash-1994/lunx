@@ -72,20 +72,17 @@ export class Transformer {
 
         modules.forEach(m => {
             const ext = m.path.split('.').pop()?.toLowerCase() || 'js';
-            const content = m.content;
 
-            const isNodeModule = m.path.includes('node_modules') || m.path.includes('.pnpm');
-            const hasFrameworkSyntax = !isNodeModule && (/<[a-zA-Z]/.test(content) || /@[A-Z]/.test(content));
-            const isPlainJs = ['js', 'mjs', 'cjs'].includes(ext);
             const isCss = ext === 'css';
-            const isVue = ext === 'vue';
-            const hasAssetImport = /import\s+.*from\s+['"].*\.(png|jpg|jpeg|gif|svg|css|less|scss|sass|json)['"]/.test(content) ||
-                /require\(['"].*\.(png|jpg|jpeg|gif|svg|css|less|scss|sass|json)['"]\)/.test(content);
+            const isVueSfc = ext === 'vue';
+            const isSvelte = ext === 'svelte';
+            const isAstro = ext === 'astro';
+            const isNativeJs = ['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'mts', 'cts'].includes(ext);
+            const needsFrameworkCompiler = isVueSfc || isSvelte || isAstro;
 
             if (this.available && isCss) {
-                // Completely hoisted LightningCSS path
                 nativeCssBatch.push(m);
-            } else if (this.available && (isPlainJs || isVue) && !hasFrameworkSyntax && !hasAssetImport) {
+            } else if (this.available && isNativeJs && !needsFrameworkCompiler) {
                 nativeBatch.push(m);
             } else {
                 pluginBatch.push(m);
@@ -122,8 +119,8 @@ export class Transformer {
                 nativeBatch.forEach(m => {
                     const ext = m.path.split('.').pop() || 'js';
                     let loader = 'js';
-                    if (['tsx', 'ts', 'jsx', 'js'].includes(ext)) loader = ext;
-                    else if (ext === 'vue') loader = 'vue';
+                    if (['tsx', 'ts', 'jsx', 'js', 'mts', 'cts', 'mjs', 'cjs'].includes(ext)) loader = ext === 'mjs' || ext === 'cjs' || ext === 'mts' || ext === 'cts' ? 'js' : ext;
+                    else if (ext === 'vue') loader = 'js';
 
                     if (!batches[loader]) batches[loader] = [];
                     batches[loader].push(m);

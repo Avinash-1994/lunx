@@ -185,6 +185,7 @@ export interface LunxBaseConfig {
 
     name:          string;
     filename?:     string;
+    singletonHost?: string;
     exposes?:      Record<string, string>;
     remotes?:      Record<string, string>;
     shared?:       Record<string, { singleton?: boolean; requiredVersion?: string }>;

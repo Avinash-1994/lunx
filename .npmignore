@@ -35,12 +35,16 @@ tsconfig.*.json
 jest.config.js
 .eslintrc.js
 
-# Exclude massive platform-specific Rust binaries from the main package (keeps size < 2MB).
-# Users without the binary will gracefully fall back to the JS stub implemented in index.js.
-dist/lunx_native.node
-dist/**/*.node
-dist/nexxo_native.node
-nexxo_native.node
+# Native binary ships ONLY via optional @lunx/native-* packages (not in lunx-dev).
+/lunx_native.node
+/native/
+native/target/
+**/target/
 **/*.node
-*.node
+nexxo_native.node
+dist/nexxo_native.node
+dist/ai/
+dist/visual/
+dist/marketplace/
+dist/packages/
 dist/**/__tests__/

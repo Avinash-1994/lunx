@@ -1,7 +1,8 @@
 {
-  "name": "lunx",
-  "version": "1.0.0",
+  "name": "lunx-dev",
+  "version": "1.0.3",
   "description": "⚡ Lunx — a modern JavaScript build tool powered by SWC and LightningCSS. Fast HMR, module federation, tree shaking, and multi-framework support (React, Vue, Svelte, Solid). A fast, Rust-native build pipeline.",
+  "homepage": "https://lunx.dev",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -17,6 +18,7 @@
   "sideEffects": false,
   "bin": {
     "lunx": "./dist/cli.js",
+    "lunxjs": "./dist/cli.js",
     "create-lunx": "./dist/create-lunx.js"
   },
   "files": [
@@ -24,12 +26,17 @@
     "README.md",
     "LICENSE"
   ],
+  "optionalDependencies": {
+    "@lunx/native-linux-x64-gnu": "1.0.3"
+  },
   "scripts": {
-    "build": "rimraf dist && npm run build:native && tsc -p tsconfig.build.json && node ./scripts/postbuild.js",
+    "build": "rimraf dist && npm run build:native && tsc -p tsconfig.build.json && node ./scripts/postbuild.js && node ./scripts/verify-native.mjs && node ./scripts/verify-pack-size.mjs",
     "build:native": "node ./scripts/build_native.js",
     "dev": "bun src/cli.ts dev",
     "dev:bun": "bun src/cli.ts dev",
     "start": "bun src/cli.ts dev",
+    "pack:native": "npm pack --ignore-scripts --workspace=false --pack-destination . ./packages/lunx-native-linux-x64-gnu",
+    "publish:native": "npm publish --access public ./packages/lunx-native-linux-x64-gnu",
     "prepack": "npm run build",
     "test": "cross-env NODE_OPTIONS=\"--experimental-vm-modules\" jest",
     "test:bun": "bun test",
@@ -108,7 +115,6 @@
   "bugs": {
     "url": "https://github.com/Avinash-1994/lunx/issues"
   },
-  "homepage": "https://github.com/Avinash-1994/lunx#readme",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -143,6 +149,7 @@
     "kleur": "^4.1.4",
     "launch-editor": "^2.12.0",
     "level": "^10.0.0",
+    "lightningcss": "^1.30.1",
     "node-fetch": "^2.7.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

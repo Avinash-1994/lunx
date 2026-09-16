@@ -3,6 +3,7 @@
  * Watches lunx.config.ts, tsconfig.json, .env etc. for changes.
  * Uses native Rust watcher first; falls back to chokidar.
  */
+import fs from 'fs';
 import path from 'path';
 import { log } from '../utils/logger.js';
 
@@ -11,8 +12,10 @@ export type ReloadType = 'hot' | 'rebuild' | 'restart';
 // Try loading native watcher — fail silently so chokidar takes over
 let NativeWatcher: any = null;
 try {
-    const native = await import('../native/index.js');
-    NativeWatcher = native.NativeWatcher;
+    if (process.env.LUNX_WATCHER !== 'chokidar') {
+        const native = await import('../native/index.js');
+        NativeWatcher = native.NativeWatcher;
+    }
 } catch (e: any) {
     console.warn(`[lunx] Native watcher unavailable, falling back to chokidar: ${e?.message ?? e}`);
 }
@@ -32,18 +35,27 @@ export class ConfigWatcher {
             'tailwind.config.js', 'tsconfig.json', '.env', '.env.local'
         ].map(f => path.join(this.root, f));
 
+        // notify cannot watch paths that do not exist yet (e.g. lunx.config.js
+        // when the project only has lunx.config.ts). Watching missing files
+        // previously aborted the entire native watcher and fell back to chokidar.
+        const existingConfigFiles = configFiles.filter((f) => {
+            try { return fs.existsSync(f); } catch { return false; }
+        });
+        const watchPaths = existingConfigFiles.length > 0 ? existingConfigFiles : [this.root];
+        const configSet = new Set(configFiles);
+        const configNames = new Set(configFiles.map((f) => path.basename(f)));
+
         if (NativeWatcher) {
             try {
                 this.nativeWatcher = new NativeWatcher();
-                this.nativeWatcher.start(configFiles, (_err: any, event: any) => {
+                this.nativeWatcher.start(watchPaths, (_err: any, event: any) => {
                     if (_err || event.kind === 'access') return;
                     for (const p of event.paths as string[]) {
-                        if (configFiles.includes(p)) {
-                            const filename = path.basename(p);
-                            const type = this.determineReloadType(filename);
-                            log.info(`Config changed: ${filename} -> ${type} [native]`, { category: 'server' });
-                            this.onReload(type, p);
-                        }
+                        const filename = path.basename(p);
+                        if (!configSet.has(p) && !configNames.has(filename)) continue;
+                        const type = this.determineReloadType(filename);
+                        log.info(`Config changed: ${filename} -> ${type} [native]`, { category: 'server' });
+                        this.onReload(type, p);
                     }
                 });
                 return;

@@ -4,24 +4,26 @@ import { build } from 'esbuild';
 import { createHash } from 'crypto';
 import { createRequire } from 'module';
 import { log } from '../utils/logger.js';
+import native from '../native/index.js';
 
 const require = createRequire(import.meta.url);
 
-// Lazily load the native prebundle N-API.
-// Avoids a hard crash if the native binary is not present (fallback to JS-only path).
-let _native: { prebundle: Function; prebundlePut: Function } | null = null;
-function getNative() {
-    if (_native !== null) return _native;
+// Unified native loader — never hard-require lunx_native.node from cwd alone.
+let _native: { prebundle: Function; prebundlePut: Function } | null | undefined;
+function isRustNative(): boolean {
     try {
-        const candidates = [
-            path.resolve(process.cwd(), 'lunx_native.node'),
-            path.resolve(process.cwd(), 'dist/lunx_native.node'),
-            new URL('../../lunx_native.node', import.meta.url).pathname,
-        ];
-        for (const p of candidates) {
-            try { _native = require(p); return _native; } catch {}
-        }
-    } catch {}
+        return typeof (native as any).helloRust === 'function'
+            && String((native as any).helloRust()) !== 'JS fallback';
+    } catch {
+        return false;
+    }
+}
+function getNative() {
+    if (_native !== undefined) return _native;
+    if (isRustNative() && typeof (native as any).prebundle === 'function') {
+        _native = native as { prebundle: Function; prebundlePut: Function };
+        return _native;
+    }
     _native = null;
     return null;
 }

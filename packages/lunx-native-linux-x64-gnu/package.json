@@ -1,0 +1,24 @@
+{
+  "name": "@lunx/native-linux-x64-gnu",
+  "version": "1.0.3",
+  "description": "Optional Rust N-API binary for lunx-dev on linux-x64 (glibc). Same pattern as @swc/core / esbuild platform packages.",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lunx_native.linux-x64-gnu.node",
+    "README.md"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Avinash-1994/lunx.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -35,6 +35,7 @@ export const BuildConfigSchema = z.object({
   federation: z.object({
     name: z.string(),
     filename: z.string().optional(),
+    singletonHost: z.string().optional(),
     exposes: z.record(z.string(), z.string()).optional(),
     remotes: z.record(z.string(), z.string()).optional(),
     shared: z.record(z.string(), z.object({
@@ -110,6 +111,7 @@ export type BuildConfig = {
   federation?: {
     name: string;
     filename?: string;
+    singletonHost?: string;
     exposes?: Record<string, string>;
     remotes?: Record<string, string>;
     shared?: Record<string, { singleton?: boolean; requiredVersion?: string }>;

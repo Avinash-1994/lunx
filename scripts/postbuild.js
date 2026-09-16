@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { promises as fs } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, relative } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -73,6 +73,69 @@ async function copyAll(patternDir, filterExt, outDir) {
   await fs.rm(join(distDir, 'test-server.d.ts'), { force: true }).catch(() => {});
   await fs.rm(join(distDir, 'plugins', 'testSandbox.js'), { force: true }).catch(() => {});
   await fs.rm(join(distDir, 'plugins', 'testSandbox.d.ts'), { force: true }).catch(() => {});
+
+  // Prune non-runtime folders from dist so the published JS footprint stays ≤ ~1.6 MB.
+  const pruneDirs = [
+    'ai', 'visual', 'marketplace', 'packages', 'repro', 'benchmarks',
+    'test', 'tests', 'e2e',
+  ];
+  for (const d of pruneDirs) {
+    await fs.rm(join(distDir, d), { recursive: true, force: true }).catch(() => {});
+  }
+
+  // Remove ANY .node from dist/ — native ships via optional @lunx/native-* packages
+  // so lunx-dev stays competitive on download size (≤1.6MB), like esbuild/@swc/core.
+  try {
+    const walk = async (dir) => {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const e of entries) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) await walk(p);
+        else if (e.name.endsWith('.node')) await fs.rm(p, { force: true }).catch(() => {});
+      }
+    };
+    await walk(distDir);
+  } catch { }
+
+  const nativeDir = join(rootDir, 'native');
+  const distNativeDir = join(distDir, 'native');
+  await ensureDir(distNativeDir);
+
+  // Refresh optional platform package binary (published separately)
+  const optionalNativeDir = join(rootDir, 'packages', 'lunx-native-linux-x64-gnu');
+  await ensureDir(optionalNativeDir);
+  let binarySrc = join(rootDir, 'lunx_native.node');
+  try {
+    await fs.access(binarySrc);
+  } catch {
+    binarySrc = '';
+    try {
+      const entries = await fs.readdir(nativeDir);
+      const plat = entries.find((e) => e.startsWith('lunx_native') && e.endsWith('.node'));
+      if (plat) binarySrc = join(nativeDir, plat);
+    } catch { }
+  }
+  if (binarySrc) {
+    await copyIfExists(binarySrc, join(optionalNativeDir, 'lunx_native.linux-x64-gnu.node'));
+    // Keep a local copy for monorepo/dev loads without requiring npm install of the optional pkg
+    await copyIfExists(binarySrc, join(rootDir, 'lunx_native.node'));
+  }
+
+  // Symlink optional package into node_modules for local verify / tests
+  try {
+    const nmScope = join(rootDir, 'node_modules', '@lunx');
+    await ensureDir(nmScope);
+    const linkPath = join(nmScope, 'native-linux-x64-gnu');
+    await fs.rm(linkPath, { recursive: true, force: true }).catch(() => {});
+    await fs.symlink(optionalNativeDir, linkPath, 'junction').catch(async () => {
+      // Fallback: copy package.json + index (binary already there) via relative symlink
+      await fs.symlink(relative(nmScope, optionalNativeDir), linkPath, 'dir').catch(() => {});
+    });
+  } catch { }
+
+  // Keep a small JS napi helper next to the loader (not another .node copy)
+  await copyIfExists(join(nativeDir, 'index.js'), join(distNativeDir, 'napi-loader.cjs'));
+  await copyIfExists(join(nativeDir, 'index.cjs'), join(distNativeDir, 'index.cjs'));
 
   console.log('Post-build copy and cleanup complete');
 })();

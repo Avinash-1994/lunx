@@ -77,15 +77,7 @@ export declare class GraphAnalyzer {
   clear(): void
 }
 
-/**
- * Native file system watcher with 50ms debounce.
- *
- * Usage:
- *   const w = new NativeWatcher();
- *   w.start(['/path/to/watch'], (event) => { ... });
- *   ...
- *   w.stop();
- */
+/** Native file system watcher with 50ms debounce. */
 export declare class NativeWatcher {
   constructor()
   getVersion(): string
@@ -307,8 +299,8 @@ export declare function prebundlePut(key: string, moduleId: string, bundle: stri
 export declare function scanImports(code: string): Array<string>
 
 /**
- * Convenience standalone function: start watching paths and call callback on events.
- * Returns a handle ID (currently unused — call stop() on the NativeWatcher instance).
+ * Convenience standalone function. The watcher is dropped at the end of this
+ * call — use `new NativeWatcher()` for a persistent watcher.
  */
 export declare function startWatcher(paths: Array<string>, callback: (err: null | Error, event: WatchEvent) => void): void
 

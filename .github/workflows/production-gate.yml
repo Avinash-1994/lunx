@@ -412,8 +412,8 @@ jobs:
       - name: 🔌 Verify Adapter Core Package
         run: |
           node --input-type=module --eval "
-            import('./packages/nuclie-adapter-core/src/index.js')
-              .then(m => console.log('✅ nuclie-adapter-core exports:', Object.keys(m).join(', ')))
+            import('./packages/lunx-adapter-core/src/index.js')
+              .then(m => console.log('✅ @lunx/adapter-core exports:', Object.keys(m).join(', ')))
               .catch(e => console.log('⚠️  (TS source — expected in CI without compile step):', e.message))
           " || true
 

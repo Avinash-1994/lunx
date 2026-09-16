@@ -1,6 +1,8 @@
 # ⚡ Lunx
 
-> **The ultra-fast, Rust-native JavaScript build tool & dev server with zero-config framework auto-detection, native Module Federation, and built-in supply-chain security.**
+> **A Rust-native JavaScript build tool for SPAs and Module Federation.**  
+> Main npm package stays **≤1.6MB**. Rust speed ships via optional `@lunx/native-*` (same pattern as esbuild / `@swc/core`).  
+> USP: **Federation + security CLI + Rust transforms** — not a Next/Nuxt replacement.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org)
@@ -17,7 +19,7 @@
   - [Svelte 5 / Svelte 4](#3-svelte)
   - [SolidJS](#4-solidjs)
   - [Angular (v2–v18+)](#5-angular)
-  - [SSR Meta-Frameworks (Next.js, Nuxt, SvelteKit, Remix, Astro)](#6-ssr-meta-frameworks)
+  - [SSR / meta-frameworks (compat proxies)](#6-ssr-meta-frameworks)
   - [Desktop Apps (Electron & Tauri)](#7-desktop-apps-electron--tauri)
 - [Configuration & Auto-Detection](#-configuration--auto-detection)
 - [Module Federation Tutorial](#-module-federation-tutorial)
@@ -73,7 +75,7 @@ You will see the dev server startup banner:
   ✔ Ready in 18ms (HMR active)
 ```
 
-Edit any file in `src/` — changes appear **instantaneously** via sub-millisecond Rust Delta HMR without a full page reload.
+Edit any file in `src/` — changes hot-reload via the native watcher and SWC transform when the Rust binary is loaded.
 
 ### Step 3 — Production Build & Preview
 
@@ -198,20 +200,18 @@ export default defineConfig({
 
 ---
 
-### 6. SSR Meta-Frameworks
+### 6. SSR / meta-frameworks (compat, not a replacement)
 
-Lunx supports full-stack SSR frameworks with zero extra configuration. When specified in `package.json` or `lunx.config.ts`, `preset: 'ssr'` and `platform: 'node'` are automatically applied:
+Lunx is an **SPA + Module Federation** build tool. It does **not** replace Next.js, Nuxt, SvelteKit, Remix, or similar SSR engines.
 
-| Framework | Auto-Detected Dependency | Config preset |
-|---|---|---|
-| **Next.js** | `next` | `framework: 'next'` |
-| **Nuxt** | `nuxt` | `framework: 'nuxt'` |
-| **SvelteKit** | `@sveltejs/kit` | `framework: 'sveltekit'` |
-| **Remix** | `@remix-run/react` | `framework: 'remix'` |
-| **Astro** | `astro` | `framework: 'astro'` |
-| **SolidStart** | `@solidjs/start` | `framework: 'solidstart'` |
-| **TanStack Start**| `@tanstack/start` | `framework: 'tanstack-start'` |
-| **Waku** | `waku` | `framework: 'waku'` |
+When those frameworks are detected, Lunx adapters **delegate to the upstream CLI** (for example spawning `next dev`) or apply limited Pages-router loader hooks. Treat them as compatibility shims:
+
+| Framework | What Lunx does |
+|---|---|
+| **Next.js** | App Router: proxies `next dev`. Pages Router: optional SWC loader hook. Not a Next replacement. |
+| **Nuxt / SvelteKit / Remix / SolidStart / …** | Detected and labeled as upstream adapters. Use each framework's own `dev`/`build`. |
+
+For production speed, use Lunx on **React / Vue / Svelte / Solid / Preact SPAs** and federated remotes.
 
 ---
 
@@ -420,15 +420,14 @@ lunx security report
 
 ## 📊 Performance Benchmarks
 
-*All benchmarks measured on canonical 300-module React fixture (Intel i7-13650HX, 23GB RAM, Linux x64, Node v20.19.5). Reproduce locally via `cd benchmarks/public && node run-all.mjs`.*
+Numbers below are **only valid when the native binary is loaded** (`[lunx] engine: rust-native` at startup). If you see `engine: js-fallback`, transforms run on `@swc/core` in Node and will be slower.
 
-| Benchmark Metric | Lunx v1.0.0 | Vite 5 | Webpack 5 | Baseline Target |
-|---|---|---|---|---|
-| **HMR Latency (p50)** | **0.001ms** | 12.0ms | 110.0ms | ≤12.0ms |
-| **HMR Latency (p99)** | **0.012ms** | 20.0ms | 180.0ms | ≤20.0ms |
-| **Cold Build Time** | **295.90ms** | 650.0ms | 2,800.0ms | ≤400.0ms |
-| **Warm Build Time** | **303.12ms** | 320.0ms | 950.0ms | ≤400.0ms |
-| **SQLite Cache Hit Rate**| **99.00%** | N/A | N/A | ≥99.0% |
+Reproduce locally via `cd benchmarks/public && node run-all.mjs` after `npm run build` on this repo.
+
+| Benchmark Metric | Notes |
+|---|---|
+| **HMR** | Rust `notify` watcher + SWC transform when native is loaded. Published packages without `lunx_native*.node` fall back to chokidar + JS. Do not treat synthetic sub-millisecond lab numbers as a product claim. |
+| **Cold / warm build** | Dominated by native SWC + LightningCSS on SPA graphs. Compare against Vite/Rspack on the same fixture; do not use unpublished internal benches as marketing. |
 
 ---
 

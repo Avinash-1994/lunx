@@ -1,13 +1,38 @@
-/// Phase 3.3 — Native FS Watcher
+/// Native FS Watcher
 ///
 /// Uses the `notify` crate with a 50ms debounce.
-/// Replaces chokidar usage in the dev server.
-/// Falls back to chokidar automatically if this module fails to load.
+/// Ignores heavy trees (node_modules, .git, dist, …) so we do not exhaust
+/// inotify watches or panic the Node process. Falls back to chokidar in JS
+/// if this module fails to load.
 use napi_derive::napi;
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
-use notify::{Watcher, RecommendedWatcher, RecursiveMode};
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+const DEBOUNCE_MS: u64 = 50;
+
+const IGNORED_DIR_NAMES: &[&str] = &[
+    "node_modules",
+    ".git",
+    "dist",
+    ".lunx",
+    ".lunx_cache",
+    "target",
+    ".next",
+    ".nuxt",
+    ".output",
+    "coverage",
+    ".turbo",
+    ".cache",
+    "build",
+];
 
 #[napi(object)]
 pub struct WatchEvent {
@@ -18,17 +43,49 @@ pub struct WatchEvent {
     pub timestamp: f64,
 }
 
+fn should_ignore(path: &Path) -> bool {
+    path.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .map(|s| IGNORED_DIR_NAMES.contains(&s))
+            .unwrap_or(false)
+    })
+}
+
+fn now_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
+
+/// Watch each directory non-recursively, skipping ignored trees.
+/// Recursive notify on the project root would also watch node_modules and
+/// can abort the Node process (inotify flood / panic=abort).
+fn watch_filtered(watcher: &mut RecommendedWatcher, root: &Path) {
+    if should_ignore(root) || !root.exists() {
+        return;
+    }
+    let _ = watcher.watch(root, RecursiveMode::NonRecursive);
+    if !root.is_dir() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() && !should_ignore(&p) {
+            watch_filtered(watcher, &p);
+        }
+    }
+}
+
 /// Native file system watcher with 50ms debounce.
-///
-/// Usage:
-///   const w = new NativeWatcher();
-///   w.start(['/path/to/watch'], (event) => { ... });
-///   ...
-///   w.stop();
 #[napi]
 pub struct NativeWatcher {
-    // inner watcher kept alive inside an Arc<Mutex<...>>
     inner: Arc<Mutex<Option<RecommendedWatcher>>>,
+    stop: Arc<AtomicBool>,
 }
 
 #[napi]
@@ -37,6 +94,7 @@ impl NativeWatcher {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(None)),
+            stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -54,73 +112,116 @@ impl NativeWatcher {
         #[napi(ts_arg_type = "(err: null | Error, event: WatchEvent) => void")]
         callback: ThreadsafeFunction<WatchEvent>,
     ) -> Result<()> {
+        self.stop.store(false, Ordering::SeqCst);
+        let (tx, rx) = mpsc::channel::<WatchEvent>();
+        let stop = Arc::clone(&self.stop);
+
         let cb = callback;
-
-        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            match res {
-                Ok(event) => {
-                    let kind = match event.kind {
-                        notify::EventKind::Create(_) => "create",
-                        notify::EventKind::Modify(_) => "modify",
-                        notify::EventKind::Remove(_) => "delete",
-                        notify::EventKind::Access(_) => "access",
-                        _ => "other",
-                    };
-
-                    let paths: Vec<String> = event.paths.iter()
-                        .filter_map(|p| p.to_str().map(|s| s.to_string()))
-                        .collect();
-
-                    let watch_event = WatchEvent {
-                        kind: kind.to_string(),
-                        paths,
-                        timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs_f64() * 1000.0)
-                            .unwrap_or(0.0),
-                    };
-
-                    cb.call(Ok(watch_event), ThreadsafeFunctionCallMode::NonBlocking);
+        thread::Builder::new()
+            .name("lunx-notify-debounce".into())
+            .spawn(move || {
+                let mut pending: HashSet<String> = HashSet::new();
+                let mut last_kind = "modify".to_string();
+                loop {
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    match rx.recv_timeout(Duration::from_millis(DEBOUNCE_MS)) {
+                        Ok(ev) => {
+                            if ev.kind != "access" {
+                                last_kind = ev.kind;
+                                pending.extend(ev.paths);
+                            }
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            if pending.is_empty() {
+                                continue;
+                            }
+                            let watch_event = WatchEvent {
+                                kind: last_kind.clone(),
+                                paths: pending.drain().collect(),
+                                timestamp: now_ms(),
+                            };
+                            let _ = cb.call(Ok(watch_event), ThreadsafeFunctionCallMode::NonBlocking);
+                        }
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
                 }
-                Err(e) => {
-                    let watch_event = WatchEvent {
-                        kind: "error".to_string(),
-                        paths: vec![e.to_string()],
-                        timestamp: 0.0,
-                    };
-                    cb.call(Ok(watch_event), ThreadsafeFunctionCallMode::NonBlocking);
+            })
+            .map_err(|e| Error::new(Status::GenericFailure, format!("debounce thread: {}", e)))?;
+
+        let mut watcher = RecommendedWatcher::new(
+            move |res: notify::Result<notify::Event>| {
+                match res {
+                    Ok(event) => {
+                        if matches!(event.kind, notify::EventKind::Access(_)) {
+                            return;
+                        }
+                        let kind = match event.kind {
+                            notify::EventKind::Create(_) => "create",
+                            notify::EventKind::Modify(_) => "modify",
+                            notify::EventKind::Remove(_) => "delete",
+                            _ => "other",
+                        };
+                        let paths: Vec<String> = event
+                            .paths
+                            .iter()
+                            .filter(|p| !should_ignore(p))
+                            .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                            .collect();
+                        if paths.is_empty() {
+                            return;
+                        }
+                        let _ = tx.send(WatchEvent {
+                            kind: kind.to_string(),
+                            paths,
+                            timestamp: now_ms(),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WatchEvent {
+                            kind: "error".to_string(),
+                            paths: vec![e.to_string()],
+                            timestamp: 0.0,
+                        });
+                    }
                 }
-            }
-        })
+            },
+            Config::default(),
+        )
         .map_err(|e| Error::new(Status::GenericFailure, format!("Watcher init failed: {}", e)))?;
 
-        let mut inner = self.inner.lock()
-            .map_err(|_| Error::new(Status::GenericFailure, "Mutex poisoned"))?;
-
-        let mut w = watcher;
         for path_str in &paths {
-            let p = std::path::Path::new(path_str);
-            w.watch(p, RecursiveMode::Recursive)
-                .map_err(|e| Error::new(Status::GenericFailure,
-                    format!("Cannot watch {}: {}", path_str, e)))?;
+            let p = PathBuf::from(path_str);
+            if !p.exists() {
+                continue;
+            }
+            watch_filtered(&mut watcher, &p);
         }
 
-        *inner = Some(w);
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| Error::new(Status::GenericFailure, "Mutex poisoned"))?;
+        *inner = Some(watcher);
         Ok(())
     }
 
     /// Stop watching and release all resources.
     #[napi]
     pub fn stop(&self) -> Result<()> {
-        let mut inner = self.inner.lock()
+        self.stop.store(true, Ordering::SeqCst);
+        let mut inner = self
+            .inner
+            .lock()
             .map_err(|_| Error::new(Status::GenericFailure, "Mutex poisoned"))?;
-        *inner = None; // drops the watcher → unregisters all paths
+        *inner = None;
         Ok(())
     }
 }
 
-/// Convenience standalone function: start watching paths and call callback on events.
-/// Returns a handle ID (currently unused — call stop() on the NativeWatcher instance).
+/// Convenience standalone function. The watcher is dropped at the end of this
+/// call — use `new NativeWatcher()` for a persistent watcher.
 #[napi(js_name = "startWatcher")]
 pub fn start_watcher(
     paths: Vec<String>,
@@ -129,7 +230,5 @@ pub fn start_watcher(
 ) -> Result<()> {
     let w = NativeWatcher::new();
     w.start(paths, callback)?;
-    // Note: the watcher is dropped here intentionally in the standalone API.
-    // For persistent use, create a NativeWatcher instance instead.
     Ok(())
 }

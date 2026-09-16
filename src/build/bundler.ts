@@ -31,6 +31,9 @@ export async function build(rawConfig: BuildConfig) {
       try {
         await import('../framework-adapters/angular/index.js');
       } catch (e) {}
+      try {
+        await import('../framework-adapters/spa/index.js');
+      } catch (e) {}
 
       adapter = registry.detect(config.root, pkg);
       if (!adapter) console.log(`[DEBUG] registry.detect returned null for ${config.root}`);
@@ -47,7 +50,15 @@ export async function build(rawConfig: BuildConfig) {
     if (adapter.config) {
       config = await adapter.config(config) as BuildConfig;
     }
-    console.log(`[lunx] adapter: ${adapter.name}`);
+    const metaProxies = new Set([
+      'nextjs-pages', 'next', 'nuxt', 'svelte-kit', 'solidstart', 'remix',
+      'tanstack-start', 'waku', 'analog', 'react-router', 'astro', 'vitepress',
+      'gatsby', 'redwoodjs', 'qwik-city',
+    ]);
+    const extra = metaProxies.has(adapter.name)
+      ? ` (upstream ${adapter.name}, not a Lunx SSR engine)`
+      : '';
+    console.log(`[lunx] adapter: ${adapter.name}${extra}`);
   }
 
   // Step 4: merge adapter plugins into plugin list

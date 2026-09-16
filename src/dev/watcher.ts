@@ -12,9 +12,10 @@ import { explainReporter } from '../core/engine/events.js';
 // ─── Try native watcher ───────────────────────────────────────────────────────
 let NativeWatcher: any = null;
 try {
-    // Dynamically imported so chokidar fallback works if native fails to load
-    const native = await import('../native/index.js');
-    NativeWatcher = native.NativeWatcher;
+    if (process.env.LUNX_WATCHER !== 'chokidar') {
+        const native = await import('../native/index.js');
+        NativeWatcher = native.NativeWatcher;
+    }
 } catch (e: any) {
     // We do NOT log here, we log when the watcher is actually started.
 }

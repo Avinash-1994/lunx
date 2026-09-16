@@ -9,48 +9,12 @@ import { BuildConfig } from '../config/index.js';
 import { log } from '../utils/logger.js';
 import { PluginManager } from '../plugins/index.js';
 import { PluginSandbox } from '../core/sandbox.js';
+import { NativeWorker, engineUsed } from '../native/index.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
-// Load Native Worker
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-let NativeWorker: any;
-
-try {
-  const candidates = [
-    path.resolve(__dirname, '../../lunx_native.node'), // From src/dev/devServer.ts
-    path.resolve(__dirname, '../lunx_native.node'),    // From dist/dev/devServer.js
-    path.resolve(__dirname, './lunx_native.node'),     // From dist/
-    path.resolve(process.cwd(), 'lunx_native.node'),   // Root fallback
-    path.resolve(process.cwd(), 'dist/lunx_native.node')
-  ];
-
-  let pathFound = '';
-  for (const c of candidates) {
-    try {
-      if (require('fs').existsSync(c)) {
-        pathFound = c;
-        break;
-      }
-    } catch { }
-  }
-
-  if (!pathFound) throw new Error('Native binary not found');
-
-  const nativeModule = require(pathFound);
-  NativeWorker = nativeModule.NativeWorker;
-} catch (e) {
-  // Native worker not found or failed to load, will fallback to JS implementation
-  if (process.env.DEBUG) log.debug('Native worker not found, using JS fallback');
-  // Mock Native Worker
-  NativeWorker = class {
-    constructor(workers: number) { }
-    processFile(filePath: string) { return null; }
-    invalidate(filePath: string) { }
-    rebuild(filePath: string) { return []; }
-  };
-}
 
 import { HMRThrottle } from './hmrThrottle.js';
 import { ConfigWatcher } from './configWatcher.js';
@@ -314,13 +278,26 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     await import('../meta-frameworks/vitepress/index.js').catch(() => {});
     await import('../meta-frameworks/tauri/index.js').catch(() => {});
     await import('../meta-frameworks/electron/index.js').catch(() => {});
+    await import('../framework-adapters/spa/index.js').catch(() => {});
     
     const pkgPath = path.join(cfg.root || process.cwd(), 'package.json');
     const fsNode = await import('fs');
       if (fsNode.existsSync(pkgPath)) {
         const pkg = JSON.parse(fsNode.readFileSync(pkgPath, 'utf-8'));
         activeAdapter = registry.detect(cfg.root || process.cwd(), pkg);
-        console.log('[LUNX DEV] activeAdapter:', activeAdapter ? activeAdapter.name : 'null');
+        if (activeAdapter) {
+          const metaProxies = new Set([
+            'nextjs-pages', 'next', 'nuxt', 'svelte-kit', 'solidstart', 'remix',
+            'tanstack-start', 'waku', 'analog', 'react-router', 'astro', 'vitepress',
+            'gatsby', 'redwoodjs', 'qwik-city',
+          ]);
+          const extra = metaProxies.has(activeAdapter.name)
+            ? ` (upstream ${activeAdapter.name}, not a Lunx SSR engine)`
+            : '';
+          console.log(`[lunx] adapter: ${activeAdapter.name}${extra}`);
+        } else {
+          console.log('[LUNX DEV] activeAdapter: null');
+        }
       }
   } catch (e) {
     // Ignore if not present
@@ -335,6 +312,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // @ts-ignore - Pipeline owns opinionated defaults
   pipeline.applyDefaults();
 
+  log.info(`--> Dev Server: engine ${engineUsed === 'native' ? 'rust-native' : 'js-fallback'}`, { category: 'server' });
   log.info(`--> Dev Server: Active ${displayFramework} workflow`, { category: 'server' });
   // Only warn if truly no framework is known (not just vanilla-mode frameworks like alpine/mithril/vanilla)
   const knownVanillaFrameworks = ['alpine', 'mithril', 'vanilla'];
@@ -1665,16 +1643,15 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
       const ext = path.extname(filePath);
 
-      if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs' || ext === '.vue' || ext === '.svelte' || ext === '.astro') {
+        if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs' || ext === '.vue' || ext === '.svelte' || ext === '.astro') {
         let raw = await fs.readFile(filePath, 'utf-8');
 
-        // Native Transform (Caching + Graph) - only for JS/TS files
+        // Native Transform (Caching + Graph) - JS/TS/JSX/TSX via unified loader
         if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs') {
           try {
-            raw = nativeWorker.transformSync(raw, filePath);
+            const transformed = nativeWorker.transformSync(raw, filePath);
+            raw = typeof transformed === 'string' ? transformed : (transformed?.code ?? raw);
           } catch (e: any) {
-            // Silently continue - native worker is optional optimization
-            // Only log in debug mode to avoid terminal spam
             if (process.env.DEBUG) {
               log.debug(`NativeWorker skipped for ${filePath}: ${e.message}`, { category: 'build' });
             }

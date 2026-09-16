@@ -23,7 +23,16 @@ export class AdapterRegistry {
     { pkg: 'vitepress', adapter: 'vitepress' },
     { pkg: 'astro', adapter: 'astro' },
     { pkg: 'gatsby', adapter: 'gatsby' },
-    { pkg: '@redwoodjs/core', adapter: 'redwood' }
+    { pkg: '@redwoodjs/core', adapter: 'redwood' },
+    // SPA fallbacks — always after meta-frameworks
+    { pkg: '@builder.io/qwik', adapter: 'qwik' },
+    { pkg: 'solid-js', adapter: 'solid' },
+    { pkg: 'svelte', adapter: 'svelte' },
+    { pkg: 'vue', adapter: 'vue' },
+    { pkg: 'preact', adapter: 'preact' },
+    { pkg: 'lit', adapter: 'lit' },
+    { pkg: 'react', adapter: 'react' },
+    { pkg: 'alpinejs', adapter: 'alpine' },
   ];
 
   private activeAdapter: LunxAdapter | null = null;
