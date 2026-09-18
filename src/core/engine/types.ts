@@ -70,6 +70,8 @@ export interface BuildArtifact {
     id: string; // contentHash
     type: 'js' | 'css' | 'asset' | 'map';
     fileName: string;
+    /** Graph entry that produced this chunk, relative to the project root when available. */
+    entry?: string;
     dependencies: string[];
     source?: string | Uint8Array;
     modules?: Array<{
@@ -106,6 +108,8 @@ export interface BuildCache {
 // Configuration
 export interface ResolvedConfig {
     entryPoints: string[];
+    /** Source HTML shells to rewrite at emit time (index.html, src/index.html, ...). */
+    htmlTemplates?: string[];
     outputDir: string;
     publicPath: string;
     splittingStrategy: 'route' | 'module';

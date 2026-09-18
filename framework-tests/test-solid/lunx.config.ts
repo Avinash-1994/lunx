@@ -1,2 +1,2 @@
 const defineConfig = (c: any) => c;
-export default defineConfig({ framework: 'vanilla', entry: 'src/main.tsx' });
+export default defineConfig({ framework: 'solid', entry: ['index.html'] });

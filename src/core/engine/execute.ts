@@ -302,6 +302,7 @@ export async function executeParallel(execPlan: ExecutionPlan, buildPlan: BuildP
                 id: canonicalHash(bundleContent).substring(0, 16),
                 type: isCss ? 'css' : 'js',
                 fileName: chunk.outputName,
+                entry: chunk.entry,
                 dependencies: [...chunk.modules],
                 source: bundleContent,
                 modules: artifactModules

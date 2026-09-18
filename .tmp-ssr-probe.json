@@ -1,0 +1,57 @@
+[
+  {
+    "port": 5510,
+    "fw": "solid",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5511,
+    "fw": "angular",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5512,
+    "fw": "nuxt",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5513,
+    "fw": "sveltekit",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5514,
+    "fw": "remix",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5515,
+    "fw": "next",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5516,
+    "fw": "rrv7",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5517,
+    "fw": "solidstart",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5518,
+    "fw": "tanstack",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5519,
+    "fw": "waku",
+    "error": "ECONNREFUSED"
+  },
+  {
+    "port": 5520,
+    "fw": "analog",
+    "error": "ECONNREFUSED"
+  }
+]

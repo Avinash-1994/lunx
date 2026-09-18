@@ -1,7 +1,10 @@
-
 import fs from 'fs/promises';
 import path from 'path';
 import { LunxPlugin } from '../core/plugins/types.js';
+import {
+    fallbackHtmlShell,
+    rewriteHtmlForProduction,
+} from '../build/html-entry.js';
 
 export function createHtmlPlugin(rootDir: string, outDir: string): LunxPlugin {
     return {
@@ -14,43 +17,54 @@ export function createHtmlPlugin(rootDir: string, outDir: string): LunxPlugin {
             permissions: { fs: 'read' }
         },
         id: 'lunx:html',
-        async runHook(hook, data) {
+        async runHook(hook, data, context) {
             if (hook !== 'buildEnd') return data;
 
             const { artifacts } = data;
-            const jsArtifacts = artifacts.filter((a: any) => a.type === 'js' && !a.fileName.includes('remoteEntry'));
-            const cssArtifacts = artifacts.filter((a: any) => a.type === 'css');
+            const ctx = data.ctx || context;
+            const publicPath = ctx?.config?.publicPath || '/';
+            const templates: string[] = ctx?.config?.htmlTemplates?.length
+                ? ctx.config.htmlTemplates
+                : ['index.html', 'src/index.html'];
 
-            const scripts = jsArtifacts.map((a: any) => `<script type="module" src="/${a.fileName}"></script>`).join('\n    ');
-            const links = cssArtifacts.map((a: any) => `<link rel="stylesheet" href="/${a.fileName}">`).join('\n    ');
+            const htmlArtifacts: any[] = [];
+            for (const rel of templates) {
+                const abs = path.isAbsolute(rel) ? rel : path.join(rootDir, rel);
+                let source: string | null = null;
+                try {
+                    source = await fs.readFile(abs, 'utf-8');
+                } catch {
+                    continue;
+                }
+                const rewritten = rewriteHtmlForProduction(source, artifacts, {
+                    publicPath,
+                    htmlFileAbs: abs,
+                    rootDir,
+                });
+                htmlArtifacts.push({
+                    id: `html:${rel}`,
+                    type: 'asset',
+                    fileName: 'index.html',
+                    source: rewritten,
+                    dependencies: []
+                });
+                break;
+            }
 
-            const htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lunx Build</title>
-    ${links}
-</head>
-<body>
-    <div id="root"></div>
-    <div id="app"></div>
-    ${scripts}
-</body>
-</html>`;
+            if (htmlArtifacts.length === 0) {
+                htmlArtifacts.push({
+                    id: 'index-html',
+                    type: 'asset',
+                    fileName: 'index.html',
+                    source: fallbackHtmlShell(artifacts, publicPath),
+                    dependencies: []
+                });
+            }
 
+            const withoutGeneratedHtml = artifacts.filter((a: any) => a.fileName !== 'index.html');
             return {
                 ...data,
-                artifacts: [
-                    ...artifacts,
-                    {
-                        id: 'index-html',
-                        type: 'asset',
-                        fileName: 'index.html',
-                        source: htmlContent,
-                        dependencies: []
-                    }
-                ]
+                artifacts: [...withoutGeneratedHtml, ...htmlArtifacts]
             };
         }
     };

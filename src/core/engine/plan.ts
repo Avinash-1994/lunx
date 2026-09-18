@@ -20,7 +20,9 @@ export function planBuild(ctx: BuildContext): BuildPlan {
     const assets: AssetPlan[] = [];
     const entryDeps = new Map<string, Set<string>>();
 
-    const sortedEntries = [...ctx.config.entryPoints].sort();
+    const sortedEntries = [...ctx.config.entryPoints]
+        .filter((entry) => !entry.toLowerCase().split(/[?#]/)[0].endsWith('.html'))
+        .sort();
     const getId = (p: string) => {
         const normalized = normalizePath(p);
         return generateModuleId('file', normalized, ctx.rootDir);

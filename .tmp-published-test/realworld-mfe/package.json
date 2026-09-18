@@ -1,0 +1,10 @@
+{
+  "name": "realworld-mfe-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:host": "cd storefront-host && npx lunx dev --port 5090",
+    "dev:catalog": "cd catalog-remote && npx lunx dev --port 5091",
+    "build:all": "cd catalog-remote && npx lunx build && cd ../storefront-host && npx lunx build"
+  }
+}

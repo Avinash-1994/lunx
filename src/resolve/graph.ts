@@ -57,6 +57,9 @@ export class DependencyGraph {
   }
 
   async addEntry(entryPath: string, rootDir: string) {
+    if (entryPath.toLowerCase().split(/[?#]/)[0].endsWith('.html')) {
+      return;
+    }
     const normalized = normalizePath(entryPath);
     const type = this.detectType(normalized);
     const id = generateModuleId(type, normalized, rootDir);

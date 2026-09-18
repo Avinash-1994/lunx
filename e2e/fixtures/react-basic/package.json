@@ -1,1 +1,1 @@
-{ "name": "react-basic", "version": "1.0.0" }
+{"name":"react-basic","version":"1.0.0","devDependencies":{"lunx-dev":"^1.0.0"}}

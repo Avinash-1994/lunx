@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lunx Framework Test Launcher</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: #0b1220;
+      color: #e5eefc;
+      padding: 32px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: #9fb3d1; margin: 0 0 24px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    a {
+      display: block;
+      padding: 16px;
+      border-radius: 12px;
+      background: #152238;
+      border: 1px solid #243552;
+      color: #e5eefc;
+      text-decoration: none;
+    }
+    a:hover { border-color: #4f7cff; background: #1a2b46; }
+    strong { display: block; margin-bottom: 6px; font-size: 16px; }
+    span { color: #8ea5c7; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Lunx Framework Test Launcher</h1>
+  <p>Open these links in your browser. If a page looks blank, wait 1–2 seconds or hard-refresh.</p>
+  <div class="grid">
+    <a href="http://localhost:5480" target="_blank" rel="noreferrer"><strong>Svelte</strong><span>http://localhost:5480</span></a>
+    <a href="http://localhost:5481" target="_blank" rel="noreferrer"><strong>Preact</strong><span>http://localhost:5481</span></a>
+    <a href="http://localhost:5482" target="_blank" rel="noreferrer"><strong>Lit</strong><span>http://localhost:5482</span></a>
+    <a href="http://localhost:5483" target="_blank" rel="noreferrer"><strong>Alpine</strong><span>http://localhost:5483</span></a>
+    <a href="http://localhost:5484" target="_blank" rel="noreferrer"><strong>Vanilla</strong><span>http://localhost:5484</span></a>
+    <a href="http://localhost:5485" target="_blank" rel="noreferrer"><strong>Qwik</strong><span>http://localhost:5485</span></a>
+    <a href="http://localhost:5486" target="_blank" rel="noreferrer"><strong>Astro</strong><span>http://localhost:5486</span></a>
+    <a href="http://localhost:5487" target="_blank" rel="noreferrer"><strong>VitePress</strong><span>http://localhost:5487</span></a>
+  </div>
+</body>
+</html>

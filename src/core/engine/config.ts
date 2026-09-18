@@ -16,6 +16,7 @@ import path from 'path';
 
 import { PluginManager } from '../plugins/manager.js';
 import { getInfrastructurePreset } from '../../presets/infrastructure.js';
+import { expandHtmlEntries } from '../../build/html-entry.js';
 
 // Stage 1: Initialization
 export async function initBuild(
@@ -68,8 +69,13 @@ export async function initBuild(
 
 function resolveConfig(userConfig: BuildConfig, rootDir: string, mode: BuildMode): ResolvedConfig {
     const sourcemap = userConfig.build?.sourcemap;
+    const rawEntries = Array.isArray(userConfig.entry)
+        ? userConfig.entry
+        : (userConfig.entry ? [userConfig.entry] : []);
+    const { entryPoints, htmlTemplates } = expandHtmlEntries(rawEntries, rootDir);
     return {
-        entryPoints: Array.isArray(userConfig.entry) ? userConfig.entry : (userConfig.entry ? [userConfig.entry] : []),
+        entryPoints,
+        htmlTemplates,
         outputDir: path.isAbsolute(userConfig.outDir || 'dist')
             ? userConfig.outDir
             : path.resolve(rootDir, userConfig.outDir || 'dist'),
@@ -116,6 +122,11 @@ export async function computeInputFingerprint(ctx: BuildContext): Promise<InputF
     for (const entry of ctx.config.entryPoints) {
         const absEntry = path.isAbsolute(entry) ? entry : path.resolve(ctx.rootDir, entry);
         await hashPath(absEntry);
+    }
+
+    for (const html of ctx.config.htmlTemplates || []) {
+        const absHtml = path.isAbsolute(html) ? html : path.resolve(ctx.rootDir, html);
+        await hashPath(absHtml);
     }
 
     // Include the main package manifest and local build config so dependency and plugin changes are captured.
