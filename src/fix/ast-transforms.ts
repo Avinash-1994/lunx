@@ -1,4 +1,4 @@
-import * as acorn from 'acorn';
+import { parse as parseModule } from '../internal/oxc.js';
 import * as walk from '../internal/ast-walk.js';
 
 /**
@@ -305,8 +305,8 @@ export class AutoFixEngine {
     validateTransform(originalCode: string, transformedCode: string): boolean {
         try {
             // Try to parse both versions
-            acorn.parse(originalCode, { sourceType: 'module', ecmaVersion: 'latest' });
-            acorn.parse(transformedCode, { sourceType: 'module', ecmaVersion: 'latest' });
+            parseModule('module.js', originalCode, 'js');
+            parseModule('module.js', transformedCode, 'js');
 
             // Both parse successfully, transform is safe
             return true;
@@ -392,7 +392,7 @@ export class AutoFixEngine {
         // Step 1: Analyze all modules to find exports and imports
         for (const [path, code] of modules) {
             try {
-                const ast = acorn.parse(code, { sourceType: 'module', ecmaVersion: 'latest' });
+                const ast = parseModule('module.js', code, 'js');
                 const exports = new Set<string>();
                 const imports = new Map<string, string[]>();
 

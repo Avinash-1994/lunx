@@ -1,4 +1,5 @@
 import { createRequire } from 'module';
+import { compile } from '../../internal/oxc.js';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
@@ -84,23 +85,10 @@ export class AngularCompilerAdapter {
         }
       }
 
-      // 2. SWC Downlevel
-      try {
-        const swc = require('@swc/core');
-        const res = await swc.transform(transformedCode, {
-          jsc: {
-            parser: { syntax: 'typescript', decorators: true },
-            transform: { legacyDecorator: true, decoratorMetadata: true },
-            target: 'es2022'
-          },
-          sourceMaps: true
-        });
-        transformedCode = res.code;
-        sourceMap = res.map;
-      } catch (e) {
-        // Fallback if SWC not installed
-        transformedCode = transformedCode.replace(/import /g, '// import '); // Dummy transform
-      }
+      // 2. Strip types; Angular DI needs decorator metadata.
+      const res = compile(id, transformedCode, { lang: 'ts', legacyDecorators: true, decoratorMetadata: true, sourcemap: true });
+      transformedCode = res.code;
+      sourceMap = res.map;
     } 
     else if (id.endsWith('.css') || id.endsWith('.scss')) {
       // 3. LightningCSS Styles & ViewEncapsulation

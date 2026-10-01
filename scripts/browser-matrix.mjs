@@ -25,7 +25,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CLI = path.join(REPO, 'src', 'cli.ts');
+// LUNX_CLI=dist/cli.js runs the built CLI with plain node (no tsx).
+const CLI = process.env.LUNX_CLI ? path.resolve(REPO, process.env.LUNX_CLI) : path.join(REPO, 'src', 'cli.ts');
 
 const args = process.argv.slice(2);
 const only = args.find((a) => a.startsWith('--only='))?.split('=')[1]?.split(',');
@@ -419,7 +420,7 @@ function run(commandArgs, cwd, timeoutMs = 180_000) {
     });
 }
 
-const tsxLoader = ['--import', 'tsx'];
+const tsxLoader = process.env.LUNX_CLI ? [] : ['--import', 'tsx'];
 
 // ── The matrix ──────────────────────────────────────────────────────────────
 

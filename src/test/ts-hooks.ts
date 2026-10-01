@@ -12,6 +12,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { compile } from '../internal/oxc.js';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -120,19 +121,12 @@ export async function load(
 
     const filename = fileURLToPath(base);
     const isTsx = base.endsWith('.tsx');
-    const swc = require('@swc/core');
-    const { code } = swc.transformSync(source, {
-        filename,
-        jsc: {
-            parser: { syntax: 'typescript', tsx: isTsx, decorators: true },
-            target: 'es2022',
-            // Automatic, so a test file rendering JSX needs no React import.
-            transform: isTsx ? { react: { runtime: 'automatic' } } : undefined,
-        },
-        // Tests run as ESM: the runner imports them by URL.
-        module: { type: 'es6' },
-        sourceMaps: 'inline',
-        isModule: true,
+    // Automatic JSX, so a test file rendering JSX needs no React import.
+    const { code } = compile(filename, source, {
+        lang: isTsx ? 'tsx' : 'ts',
+        jsx: isTsx ? { runtime: 'automatic' } : undefined,
+        legacyDecorators: true,
+        sourcemap: 'inline',
     });
 
     return { format: 'module', source: code, shortCircuit: true };

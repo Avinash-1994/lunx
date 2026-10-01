@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { Plugin } from 'esbuild';
+import type { Plugin } from 'esbuild';
 import crypto from 'crypto';
 
 export interface CSSModulesConfig {

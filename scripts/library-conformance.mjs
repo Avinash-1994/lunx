@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CLI = path.join(REPO, 'src', 'cli.ts');
+// LUNX_CLI=dist/cli.js runs the built CLI with plain node (no tsx).
+const CLI = process.env.LUNX_CLI ? path.resolve(REPO, process.env.LUNX_CLI) : path.join(REPO, 'src', 'cli.ts');
 const keep = process.argv.includes('--keep');
 
 // ── Packages ────────────────────────────────────────────────────────────────
@@ -250,7 +251,7 @@ function freePort() {
 
 function runCli(args, cwd, readyPattern, timeoutMs = 120_000) {
     return new Promise((resolve) => {
-        const child = spawn(process.execPath, ['--import', 'tsx', CLI, ...args], { cwd, env: { ...process.env, NO_COLOR: '1', LUNX_SKIP_SECURITY: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(process.execPath, [...(process.env.LUNX_CLI ? [] : ['--import', 'tsx']), CLI, ...args], { cwd, env: { ...process.env, NO_COLOR: '1', LUNX_SKIP_SECURITY: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
         let output = '';
         const done = (result) => {
             clearTimeout(timer);

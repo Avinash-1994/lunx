@@ -13,7 +13,7 @@ import { getFrameworkPreset } from '../presets/frameworks.js';
 import { log } from '../utils/logger.js';
 import { createRequire } from 'module';
 import { fileURLToPath, pathToFileURL } from 'url';
-import * as esbuild from 'esbuild';
+import { compile } from '../internal/oxc.js';
 import { canonicalHash } from '../core/engine/hash.js';
 const _require = createRequire(import.meta.url);
 
@@ -151,16 +151,10 @@ export class UniversalTransformer {
 
         if (!skipNormalization) {
             try {
-                const targetFormat = options.format || (options.target === 'node' ? 'cjs' : 'esm');
-                const finalResult = await esbuild.transform(result.code, {
-                    define: options.define || {},
-                    loader: 'tsx',
-                    format: targetFormat,
-                    platform: options.target === 'node' ? 'node' : 'browser',
-                    target: 'esnext',
-                    minify: false
-                });
-                result.code = finalResult.code;
+                // Applies `define` and strips any TypeScript a framework compiler
+                // left behind. Output stays ESM; CommonJS output is the legacy
+                // engine's business.
+                result.code = compile(options.filePath, result.code, { lang: 'tsx', define: options.define }).code;
             } catch (err: any) {
                 // Log normalization failures for debugging
                 // These are usually non-critical but good to know about
@@ -203,9 +197,6 @@ export class UniversalTransformer {
         }
 
         try {
-            const swcModule = await import('@swc/core');
-            const swc = (swcModule as any).default || swcModule;
-
             // The automatic runtime is the default: it is what React >= 17,
             // Preact, Solid and every modern toolchain expect, and it needs no
             // `import React` in user code. Classic is used only when we can
@@ -216,26 +207,17 @@ export class UniversalTransformer {
             const majorReact = reactVersion ? parseInt(reactVersion, 10) : NaN;
             const useAutomatic = !!jsxOptions?.importSource || !Number.isFinite(majorReact) || majorReact >= 17;
 
-            const output = await swc.transform(code, {
-                filename: filePath,
-                sourceMaps: isDev ? 'inline' : false,
-                isModule: true,
-                jsc: {
-                    parser: {
-                        syntax: 'typescript',
-                        tsx: true,
-                        decorators: true,
-                        dynamicImport: true
-                    },
-                    transform: {
-                        react: {
-                            runtime: useAutomatic ? 'automatic' : 'classic',
-                            importSource: jsxOptions?.importSource,
-                            development: isDev,
-                            refresh: isDev
-                        }
-                    }
-                }
+            const output = compile(filePath, code, {
+                lang: ext === '.tsx' ? 'tsx' : 'jsx',
+                jsx: {
+                    runtime: useAutomatic ? 'automatic' : 'classic',
+                    importSource: jsxOptions?.importSource,
+                    development: isDev,
+                    // react-refresh is React's; Preact & co. reload instead.
+                    refresh: isDev && !jsxOptions?.importSource,
+                },
+                legacyDecorators: true,
+                sourcemap: isDev ? 'inline' : false,
             });
 
             let finalCode = output?.code || code;
@@ -282,7 +264,7 @@ if (import.meta.hot && __lunx_refresh) {
             log.projectError({
                 file: relativePath,
                 message: errorMessage,
-                line: error.loc?.line,
+                line: error.loc?.line ?? error.details?.[0]?.line,
                 column: error.loc?.column,
                 type: 'Transformation Error',
                 plugin: 'lunx:universal-transformer'
@@ -537,55 +519,55 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
      */
     private async transformSolid(code: string, filePath: string, isDev: boolean): Promise<TransformResult> {
         const ext = path.extname(filePath);
-        if (ext !== '.jsx' && ext !== '.tsx') {
+        if (ext !== '.jsx' && ext !== '.tsx' && !(ext === '.js' && looksLikeJsx(code))) {
             return this.transformVanilla(code, filePath, isDev);
         }
 
-        try {
-            const swcModule = await import('@swc/core');
-            const swc = (swcModule as any).default || swcModule;
-            const output = await swc.transform(code, {
+        // Solid's JSX is compiled by its own compiler (dom-expressions) into
+        // fine-grained DOM updates; `{count()}` is only reactive that way.
+        // It ships as a Babel preset, so use the project's copy when present
+        // (vite-plugin-solid users have it).
+        const babel = await this.loadSolidCompiler();
+        if (babel) {
+            const stripped = compile(filePath, code, { lang: ext === '.tsx' ? 'tsx' : 'jsx', jsx: 'preserve', legacyDecorators: true }).code;
+            const out = await babel.core.transformAsync(stripped, {
                 filename: filePath,
+                babelrc: false,
+                configFile: false,
                 sourceMaps: isDev ? 'inline' : false,
-                isModule: true,
-                jsc: {
-                    parser: {
-                        syntax: 'typescript',
-                        tsx: true
-                    },
-                    transform: {
-                        react: {
-                            runtime: 'automatic',
-                            importSource: 'solid-js/h'
-                        }
-                    }
-                }
+                presets: [[babel.preset, { generate: 'dom', hydratable: false, dev: isDev }]],
             });
-
-            let finalCode = output?.code || code;
-
-            return { code: finalCode, map: output?.map ? JSON.stringify(output.map) : undefined };
-        } catch (error: any) {
-            log.warn(`Solid transform failed (babel-preset-solid missing?), using esbuild fallback with HMR`);
-            // Fallback: use esbuild but still add HMR
-            try {
-                const result = await esbuild.transform(code, {
-                    loader: 'tsx',
-                    sourcemap: isDev ? 'inline' : false,
-                    format: 'esm',
-                    target: 'es2020',
-                    jsx: 'automatic',
-                    jsxImportSource: 'solid-js'
-                });
-
-                let finalCode = result.code;
-
-                return { code: finalCode, map: result.map };
-            } catch (fallbackError: any) {
-                log.error(`Solid fallback also failed: ${fallbackError.message}`);
-                return this.transformVanilla(code, filePath, isDev);
-            }
+            return { code: out?.code ?? stripped };
         }
+
+        // Fallback: hyperscript runtime. Renders, but JSX expressions are not
+        // reactive, so say so once.
+        if (!this.solidWarned) {
+            this.solidWarned = true;
+            log.warn('Solid: install babel-preset-solid and @babel/core for reactive JSX (npm i -D babel-preset-solid @babel/core). Using solid-js/h meanwhile.');
+        }
+        return compile(filePath, code, {
+            lang: ext === '.tsx' ? 'tsx' : 'jsx',
+            jsx: { runtime: 'automatic', importSource: 'solid-js/h' },
+            sourcemap: isDev ? 'inline' : false,
+        });
+    }
+
+    private solidWarned = false;
+    private solidCompiler: Promise<{ core: any; preset: any } | null> | null = null;
+
+    private loadSolidCompiler(): Promise<{ core: any; preset: any } | null> {
+        this.solidCompiler ??= (async () => {
+            try {
+                const paths = [this.root, process.cwd()];
+                const core = await import(pathToFileURL(_require.resolve('@babel/core', { paths })).href);
+                const preset = await import(pathToFileURL(_require.resolve('babel-preset-solid', { paths })).href);
+                return { core: core.default ?? core, preset: preset.default ?? preset };
+            } catch {
+                return null;
+            }
+        })();
+        return this.solidCompiler;
     }
 
     /**
@@ -629,29 +611,16 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
             });
 
             const output = result.modules[0];
-            const { transform } = await import('esbuild');
-            const final = await transform(output.code, {
-                loader: 'tsx',
-                format: 'esm',
-                target: 'es2020',
-                jsx: 'automatic',
-                jsxImportSource: '@builder.io/qwik'
-            });
-            const finalCode = final.code;
-            return { code: finalCode, map: final.map ? JSON.stringify(final.map) : undefined };
+            const final = compile(filePath, output.code, { lang: 'tsx', jsx: { runtime: 'automatic', importSource: '@builder.io/qwik' } });
+            return { code: final.code, map: final.map };
         }
         catch (error: any) {
-            // Fallback: use esbuild directly with Qwik JSX classic mode
-            log.warn(`Qwik optimizer failed, using esbuild fallback: ${error.message}`);
+            // Fallback: compile directly with Qwik JSX classic mode
+            log.warn(`Qwik optimizer failed, compiling without it: ${error.message}`);
             try {
-                const final = await esbuild.transform(code, {
-                    loader: (path.extname(filePath) === '.tsx' || path.extname(filePath) === '.jsx') ? 'tsx' : 'ts',
-                    format: 'esm',
-                    target: 'es2020',
-                    jsx: 'transform',
-                    jsxFactory: 'h',
-                    jsxFragment: 'Fragment',
-                    jsxImportSource: undefined,
+                const final = compile(filePath, code, {
+                    lang: (path.extname(filePath) === '.tsx' || path.extname(filePath) === '.jsx') ? 'tsx' : 'ts',
+                    jsx: { runtime: 'classic', pragma: 'h', pragmaFrag: 'Fragment' },
                 });
                 // Inject h/Fragment imports from qwik
                 const imports = `import { h, Fragment } from '@builder.io/qwik';\n`;
@@ -744,25 +713,20 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
                     try {
                         return await bunParser.transform(code, filePath, { isDev });
                     } catch (e) {
-                        log.warn(`Bun transform failed, falling back to esbuild: ${e}`);
+                        log.warn(`Bun transform failed, falling back to Oxc: ${e}`);
                     }
                 }
 
-                // Fallback to esbuild
-                const result = await esbuild.transform(code, {
-                    loader: (ext === '.mjs' ? 'js' : ext.slice(1)) as any,
+                const result = compile(filePath, code, {
+                    lang: ext === '.mjs' ? 'js' : (ext.slice(1) as any),
+                    legacyDecorators: true,
                     sourcemap: isDev ? 'inline' : false,
-                    format: 'esm',
-                    // Only strip syntax: lowering to an older target rejects
-                    // valid modern code (top-level await) for no benefit.
-                    target: 'esnext',
-                    tsconfigRaw: { compilerOptions: { experimentalDecorators: true } }
                 });
                 return { code: result.code, map: result.map };
             } catch (error: any) {
                 // Serving the untransformed source would hand the browser
                 // TypeScript; fail loudly so the overlay shows the cause.
-                const detail = error.errors?.[0]?.text ?? error.message;
+                const detail = error.details?.[0]?.message ?? error.message;
                 log.error(`Transform failed for ${filePath}: ${detail}`);
                 throw new Error(`${path.basename(filePath)}: ${detail}`);
             }

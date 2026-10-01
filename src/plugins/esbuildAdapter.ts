@@ -1,4 +1,4 @@
-import { Plugin as EsbuildPlugin } from 'esbuild';
+import type { Plugin as EsbuildPlugin } from 'esbuild';
 import { PluginManager } from './index.js';
 import path from 'path';
 import fs from 'fs/promises';

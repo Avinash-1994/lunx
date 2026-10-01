@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import * as acorn from 'acorn';
+import { parse as parseModule } from '../internal/oxc.js';
 import { simple } from '../internal/ast-walk.js';
 
 /**
@@ -55,7 +55,7 @@ function analyzeSourceFile(filePath: string): FileStats {
     const exports: string[] = [];
 
     try {
-        const ast = acorn.parse(code, { sourceType: 'module', ecmaVersion: 'latest' });
+        const ast = parseModule('module.js', code, 'js');
         simple(ast, {
             ExportNamedDeclaration(node: any) {
                 if (node.declaration) {

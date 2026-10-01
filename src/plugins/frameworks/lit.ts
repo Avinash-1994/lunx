@@ -126,7 +126,7 @@ async function transformLit(
 ): Promise<string | null> {
     try {
         // Use esbuild for TypeScript/JavaScript transformation
-        const esbuild = await import('esbuild');
+        const esbuild = await import('../../internal/esbuild-compat.js');
 
         const result = await esbuild.transform(code, {
             loader: options.loader,

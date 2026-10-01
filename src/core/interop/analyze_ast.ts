@@ -1,6 +1,6 @@
 
 import { ExportMap } from './types.js';
-import { parse } from 'acorn';
+import { parse as parseModule } from '../../internal/oxc.js';
 
 // Phase A: AST-Based Export Analysis
 
@@ -21,13 +21,9 @@ export function analyzeExportsAST(content: string, format: 'esm' | 'cjs'): Expor
     };
 
     try {
-        // Parse with Acorn
+        // ESTree AST from Oxc
         // We use sourceType: 'module' for ESM, 'script' for CJS (though commonjs is looser)
-        const ast = parse(content, {
-            ecmaVersion: 'latest',
-            sourceType: format === 'esm' ? 'module' : 'script',
-            locations: false
-        }) as any;
+        const ast = parseModule('module.js', content, 'js', format === 'esm' ? 'module' : 'script');
 
         if (format === 'esm') {
             walkESM(ast, exports);

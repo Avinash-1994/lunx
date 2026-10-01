@@ -28,7 +28,7 @@ export async function optimizeArtifacts(artifacts: BuildArtifact[], ctx: BuildCo
         if (ctx.config.minify) {
             explainReporter.report('optimize', 'minify', `Minifying ${artifact.fileName}`);
             try {
-                const { transform } = await import('esbuild');
+                const { transform } = await import('../../internal/esbuild-compat.js');
 
                 // Day 52: Advanced CSS Purging (Heuristic)
                 if (artifact.type === 'css' && (ctx.mode === 'production' || ctx.mode === 'build')) {

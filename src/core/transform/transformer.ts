@@ -1,4 +1,5 @@
 import { createRequire } from 'module';
+import { minify as oxcMinify } from '../../internal/oxc.js';
 const require = createRequire(import.meta.url);
 const { NativeWorker, minifySync } = require('../../native/index.js');
 import fs from 'fs/promises';
@@ -35,28 +36,17 @@ export class Transformer {
             }
             throw new Error('Native minifier returned empty result');
         } catch (e: any) {
-            // Fallback to esbuild minification if native fails
-            log.debug(`Native minify failed (${e.message}), falling back to esbuild`, { category: 'build' });
+            // Fall back to Oxc's minifier. The bundle uses lunx's own module
+            // runtime (globalThis.d/r), so it is minified as a plain script.
+            log.debug(`Native minify failed (${e.message}), falling back to Oxc`, { category: 'build' });
             try {
-                const esbuild = require('esbuild');
-                // Use 'iife' format to avoid import/export statements in output.
-                // Our bundle uses a custom runtime (globalThis.d/r) which is CJS-compatible.
-                const result = esbuild.transformSync(code, {
-                    minify: true,
-                    target: 'es2020',
-                    loader: 'js',
-                    format: 'iife',
-                    treeShaking: false,
-                    legalComments: 'none',
-                    // Don't try to re-interpret import/export - it's a runtime module system
-                    platform: 'browser'
-                });
+                const result = oxcMinify('bundle.js', code);
                 if (result.code && result.code.length > 0) {
                     return result.code;
                 }
-                throw new Error('esbuild returned empty result');
-            } catch (esbuildError: any) {
-                log.debug(`esbuild minification also failed (${esbuildError.message.substring(0, 120)}). Bundle size: ${sizeInMB.toFixed(2)}MB. Returning original code.`, { category: 'build' });
+                throw new Error('Oxc returned empty result');
+            } catch (minifyError: any) {
+                log.debug(`Oxc minification also failed (${minifyError.message.substring(0, 120)}). Bundle size: ${sizeInMB.toFixed(2)}MB. Returning original code.`, { category: 'build' });
                 return code;
             }
         }

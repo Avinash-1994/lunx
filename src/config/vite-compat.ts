@@ -11,7 +11,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 export const VITE_CONFIG_FILES = ['vite.config.ts', 'vite.config.mts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs', 'vite.config.cts'];
@@ -166,46 +165,8 @@ export const searchForWorkspaceRoot = (dir) => dir;`,
 };
 
 async function loadConfigModule(file: string, root: string, stubFrameworks: boolean): Promise<any> {
-    const esbuild = await import('esbuild');
-    const dir = path.dirname(file);
-    const result = await esbuild.build({
-        entryPoints: [file],
-        bundle: true,
-        write: false,
-        platform: 'node',
-        format: 'esm',
-        packages: 'external',
-        logLevel: 'silent',
-        plugins: stubFrameworks
-            ? [{
-                  name: 'lunx:config-stubs',
-                  setup(build) {
-                      const filter = new RegExp(`^(${Object.keys(STUBS).map((k) => k.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|')})$`);
-                      build.onResolve({ filter }, (args) => ({ path: args.path, namespace: 'lunx-stub' }));
-                      build.onLoad({ filter: /.*/, namespace: 'lunx-stub' }, (args) => ({ contents: STUBS[args.path]!, loader: 'js' }));
-                  },
-              }]
-            : [],
-        define: {
-            'import.meta.url': JSON.stringify(pathToFileURL(file).href),
-            'import.meta.dirname': JSON.stringify(dir),
-            'import.meta.filename': JSON.stringify(file),
-            __dirname: JSON.stringify(dir),
-            __filename: JSON.stringify(file),
-        },
-    });
-    const code = result.outputFiles[0]!.text;
-    // Next to the project's node_modules so the config's bare imports resolve.
-    const tmpDir = path.join(root, 'node_modules', '.lunx');
-    await fsp.mkdir(tmpDir, { recursive: true });
-    const tmp = path.join(tmpDir, `vite.config.${crypto.createHash('sha1').update(code).digest('hex').slice(0, 8)}.mjs`);
-    await fsp.writeFile(tmp, code);
-    try {
-        const mod = await import(pathToFileURL(tmp).href);
-        return mod.default ?? mod;
-    } finally {
-        await fsp.rm(tmp, { force: true });
-    }
+    const { importBundled } = await import('../internal/load-module.js');
+    return importBundled(file, { root, stubs: stubFrameworks ? STUBS : {} });
 }
 
 /** Vite allows nested arrays, falsy entries and promises in `plugins`. */

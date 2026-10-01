@@ -515,57 +515,13 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
 async function loadModuleConfig(tsPath: string, cwd: string): Promise<any> {
   log.info(`Loading config from ${path.basename(tsPath)}...`);
-  const { build } = await import('esbuild');
-  const outfile = path.join(cwd, `lunx.config.temp.${Date.now()}.mjs`);
-
-  try {
-    await build({
-      entryPoints: [tsPath],
-      outfile,
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      target: 'es2020',
-      external: [
-        'esbuild', 'zod', 'kleur',
-        'svelte-preprocess', 'svelte', 'esbuild-svelte', 'js-yaml',
-        'coffeescript', 'pug', 'stylus', 'less', 'postcss', 'sass', 'postcss-load-config', 'sugarss',
-        'react', 'react-dom',
-        // The config imports the tool itself for `defineConfig`. It is not a
-        // dependency of the user's project, so it can never be bundled here;
-        // the plugin below supplies it instead.
-        'lunx', 'lunx-dev'
-      ],
-      plugins: [
-        {
-          name: 'lunx-self-import',
-          setup(build) {
-            // A config written as `import { defineConfig } from 'lunx'` must
-            // work whether the package is installed as `lunx` or `lunx-dev`,
-            // and even when neither is resolvable from the project (linked
-            // checkouts, pnpm, monorepos).
-            build.onResolve({ filter: /^lunx(-dev)?$/ }, () => ({
-              path: 'lunx-self',
-              namespace: 'lunx-self',
-            }));
-            build.onLoad({ filter: /.*/, namespace: 'lunx-self' }, () => ({
-              // defineConfig is an identity helper that exists for types only.
-              contents: [
-                'export const defineConfig = (c) => c;',
-                'export default { defineConfig };',
-              ].join(String.fromCharCode(10)),
-              loader: 'js',
-            }));
-          },
-        },
-      ],
-    });
-
-    const mod = await import('file://' + outfile);
-    return mod.default || mod;
-  } finally {
-    await fs.unlink(outfile).catch(() => { });
-  }
+  const { importBundled } = await import('../internal/load-module.js');
+  // A config written as `import { defineConfig } from 'lunx'` must work
+  // whether the package is installed as `lunx` or `lunx-dev`, and even when
+  // neither is resolvable from the project (linked checkouts, pnpm,
+  // monorepos). defineConfig is an identity helper that exists for types.
+  const self = 'export const defineConfig = (c) => c;\nexport default { defineConfig };\n';
+  return importBundled(tsPath, { root: cwd, stubs: { lunx: self, 'lunx-dev': self } });
 }
 
 export async function saveConfig(cwd: string, config: any): Promise<void> {

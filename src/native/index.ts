@@ -115,12 +115,11 @@ function loadSwc(): any {
         const detail = err?.message ? String(err.message).split('\n')[0] : 'unknown error';
         throw new Error(
             [
-                `@swc/core could not load its native binding, so no module can be compiled (${detail}).`,
-                '  - Reinstall it:  npm rebuild @swc/core  (or remove node_modules and reinstall)',
+                `The legacy build engine (module federation, SSR and node targets) compiles with @swc/core, which is not installed or would not load (${detail}).`,
+                '  - Install it:  npm i -D @swc/core',
                 '  - On Windows, @swc/core 1.16.x can reject its own cache directory over',
-                '    directory permissions; pinning "@swc/core": "~1.15.24" is a known-good',
-                '    workaround until that is fixed upstream.',
-                '  - Or build the Rust engine, which takes @swc/core off the hot path:',
+                '    directory permissions; "@swc/core": "~1.15.24" is a known-good version.',
+                '  - Or build the Rust engine, which takes @swc/core off this path:',
                 '    npm run build:native',
             ].join(String.fromCharCode(10))
         );
