@@ -1,5 +1,56 @@
 # Where lunx stands — measured, not estimated
 
+## Current (Linux, Node 22.22, 4 cores, Rust engine built)
+
+`npm run bench:arena -- --runs 5` — one React 19 + TypeScript app, eight tools,
+medians. Raw data: [BENCH_ARENA.json](BENCH_ARENA.json).
+
+| tool | dev boot | first app module | build cold | build warm | JS bytes |
+|---|---|---|---|---|---|
+| **lunx** | **291 ms** | **302 ms** | 462 ms | 457 ms | 219,626 |
+| vite 8 (Rolldown) | 381 ms | 485 ms | 792 ms | 431 ms | 220,248 |
+| rspack | 339 ms | 373 ms | 304 ms | 324 ms | 219,460 |
+| webpack | 1368 ms | 1461 ms | 3392 ms | 3571 ms | 224,696 |
+| parcel | 1315 ms | 1324 ms | 1420 ms | 1546 ms | 221,951 |
+| esbuild (bundler only) | – | – | 65 ms | 60 ms | 222,973 |
+| bun (bundler only) | – | – | 39 ms | 37 ms | 211,811 |
+| rolldown (bundler only) | – | – | 404 ms | 269 ms | 221,449 |
+
+Read plainly: **lunx has the fastest dev server of the module servers and
+bundlers measured, a build at parity with Vite (Vite varied 355–792 ms cold
+across runs), and the second-smallest bundle.** Rspack builds faster; esbuild
+and Bun are bundlers without a dev server, HMR, CSS pipeline or framework
+compilers, so their build column is not a like-for-like comparison. The lunx
+build time includes work the others skip: precompressed `.gz`/`.br`, SBOM,
+SRI and a secret scan.
+
+What changed since the Windows measurements below (same app):
+
+| | before | now |
+|---|---|---|
+| dev boot | 2042 ms | 291 ms |
+| build cold | 2988 ms | 462 ms |
+| bundle JS | 229,909 B | 219,626 B |
+| browser matrix | 39/42 on Windows, **0/42 on Linux** | 102/102 (17 stacks) |
+| library conformance | – | 48/48 |
+| CLI from a packed install | 20/21 | 19/21, 0 crashes (2 deliberate) |
+
+Correctness coverage, all in real Chromium, dev and production:
+
+- `npm run test:browser-matrix` — React, Preact, Vue, Svelte, Solid, Lit,
+  vanilla TS, Angular, Alpine, Mithril, jQuery, three.js, React + Tailwind v4,
+  React + styled-components, React Router, Vue Router, Sass: dev, CSS, clean
+  console, HMR, build, production render + CSS.
+- `npm run test:conformance` — CJS (named, default, function, `__esModule`,
+  NODE_ENV switch, require chains), ESM-only, dual packages, `exports`
+  conditions and patterns, `#imports`, legacy `browser` field, `module` field,
+  JSON, dynamic import, top-level await, module workers, wasm,
+  `new URL(…, import.meta.url)`, `import.meta.glob`, `?raw`, `?url`, `?inline`.
+
+---
+
+## Earlier measurements (Windows 11, Node 22.18, 8 cores, JS engine)
+
 Every number below was produced on this machine (Windows 11, Node v22.18.0,
 8-core) by `scripts/bench-vs-vite.mjs` and `scripts/browser-matrix.mjs`.
 **Caveat that applies to all timings: the Rust engine was never compiled (no
