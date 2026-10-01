@@ -194,8 +194,10 @@ export class UniversalTransformer {
     private async transformReact(code: string, filePath: string, isDev: boolean, jsxOptions?: { importSource?: string }): Promise<TransformResult> {
         const ext = path.extname(filePath);
 
-        // Only transform JSX/TSX files
-        if (ext !== '.jsx' && ext !== '.tsx') {
+        // Only transform JSX/TSX files — plus app `.js` files that contain JSX,
+        // which Create React App allowed and many React codebases still use.
+        const jsxInJs = (ext === '.js' || ext === '.mjs') && !filePath.includes('node_modules') && looksLikeJsx(code);
+        if (ext !== '.jsx' && ext !== '.tsx' && !jsxInJs) {
             return this.transformVanilla(code, filePath, isDev);
         }
 
@@ -822,4 +824,9 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
         this.packageVersionCache.set(packageName, null);
         return null;
     }
+}
+
+/** Cheap check for JSX in a `.js` file: a closing tag or a self-closing element. */
+export function looksLikeJsx(code: string): boolean {
+    return /<\/[A-Za-z][\w.:-]*\s*>|<[A-Za-z][\w.:-]*(\s[^<>]*)?\/>|<>|<\/>/.test(code);
 }

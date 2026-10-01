@@ -15,15 +15,14 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
 import type { BuildConfig } from '../config/index.js';
+import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 
 const gzip = promisify(zlib.gzip);
 const brotli = promisify(zlib.brotliCompress);
 
 const ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
-const CSS_EXT = /\.(css|pcss|postcss)$/i;
+const CSS_EXT = CSS_LANGS;
 const INLINE_LIMIT = 4096;
 
 export interface BuildArtifact {
@@ -130,23 +129,33 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
     };
     css.emitAsset = emitAsset;
 
-    const { UniversalTransformer } = await import('../core/universal-transformer.js');
+    const { UniversalTransformer, looksLikeJsx } = await import('../core/universal-transformer.js');
     const transformer = new UniversalTransformer(root, { cache: false });
     const compileJsx = framework === 'solid' || framework === 'preact' || framework === 'qwik' || framework === 'mithril';
 
     const plugins: any[] = [
+        ...((config as any).__rollupPlugins ?? []),
         ...(config.plugins ?? []).filter((p: any) => p && typeof p === 'object' && (p.resolveId || p.load || p.transform || p.renderChunk || p.generateBundle)),
         {
             name: 'lunx:framework',
             async transform(code: string, id: string) {
                 const file = cleanId(id);
                 const isSfc = /\.(vue|svelte)$/.test(file);
-                const isFrameworkJsx = compileJsx && /\.[jt]sx$/.test(file) && !file.includes('node_modules');
+                const isFrameworkJsx = compileJsx && !file.includes('node_modules') && (/\.[jt]sx$/.test(file) || (/\.m?js$/.test(file) && looksLikeJsx(code)));
                 const isAngular = framework === 'angular' && /\.ts$/.test(file) && !file.includes('node_modules');
                 if (!isSfc && !isFrameworkJsx && !isAngular) return null;
                 const fw = file.endsWith('.vue') ? 'vue' : file.endsWith('.svelte') ? 'svelte' : framework;
                 const out = await transformer.transform({ filePath: file, code, framework: fw as any, root, isDev: false });
                 return { code: out.code, map: null, moduleType: 'js' };
+            },
+        },
+        {
+            // Create React App allowed JSX in `.js`; parse app sources that need it as JSX.
+            name: 'lunx:jsx-in-js',
+            async transform(code: string, id: string) {
+                if (!/\.m?js$/.test(cleanId(id)) || id.includes('node_modules') || !looksLikeJsx(code)) return null;
+                if (compileJsx) return null; // the framework compiler above already handled it
+                return { code, moduleType: 'jsx' };
             },
         },
         {
@@ -157,7 +166,7 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
                 const query = id.slice(file.length);
                 const raw = await fsp.readFile(file, 'utf8');
                 if (/[?&]raw\b/.test(query)) return { code: `export default ${JSON.stringify(raw)};`, moduleType: 'js' };
-                const result = await css.process(this, file, raw, /\.module\.\w+$/.test(file) || build.cssModules === true && /\.module\./.test(file));
+                const result = await css.process(this, file, raw, isCssModule(file));
                 if (/[?&]inline\b/.test(query)) return { code: `export default ${JSON.stringify(result.code)};`, moduleType: 'js' };
                 css.add(file, result.code);
                 const exports = result.exports ? `export default ${JSON.stringify(result.exports)};` : 'export {};';
@@ -210,17 +219,17 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
     ];
 
     // ── Rolldown ─────────────────────────────────────────────────────────────
-    const envDefines: Record<string, string> = (config as any).__envDefines ?? {};
-    const metaEnv: Record<string, unknown> = { MODE: config.mode, PROD: true, DEV: false, SSR: false, BASE_URL: base };
-    for (const [key, value] of Object.entries(envDefines)) {
-        const m = key.match(/^import\.meta\.env\.(\w+)$/);
-        if (m) metaEnv[m[1]!] = safeJson(value);
-    }
+    const envDefines: Record<string, string> = { ...((config as any).__envDefines ?? {}) };
+    const metaEnv: Record<string, unknown> = {
+        ...(safeJson(envDefines['import.meta.env'] ?? '{}') as Record<string, unknown>),
+        MODE: config.mode, PROD: config.mode === 'production', DEV: config.mode !== 'production', SSR: false, BASE_URL: base,
+    };
+    delete envDefines['import.meta.env'];
     const define: Record<string, string> = {
+        ...envDefines,
         'process.env.NODE_ENV': JSON.stringify(config.mode === 'production' ? 'production' : config.mode),
         'import.meta.env': JSON.stringify(metaEnv),
         ...Object.fromEntries(Object.entries(metaEnv).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)])),
-        ...envDefines,
         ...((config as any).define ?? {}),
     };
 
@@ -374,7 +383,6 @@ class CssCollector {
     private sheets = new Map<string, string>();
     order: string[] = [];
     emitAsset!: (ctx: any, file: string, data: Buffer) => string;
-    private postcss: Promise<((css: string, from: string) => Promise<string>) | null> | null = null;
 
     constructor(private root: string, private base: string, private minify: boolean) {}
 
@@ -382,95 +390,24 @@ class CssCollector {
     get(file: string) { return this.sheets.get(file); }
     add(file: string, code: string) { this.sheets.set(file, code); }
 
-    async process(ctx: any, file: string, source: string, modules: boolean): Promise<{ code: string; exports?: Record<string, string> }> {
-        const post = await (this.postcss ??= loadPostcss(this.root));
-        const input = post ? await post(source, file) : source;
-        const { transform } = await import('lightningcss');
-        const result = transform({
-            filename: file,
-            code: Buffer.from(input),
+    process(ctx: any, file: string, source: string, modules: boolean): Promise<CompiledCss> {
+        return compileCss({
+            root: this.root,
+            file,
+            source,
+            modules,
             minify: this.minify,
-            cssModules: modules ? { pattern: '[local]_[hash]' } : false,
-            analyzeDependencies: true,
-            errorRecovery: true,
-        } as any);
-        let code = result.code.toString();
-        for (const dep of (result.dependencies ?? []) as any[]) {
-            if (dep.type !== 'url') continue;
-            code = code.split(dep.placeholder).join(this.resolveUrl(ctx, file, dep.url));
-        }
-        // @import of local files: inline them (bundle order = import order).
-        for (const dep of (result.dependencies ?? []) as any[]) {
-            if (dep.type !== 'import') continue;
-            const target = this.resolveFile(file, dep.url);
-            if (!target) continue;
-            const inner = await this.process(ctx, target, await fsp.readFile(target, 'utf8'), false);
-            code = inner.code + '\n' + code;
-        }
-        code = code.replace(/@import\s+(?:url\()?["']?[^;]*?["']?\)?[^;]*;/g, (stmt) => (/https?:\/\//.test(stmt) ? stmt : ''));
-        const exports = result.exports
-            ? Object.fromEntries(Object.entries(result.exports as Record<string, any>).map(([k, v]) => [k, [v.name, ...(v.composes ?? []).map((c: any) => c.name)].join(' ')]))
-            : undefined;
-        return { code, exports };
+            resolveUrl: (from, url) => {
+                const clean = url.split(/[?#]/)[0]!;
+                if (clean.startsWith('/') && fs.existsSync(path.join(this.root, 'public', clean))) return this.base + clean.slice(1);
+                const target = resolveCssFile(this.root, from, url);
+                if (!target) return url;
+                const data = fs.readFileSync(target);
+                if (data.length < INLINE_LIMIT && !/\.svg$/i.test(target)) return `data:${mimeOf(target)};base64,${data.toString('base64')}`;
+                return this.emitAsset(ctx, target, data) + url.slice(clean.length);
+            },
+        });
     }
-
-    private resolveFile(from: string, url: string): string | null {
-        if (/^(data:|https?:|\/\/|#)/.test(url)) return null;
-        const clean = url.split(/[?#]/)[0]!;
-        const candidates = clean.startsWith('/')
-            ? [path.join(this.root, clean), path.join(this.root, 'public', clean)]
-            : [path.resolve(path.dirname(from), clean)];
-        if (!clean.startsWith('.') && !clean.startsWith('/')) {
-            try {
-                candidates.push(createRequire(from).resolve(clean));
-            } catch { /* not a package path */ }
-        }
-        return candidates.find((c) => fs.existsSync(c) && fs.statSync(c).isFile()) ?? null;
-    }
-
-    private resolveUrl(ctx: any, from: string, url: string): string {
-        if (/^(data:|https?:|\/\/|#)/.test(url)) return url;
-        const clean = url.split(/[?#]/)[0]!;
-        if (clean.startsWith('/') && fs.existsSync(path.join(this.root, 'public', clean))) return this.base + clean.slice(1);
-        const file = this.resolveFile(from, url);
-        if (!file) return url;
-        const data = fs.readFileSync(file);
-        if (data.length < INLINE_LIMIT && !/\.svg$/i.test(file)) return `data:${mimeOf(file)};base64,${data.toString('base64')}`;
-        return this.emitAsset(ctx, file, data) + url.slice(clean.length);
-    }
-}
-
-/** Runs the project's PostCSS config (Tailwind, autoprefixer, …) when it has one. */
-async function loadPostcss(root: string): Promise<((css: string, from: string) => Promise<string>) | null> {
-    const name = ['postcss.config.js', 'postcss.config.cjs', 'postcss.config.mjs', 'postcss.config.ts', '.postcssrc.json', '.postcssrc']
-        .find((f) => fs.existsSync(path.join(root, f)));
-    if (!name) return null;
-    const req = createRequire(path.join(root, 'package.json'));
-    let postcss: any;
-    try {
-        postcss = (await import(pathToFileURL(req.resolve('postcss')).href)).default;
-    } catch {
-        console.warn(`[lunx] ${name} found but postcss is not installed — run: npm i -D postcss`);
-        return null;
-    }
-    const file = path.join(root, name);
-    let loaded: any = name.startsWith('.postcssrc')
-        ? JSON.parse(await fsp.readFile(file, 'utf8'))
-        : (await import(pathToFileURL(file).href)).default;
-    if (typeof loaded === 'function') loaded = loaded({ env: 'production' });
-    const spec = loaded?.plugins ?? [];
-    const plugins: any[] = [];
-    if (Array.isArray(spec)) plugins.push(...spec.filter(Boolean));
-    else {
-        for (const [pluginName, options] of Object.entries(spec)) {
-            if (options === false) continue;
-            const mod = await import(pathToFileURL(req.resolve(pluginName)).href);
-            const plugin = mod.default ?? mod;
-            plugins.push(typeof plugin === 'function' ? plugin(options === true ? undefined : options) : plugin);
-        }
-    }
-    const processor = postcss(plugins);
-    return async (css, from) => (await processor.process(css, { from, map: false })).css;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -137,7 +137,7 @@ function handleCssUpdate(href: string): void {
     } else {
         // CSS imported from JS is a module that injects a <style>; re-running
         // it replaces the sheet. If that fails, a reload is still correct.
-        import(/* @vite-ignore */ fresh).catch(fullReload);
+        import(/* @vite-ignore */ `${base}?import&t=${Date.now()}`).catch(fullReload);
     }
     stamp('lastCssUpdate');
 }

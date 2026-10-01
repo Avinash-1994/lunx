@@ -3,11 +3,16 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
+import { applyAlias, collectAliases, type AliasEntry } from '../config/aliases.js';
+import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css.js';
 
 // One version stamp per server session. It must be identical in every module
 // that imports a dependency: a per-request timestamp gives each importer its
 // own copy of React/Vue, which breaks hooks, context and the HMR registries.
 const depsVersion = Date.now().toString(36);
+
+/** Imported from JS, these resolve to their URL (`import logo from './logo.svg'`). */
+const DEV_ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 import { anomalyDetector } from '../security/anomaly.js';
 import type { WebSocketServer, WebSocket } from '../internal/ws.js';
 import { fileURLToPath } from 'url';
@@ -36,7 +41,7 @@ import { LiveConfigManager } from '../config/live-config.js';
  * Rewrite bare module imports to node_modules paths
  * Production-grade AST-based rewriting (Phase C1 Honest)
  */
-async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federationRemotes?: Set<string>, singletonRedirects?: Map<string, string>): Promise<string> {
+async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federationRemotes?: Set<string>, singletonRedirects?: Map<string, string>, aliases?: AliasEntry[]): Promise<string> {
   try {
     const acorn = await import('acorn');
     const ast = acorn.parse(code, {
@@ -48,10 +53,22 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
 
     const addReplacement = (node: any) => {
       if (node && node.type === 'Literal' && typeof node.value === 'string') {
-        const specifier = node.value;
+        let specifier = node.value;
+        // resolve.alias / tsconfig paths ('@/components/x' → '/src/components/x')
+        const aliased = aliases?.length && !specifier.startsWith('.') ? applyAlias(specifier, aliases) : null;
+        if (aliased) {
+          if (path.isAbsolute(aliased)) {
+            const rel = path.relative(rootDir, aliased).split(path.sep).join('/');
+            const url = rel.startsWith('..') ? '/@fs/' + aliased.split(path.sep).join('/').replace(/^\//, '') : '/' + rel;
+            const suffix = CSS_LANGS.test(url) || /\.json$/.test(url) || DEV_ASSET_EXT.test(url) ? '?import' : '';
+            replacements.push({ start: node.start, end: node.end, replacement: `'${url}${suffix}'` });
+            return;
+          }
+          specifier = aliased;
+        }
         if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('http')) {
           // Handle relative CSS/JSON 
-          if (specifier.endsWith('.css') || specifier.endsWith('.json')) {
+          if (CSS_LANGS.test(specifier) || specifier.endsWith('.json') || DEV_ASSET_EXT.test(specifier)) {
             replacements.push({
               start: node.start,
               end: node.end,
@@ -229,6 +246,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   } catch (e) { }
 
   // Filter public env vars — also loads .env / .env.development / .env.local files
+  let devDefines: Record<string, string> = {};
   let publicEnv: Record<string, string | undefined> = Object.keys(process.env)
     .filter(key => key.startsWith('LUNX_') || key.startsWith('PUBLIC_') || key === 'NODE_ENV')
     .reduce((acc, key) => ({ ...acc, [key]: process.env[key] }), {
@@ -240,9 +258,17 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     const loaded = loadEnv('development', cfg.root);
     // Merge .env file vars on top (higher priority than process.env)
     publicEnv = { ...publicEnv, ...loaded.raw };
+    devDefines = { ...loaded.define, ...loaded.metaEnv };
   } catch {
     // env.ts not available — fall back to process.env only
   }
+
+  devDefines = {
+    'process.env.NODE_ENV': '"development"',
+    ...devDefines,
+    ...((cfg as any).define ?? {}),
+  };
+  const aliases = collectAliases(cfg.root, (cfg as any).resolve?.alias);
 
   log.debug('Loaded Environment Variables', { category: 'server', count: Object.keys(publicEnv).length });
 
@@ -1683,7 +1709,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             code: raw,
             framework: primaryFramework,
             root: cfg.root,
-            isDev: true
+            isDev: true,
+            define: devDefines
           });
 
           // Rewrite imports after transformation
@@ -1703,7 +1730,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             }
           }
 
-          let code = await rewriteImports(transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects);
+          let code = await rewriteImports(transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects, aliases);
 
           res.writeHead(200, {
             'Content-Type': 'application/javascript',
@@ -1753,25 +1780,42 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         }
       }
 
-      if (ext === '.css' || ext === '.scss' || ext === '.sass' || ext === '.less' || ext === '.styl') {
+      if (CSS_LANGS.test(filePath)) {
         let raw = await fs.readFile(filePath, 'utf-8');
         raw = await pluginManager.transform(raw, filePath);
+        const compiled = await compileCss({
+          root: cfg.root,
+          file: filePath,
+          source: raw,
+          modules: isCssModule(filePath),
+          minify: false,
+          // Styles are injected into the page, so relative url()s must become
+          // server paths or they would resolve against the document instead.
+          resolveUrl: (from, ref) => {
+            if (/^(data:|https?:|\/\/|#|\/)/.test(ref)) return ref;
+            const target = resolveCssFile(cfg.root, from, ref);
+            if (!target) return ref;
+            const rel = path.relative(cfg.root, target).split(path.sep).join('/');
+            return rel.startsWith('..') ? ref : '/' + rel;
+          },
+        });
 
-        // Check if imported as module
         if (url.includes('?import')) {
-          const jsModule = `
-      const style = document.createElement('style');
-      style.textContent = ${JSON.stringify(raw)};
-      document.head.appendChild(style);
-      export default ${JSON.stringify(raw)};
-      `;
-          res.writeHead(200, { 'Content-Type': 'application/javascript' });
+          const id = '/' + path.relative(cfg.root, filePath).split(path.sep).join('/');
+          // One <style> per file, replaced in place on every hot update.
+          const jsModule = `const id = ${JSON.stringify(id)};
+let el = document.querySelector('style[data-lunx-css="' + id + '"]');
+if (!el) { el = document.createElement('style'); el.setAttribute('data-lunx-css', id); document.head.appendChild(el); }
+el.textContent = ${JSON.stringify(compiled.code)};
+export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stringify(compiled.code)};
+`;
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
           res.end(jsModule);
           return;
         }
 
-        res.writeHead(200, { 'Content-Type': 'text/css' });
-        res.end(raw);
+        res.writeHead(200, { 'Content-Type': 'text/css', 'Cache-Control': 'no-cache' });
+        res.end(compiled.code);
         return;
       }
 
@@ -1786,7 +1830,12 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         res.end(raw);
         return;
       }
-      // Serve other files raw
+      // `?raw` → file contents as a string; `?url` / asset import → its URL
+      if (/[?&]raw\b/.test(url)) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(`export default ${JSON.stringify(await fs.readFile(filePath, 'utf-8'))};`);
+        return;
+      }
       if (url.includes('?url') || url.includes('?import')) {
         const publicPath = url.split('?')[0];
         res.writeHead(200, { 'Content-Type': 'application/javascript' });

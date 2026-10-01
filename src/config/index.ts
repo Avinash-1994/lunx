@@ -345,6 +345,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
   let rawConfig: any;
   let loadedConfigPath = 'default';
+  let foreign: import('./vite-compat.js').ForeignConfig | null = null;
 
   try {
     if (await fs.access(lunxTsPath).then(() => true).catch(() => false)) {
@@ -384,6 +385,12 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
       const raw = await fs.readFile(legacyYmlPath, 'utf-8');
       rawConfig = yaml.load(raw);
       loadedConfigPath = 'lunx.build.yml';
+    } else if ((foreign = await (await import('./vite-compat.js')).readViteConfig(cwd))) {
+      // A Vite project: run it as-is. `lunx migrate` writes a native config.
+      rawConfig = foreign.config;
+      loadedConfigPath = foreign.file;
+      log.info(`[lunx] Using ${foreign.file} (Vite-compatible). Run \`lunx migrate\` to convert it.`);
+      for (const note of foreign.notes) log.info(`[lunx]   ${note}`);
     } else {
       // Return default config if file not found, with auto-detection
       log.info('No config file found, using defaults...');
@@ -434,6 +441,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
     const config = result.data as BuildConfig;
     const root = config.root || cwd;
+    if (foreign?.plugins.length) (config as any).__rollupPlugins = foreign.plugins;
 
     // CFG-02: normalise entry (handles string, array, or auto-detect)
     config.entry = normaliseEntry(config.entry as any, root);

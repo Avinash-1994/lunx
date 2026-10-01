@@ -2,7 +2,8 @@ import fs from 'fs'
 import path from 'path'
 
 export interface EnvConfig {
-  prefix?: string
+  /** Variables with these prefixes reach client code. Default: LUNX_, VITE_, REACT_APP_, PUBLIC_ */
+  prefix?: string | string[]
   files?: string[]
 }
 
@@ -75,7 +76,9 @@ export function loadEnv(
   root: string,
   config: EnvConfig = {}
 ): LoadedEnv {
-  const prefix = config.prefix ?? 'LUNX_'
+  // VITE_ and REACT_APP_ are accepted so Vite and CRA apps work unchanged;
+  // every one of these prefixes means "public" in its own ecosystem.
+  const prefixes = ([] as string[]).concat(config.prefix ?? ['LUNX_', 'VITE_', 'REACT_APP_', 'PUBLIC_'])
 
   // Files to load in order (later files override earlier ones)
   const defaultFiles = [
@@ -110,19 +113,21 @@ export function loadEnv(
   // Filter to only prefix-matching vars + standard vars
   const ALWAYS_EXPOSE = new Set(['NODE_ENV', 'MODE', 'DEV', 'PROD', 'SSR'])
 
-  const clientVars: Record<string, string> = {}
+  const clientVars: Record<string, string | boolean> = {}
 
   for (const [key, value] of Object.entries(raw)) {
-    if (key.startsWith(prefix) || ALWAYS_EXPOSE.has(key)) {
+    if (prefixes.some((p) => key.startsWith(p)) || ALWAYS_EXPOSE.has(key)) {
       clientVars[key] = value ?? ''
     }
   }
 
   // Add synthetic vars
   clientVars['MODE'] = mode
-  clientVars['DEV'] = mode === 'development' ? 'true' : 'false'
-  clientVars['PROD'] = mode === 'production' ? 'true' : 'false'
-  clientVars['SSR'] = 'false'
+  // Booleans, not strings: `if (import.meta.env.DEV)` must be false in a
+  // production build, and the string "false" is truthy.
+  clientVars['DEV'] = mode !== 'production'
+  clientVars['PROD'] = mode === 'production'
+  clientVars['SSR'] = false
 
   // Build esbuild `define` object
   // `process.env.X` → stringified value
