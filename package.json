@@ -78,7 +78,8 @@
     "bench:vs-vite": "tsx scripts/bench-vs-vite.mjs",
     "bench:arena": "tsx scripts/bench-arena.mjs",
     "test:cli-surface": "tsx scripts/verify-cli-surface.mjs",
-    "test:conformance": "tsx scripts/library-conformance.mjs"
+    "test:conformance": "tsx scripts/library-conformance.mjs",
+    "test:meta": "tsx scripts/meta-matrix.mjs"
   },
   "keywords": [
     "build-tool",

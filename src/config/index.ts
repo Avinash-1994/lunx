@@ -210,7 +210,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'entry', 'outDir', 'framework', 'preset', 'mode', 'platform', 'port',
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
-  'prebundle', 'cache', 'compatRollup', 'define', 'resolve'
+  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate'
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {

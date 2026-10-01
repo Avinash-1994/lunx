@@ -8,10 +8,10 @@ import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css
 import { transformGlobImports } from '../build/glob-import.js';
 import { compile, parse as parseModule } from '../internal/oxc.js';
 
-// One version stamp per server session. It must be identical in every module
-// that imports a dependency: a per-request timestamp gives each importer its
-// own copy of React/Vue, which breaks hooks, context and the HMR registries.
-const depsVersion = Date.now().toString(36);
+// Dependency URLs carry no version query: pre-bundled entries import each
+// other by relative path ("./preact.js"), and a browser treats
+// /@lunx-deps/preact.js?v=1 and /@lunx-deps/preact.js as two modules -- two
+// copies of Preact or React, broken hooks. Responses are no-cache instead.
 
 /** Imported from JS, these resolve to their URL (`import logo from './logo.svg'`). */
 const DEV_ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
@@ -92,7 +92,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
           if (singletonRedirects.has(pkgRoot)) {
             const safeName = specifier.replace(/[/@]/g, '_');
             const hostBase = singletonRedirects.get(pkgRoot)!;
-            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js?v=${depsVersion}`;
+            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js`;
             replacements.push({ start: node.start, end: node.end, replacement: `'${singletonUrl}'` });
             return;
           }
@@ -101,7 +101,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
         let replacement = `/node_modules/${specifier}`;
         if (preBundledDeps && preBundledDeps.has(specifier)) {
           // Exact match: this full specifier (e.g. 'solid-js/web') was pre-bundled
-          replacement = `${preBundledDeps.get(specifier)}?v=${depsVersion}`;
+          replacement = `${preBundledDeps.get(specifier)}`;
         } else if (preBundledDeps) {
           // Subpath check: specifier is 'solid-js/web' but only 'solid-js' is in preBundledDeps
           const parts = specifier.split('/');
@@ -116,7 +116,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
             if (specifier.endsWith('.js') && !preBundledDeps.has(specifier)) {
               replacement = `/node_modules/${specifier}`;
             } else {
-              replacement = `/@lunx-deps/${safeName}.js?v=${depsVersion}`;
+              replacement = `/@lunx-deps/${safeName}.js`;
             }
           }
         }

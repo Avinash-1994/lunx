@@ -41,6 +41,18 @@ export default {
     const path = await import('path');
     const root = args.root ? path.resolve(process.cwd(), args.root) : process.cwd();
 
+      // Meta-frameworks run their own toolchain (see meta-frameworks/delegate.ts).
+      const { detectMetaFramework, delegate } = await import('../../meta-frameworks/delegate.js');
+      const meta = detectMetaFramework(root);
+      if (meta) {
+        const { loadConfig: loadForDelegate } = await import('../../config/index.js');
+        const optOut = await loadForDelegate(root).then((c: any) => c?.delegate === false).catch(() => false);
+        if (!optOut) {
+          process.exitCode = await delegate(meta, 'preview', root, { port: args.port });
+          return;
+        }
+      }
+
     // Read outDir from config if not provided via CLI arg
     let outDir = args.outDir;
     if (!outDir) {

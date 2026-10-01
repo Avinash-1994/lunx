@@ -332,10 +332,17 @@ export class DependencyPreBundler {
             const builtins = new Set(builtinModules);
             const input: Record<string, string> = {};
             const virtualCode = new Map<string, string>();
+            // Entries are bare specifiers resolved by Rolldown itself, so an
+            // entry and the imports inside other packages resolve with the
+            // same conditions. Resolving entries separately put solid-js's
+            // browser build next to its dev build: two copies, dead signals.
+            const specByName = new Map<string, string>();
+            for (const dep of deps) specByName.set(dep.replace(/[/@]/g, '_'), dep);
             for (const [name, file] of Object.entries(entryPoints)) {
+                const spec = specByName.get(name) ?? file;
                 const source = await fs.readFile(file, 'utf-8').catch(() => '');
                 if (isEsmSource(file, source)) {
-                    input[name] = file;
+                    input[name] = spec;
                     continue;
                 }
                 // CommonJS: ESM needs static export names, so read them from
@@ -344,7 +351,7 @@ export class DependencyPreBundler {
                 const names = commonJsExportNames(file, source);
                 const id = VIRTUAL + name;
                 virtualCode.set(id, [
-                    `import * as __m from ${JSON.stringify(file)};`,
+                    `import * as __m from ${JSON.stringify(spec)};`,
                     'export default __m.default;',
                     ...names.map((n) => `export const ${n} = __m.${n};`),
                 ].join('\n'));

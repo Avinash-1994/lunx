@@ -79,8 +79,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.tsx'),
             'src/index.css': SHARED_CSS,
             'src/main.tsx': `import './index.css';\nimport { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
-            'src/App.tsx': `export default function App() {\n  return <h1 className="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/App.tsx': `import { useState } from 'react';\nexport default function App() {\n  const [n, setN] = useState(0);\n  return <><h1 className="marker">${MARKER_BEFORE}</h1><button id="inc" onClick={() => setN(n + 1)}>{n}</button></>;\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'preact',
@@ -91,13 +92,14 @@ const FRAMEWORKS = [
             'index.html': html('src/main.tsx'),
             'src/index.css': SHARED_CSS,
             'src/main.tsx': `import './index.css';\nimport { render } from 'preact';\nimport App from './App';\nrender(<App />, document.getElementById('root')!);\n`,
-            'src/App.tsx': `export default function App() {\n  return <h1 class="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/App.tsx': `import { useState } from 'preact/hooks';\nexport default function App() {\n  const [n, setN] = useState(0);\n  return <><h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" onClick={() => setN(n + 1)}>{n}</button></>;\n}\n`,
             'tsconfig.json': JSON.stringify(
                 { compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'preact', target: 'ES2020', module: 'ESNext', moduleResolution: 'bundler', strict: false } },
                 null,
                 2,
             ),
         },
+        interactive: true,
     },
     {
         name: 'vue',
@@ -107,8 +109,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.ts'),
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport { createApp } from 'vue';\nimport App from './App.vue';\ncreateApp(App).mount('#root');\n`,
-            'src/App.vue': `<template>\n  <h1 class="marker">${MARKER_BEFORE}</h1>\n</template>\n`,
+            'src/App.vue': `<script setup>\nimport { ref } from 'vue';\nconst n = ref(0);\n</script>\n<template>\n  <h1 class="marker">${MARKER_BEFORE}</h1>\n  <button id="inc" @click="n++">{{ n }}</button>\n</template>\n`,
         },
+        interactive: true,
     },
     {
         name: 'svelte',
@@ -118,8 +121,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.ts'),
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport { mount } from 'svelte';\nimport App from './App.svelte';\nmount(App, { target: document.getElementById('root')! });\n`,
-            'src/App.svelte': `<h1 class="marker">${MARKER_BEFORE}</h1>\n`,
+            'src/App.svelte': `<script>\n  let n = $state(0);\n</script>\n<h1 class="marker">${MARKER_BEFORE}</h1>\n<button id="inc" onclick={() => n++}>{n}</button>\n`,
         },
+        interactive: true,
     },
     {
         name: 'solid',
@@ -130,8 +134,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.tsx'),
             'src/index.css': SHARED_CSS,
             'src/main.tsx': `import './index.css';\nimport { render } from 'solid-js/web';\nimport App from './App';\nrender(() => <App />, document.getElementById('root')!);\n`,
-            'src/App.tsx': `export default function App() {\n  return <h1 class="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/App.tsx': `import { createSignal } from 'solid-js';\nexport default function App() {\n  const [n, setN] = createSignal(0);\n  return <><h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" onClick={() => setN(n() + 1)}>{n()}</button></>;\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'lit',
@@ -141,8 +146,9 @@ const FRAMEWORKS = [
             'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root"><app-root></app-root></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport './app-root';\n`,
-            'src/app-root.ts': `import { LitElement, html, css } from 'lit';\n\nexport class AppRoot extends LitElement {\n  static styles = css\`h1 { color: rgb(0, 187, 119); font-weight: 700; }\`;\n  render() { return html\`<h1 class="marker">${MARKER_BEFORE}</h1>\`; }\n}\ncustomElements.define('app-root', AppRoot);\n`,
+            'src/app-root.ts': `import { LitElement, html, css } from 'lit';\n\nexport class AppRoot extends LitElement {\n  static styles = css\`h1 { color: rgb(0, 187, 119); font-weight: 700; }\`;\n  static properties = { n: { state: true } };\n  constructor() { super(); this.n = 0; }\n  render() { return html\`<h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" @click=\${() => this.n++}>\${this.n}</button>\`; }\n}\ncustomElements.define('app-root', AppRoot);\n`,
         },
+        interactive: true,
     },
 
     // ── Ecosystem: libraries and stacks real apps are built from ─────────────
@@ -153,11 +159,12 @@ const FRAMEWORKS = [
         deps: { alpinejs: '3.14.9' },
         hmrFile: 'src/message.ts',
         files: {
-            'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root" x-data="state"><h1 class="marker" x-text="msg"></h1></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
+            'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root" x-data="state"><h1 class="marker" x-text="msg"></h1><button id="inc" @click="n++" x-text="n"></button></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
             'src/index.css': SHARED_CSS,
             'src/message.ts': `export const message = '${MARKER_BEFORE}';\n`,
-            'src/main.ts': `import './index.css';\nimport Alpine from 'alpinejs';\nimport { message } from './message';\nAlpine.data('state', () => ({ msg: message }));\nAlpine.start();\n`,
+            'src/main.ts': `import './index.css';\nimport Alpine from 'alpinejs';\nimport { message } from './message';\nAlpine.data('state', () => ({ msg: message, n: 0 }));\nAlpine.start();\n`,
         },
+        interactive: true,
     },
     {
         name: 'mithril',
@@ -167,9 +174,10 @@ const FRAMEWORKS = [
         files: {
             'index.html': html('src/main.ts'),
             'src/index.css': SHARED_CSS,
-            'src/app.ts': `import m from 'mithril';\nexport const App = { view: () => m('h1.marker', '${MARKER_BEFORE}') };\n`,
+            'src/app.ts': `import m from 'mithril';\nlet n = 0;\nexport const App = { view: () => [m('h1.marker', '${MARKER_BEFORE}'), m('button#inc', { onclick: () => n++ }, n)] };\n`,
             'src/main.ts': `import './index.css';\nimport m from 'mithril';\nimport { App } from './app';\nm.mount(document.getElementById('root')!, App);\n`,
         },
+        interactive: true,
     },
     {
         name: 'jquery',
@@ -267,8 +275,26 @@ const FRAMEWORKS = [
             'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root"><app-root></app-root></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport '@angular/compiler';\nimport { provideZonelessChangeDetection } from '@angular/core';\nimport { bootstrapApplication } from '@angular/platform-browser';\nimport { AppComponent } from './app.component';\nbootstrapApplication(AppComponent, { providers: [provideZonelessChangeDetection()] });\n`,
-            'src/app.component.ts': `import { Component } from '@angular/core';\n@Component({\n  selector: 'app-root',\n  template: '<h1 class="marker">{{ text }}</h1>',\n})\nexport class AppComponent {\n  text = '${MARKER_BEFORE}';\n}\n`,
+            'src/app.component.ts': `import { Component, signal } from '@angular/core';\n@Component({\n  selector: 'app-root',\n  template: '<h1 class="marker">{{ text }}</h1><button id="inc" (click)="n.set(n() + 1)">{{ n() }}</button>',\n})\nexport class AppComponent {\n  text = '${MARKER_BEFORE}';\n  n = signal(0);\n}\n`,
             'tsconfig.json': JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ES2022', experimentalDecorators: true, useDefineForClassFields: false, strict: false } }, null, 2),
+        },
+        interactive: true,
+    },
+    {
+        name: 'qwik',
+        ecosystem: true,
+        deps: { '@builder.io/qwik': '1.17.1' },
+        hmrFile: 'src/app.tsx',
+        // Known issue: in client-only render() mode the $-handlers render without
+        // listeners, so clicks do nothing. Rendering, HMR and build are covered.
+        knownIssue: 'client-side render(): event handlers not attached',
+        config: `import { defineConfig } from 'lunx';\nexport default defineConfig({ framework: 'qwik' });\n`,
+        files: {
+            'index.html': html('src/main.tsx'),
+            'src/index.css': SHARED_CSS,
+            'src/main.tsx': `import './index.css';\nimport '@builder.io/qwik/qwikloader.js';\nimport { render } from '@builder.io/qwik';\nimport { App } from './app';\nrender(document.getElementById('root')!, <App />);\n`,
+            'src/app.tsx': `import { component$, useSignal } from '@builder.io/qwik';\nexport const App = component$(() => {\n  const n = useSignal(0);\n  return <><h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" onClick$={() => n.value++}>{n.value}</button></>;\n});\n`,
+            'tsconfig.json': JSON.stringify({ compilerOptions: { jsx: 'react-jsx', jsxImportSource: '@builder.io/qwik', target: 'ES2022', module: 'ES2022', moduleResolution: 'bundler' } }, null, 2),
         },
     },
 ];
@@ -420,6 +446,22 @@ function run(commandArgs, cwd, timeoutMs = 180_000) {
     });
 }
 
+/** Click #inc twice (shadow DOM included) and expect it to read 2. */
+async function clickCounter(page) {
+    try {
+        const button = page.locator('#inc').first();
+        await button.click({ timeout: 5000 });
+        await button.click({ timeout: 5000 });
+        await page.waitForFunction(() => {
+            const el = document.querySelector('#inc') ?? document.querySelector('app-root')?.shadowRoot?.querySelector('#inc');
+            return el?.textContent?.trim() === '2';
+        }, null, { timeout: 5000 });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 const tsxLoader = process.env.LUNX_CLI ? [] : ['--import', 'tsx'];
 
 // ── The matrix ──────────────────────────────────────────────────────────────
@@ -437,6 +479,7 @@ for (const framework of selected) {
         dev: 'skip',
         css: 'skip',
         consoleClean: 'skip',
+        interactive: 'skip',
         hmr: 'skip',
         build: 'skip',
         preview: 'skip',
@@ -487,6 +530,14 @@ for (const framework of selected) {
         result.consoleClean = consoleErrors.length === 0 ? 'pass' : 'fail';
         if (consoleErrors.length > 0) result.notes.push(`console: ${consoleErrors[0]}`);
 
+        // 4b. The UI reacts: click a counter twice and expect "2". Rendering
+        // alone can pass with a compiler that is not wired up for reactivity.
+        if (framework.knownIssue) result.notes.push(`known issue: ${framework.knownIssue}`);
+        if (framework.interactive) {
+            result.interactive = (await clickCounter(page)) ? 'pass' : 'fail';
+            if (result.interactive === 'fail') result.notes.push('counter did not update after clicks');
+        }
+
         // 5. HMR: edit a source file, expect the browser to show the new text
         const hmrPath = path.join(root, framework.hmrFile);
         const before = await fsp.readFile(hmrPath, 'utf8');
@@ -535,6 +586,7 @@ for (const framework of selected) {
                     return el ? getComputedStyle(el).color : null;
                 });
                 if (previewColour !== 'rgb(0, 187, 119)') previewErrors.push(`production marker colour was ${previewColour}`);
+                if (framework.interactive && !(await clickCounter(previewPage))) previewErrors.push('production counter did not update after clicks');
                 result.preview = previewErrors.length === 0 ? 'pass' : 'fail';
                 if (previewErrors.length > 0) result.notes.push(`preview: ${previewErrors[0]}`);
             } catch {
@@ -566,6 +618,7 @@ for (const framework of selected) {
         `dev:${result.dev}`.padEnd(10),
         `css:${result.css}`.padEnd(10),
         `console:${result.consoleClean}`.padEnd(14),
+        `ui:${result.interactive}`.padEnd(8),
         `hmr:${result.hmr}`.padEnd(10),
         `build:${result.build}`.padEnd(12),
         `preview:${result.preview}`.padEnd(14),
@@ -579,7 +632,7 @@ await browser.close();
 
 // ── Report ──────────────────────────────────────────────────────────────────
 
-const checks = ['dev', 'css', 'consoleClean', 'hmr', 'build', 'preview'];
+const checks = ['dev', 'css', 'consoleClean', 'interactive', 'hmr', 'build', 'preview'];
 const total = results.length * checks.length;
 const passed = results.reduce((n, r) => n + checks.filter((c) => r[c] === 'pass').length, 0);
 const failed = results.reduce((n, r) => n + checks.filter((c) => r[c] === 'fail').length, 0);

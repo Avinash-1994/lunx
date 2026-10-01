@@ -599,20 +599,27 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
             }
 
             const optimizer = await qwik.createOptimizer();
+            const srcDir = path.join(this.root, 'src');
             const result = await optimizer.transformModules({
-                input: [{ code, path: filePath }],
-                srcDir: path.join(this.root, 'src'),
+                // Relative to srcDir, or the optimizer nests the path twice.
+                input: [{ code, path: path.relative(srcDir, filePath).split(path.sep).join('/') }],
+                srcDir,
                 rootDir: this.root,
+                // Inline: QRL segments stay in this module, so handlers like
+                // onClick$ work without serving separate segment files.
                 entryStrategy: { type: 'inline' },
                 minify: isDev ? 'none' : 'simplify',
                 sourceMaps: isDev,
-                mode: isDev ? 'dev' : 'lib',
-                transpile: true,
+                mode: isDev ? 'dev' : 'prod',
+                // `transpile: true` is not an optimizer option; without these
+                // two, $-handlers were never turned into QRLs and did nothing.
+                transpileTs: true,
+                transpileJsx: true,
+                isServer: false,
             });
-
-            const output = result.modules[0];
-            const final = compile(filePath, output.code, { lang: 'tsx', jsx: { runtime: 'automatic', importSource: '@builder.io/qwik' } });
-            return { code: final.code, map: final.map };
+            const errors = (result.diagnostics ?? []).filter((d: any) => d.category === 'error');
+            if (errors.length) throw new Error(errors.map((d: any) => d.message).join('; '));
+            return { code: result.modules[0].code };
         }
         catch (error: any) {
             // Fallback: compile directly with Qwik JSX classic mode
