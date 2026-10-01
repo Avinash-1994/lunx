@@ -1,20 +1,18 @@
 {
-  "generatedAt": "2026-10-01T10:02:57.665Z",
+  "generatedAt": "2026-10-01T11:08:13.547Z",
   "results": [
     {
       "framework": "vanilla-ts",
       "dev": "pass",
       "css": "pass",
       "consoleClean": "pass",
-      "hmr": "fail",
+      "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 413,
-      "paintMs": 791,
-      "buildMs": 711,
-      "notes": [
-        "edit did not reach the browser within 20s"
-      ]
+      "bootMs": 379,
+      "paintMs": 314,
+      "buildMs": 584,
+      "notes": []
     },
     {
       "framework": "react",
@@ -24,9 +22,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 315,
-      "paintMs": 1283,
-      "buildMs": 8085,
+      "bootMs": 394,
+      "paintMs": 604,
+      "buildMs": 766,
       "notes": []
     },
     {
@@ -37,9 +35,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 780,
-      "paintMs": 1497,
-      "buildMs": 3086,
+      "bootMs": 449,
+      "paintMs": 394,
+      "buildMs": 664,
       "notes": []
     },
     {
@@ -50,9 +48,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 534,
-      "paintMs": 2293,
-      "buildMs": 5101,
+      "bootMs": 363,
+      "paintMs": 535,
+      "buildMs": 887,
       "notes": []
     },
     {
@@ -62,13 +60,11 @@
       "consoleClean": "pass",
       "hmr": "pass",
       "build": "pass",
-      "preview": "fail",
-      "bootMs": 342,
-      "paintMs": 9207,
-      "buildMs": 23541,
-      "notes": [
-        "built output did not render the marker"
-      ]
+      "preview": "pass",
+      "bootMs": 334,
+      "paintMs": 561,
+      "buildMs": 819,
+      "notes": []
     },
     {
       "framework": "solid",
@@ -77,13 +73,11 @@
       "consoleClean": "pass",
       "hmr": "pass",
       "build": "pass",
-      "preview": "fail",
-      "bootMs": 438,
-      "paintMs": 542,
-      "buildMs": 1713,
-      "notes": [
-        "built output did not render the marker"
-      ]
+      "preview": "pass",
+      "bootMs": 370,
+      "paintMs": 319,
+      "buildMs": 671,
+      "notes": []
     },
     {
       "framework": "lit",
@@ -93,9 +87,139 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 422,
-      "paintMs": 1204,
-      "buildMs": 1566,
+      "bootMs": 384,
+      "paintMs": 1079,
+      "buildMs": 606,
+      "notes": []
+    },
+    {
+      "framework": "alpine",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 395,
+      "paintMs": 364,
+      "buildMs": 689,
+      "notes": []
+    },
+    {
+      "framework": "mithril",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 365,
+      "paintMs": 340,
+      "buildMs": 666,
+      "notes": []
+    },
+    {
+      "framework": "jquery",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 393,
+      "paintMs": 386,
+      "buildMs": 717,
+      "notes": []
+    },
+    {
+      "framework": "three",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 403,
+      "paintMs": 509,
+      "buildMs": 791,
+      "notes": []
+    },
+    {
+      "framework": "react-tailwind",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 375,
+      "paintMs": 800,
+      "buildMs": 903,
+      "notes": []
+    },
+    {
+      "framework": "react-styled",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 393,
+      "paintMs": 603,
+      "buildMs": 763,
+      "notes": []
+    },
+    {
+      "framework": "react-router",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 362,
+      "paintMs": 625,
+      "buildMs": 822,
+      "notes": []
+    },
+    {
+      "framework": "vue-router",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 383,
+      "paintMs": 614,
+      "buildMs": 966,
+      "notes": []
+    },
+    {
+      "framework": "sass",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 391,
+      "paintMs": 668,
+      "buildMs": 983,
+      "notes": []
+    },
+    {
+      "framework": "angular",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 401,
+      "paintMs": 1711,
+      "buildMs": 2048,
       "notes": []
     }
   ]

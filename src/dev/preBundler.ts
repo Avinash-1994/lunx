@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { build } from 'esbuild';
 import { createHash } from 'crypto';
-import { createRequire } from 'module';
+import { builtinModules, createRequire } from 'module';
 import { log } from '../utils/logger.js';
 import native from '../native/index.js';
 
@@ -293,10 +293,11 @@ export class DependencyPreBundler {
                 if (resolvedPath) {
                     try {
                         const pkgName = dep.startsWith('@') ? dep.split('/').slice(0, 2).join('/') : dep.split('/')[0];
-                        const pkgDir = path.join(root, 'node_modules', pkgName);
+                        // realpath both: node_modules may be a symlink (pnpm, workspaces).
+                        const pkgDir = await fs.realpath(path.join(root, 'node_modules', pkgName));
                         const manifest = JSON.parse(await fs.readFile(path.join(pkgDir, 'package.json'), 'utf-8'));
                         const browser = manifest.browser;
-                        const rel = './' + path.relative(pkgDir, resolvedPath).split(path.sep).join('/');
+                        const rel = './' + path.relative(pkgDir, await fs.realpath(resolvedPath)).split(path.sep).join('/');
                         let mapped: string | undefined;
                         if (typeof browser === 'string' && dep === pkgName && !manifest.exports) mapped = browser;
                         else if (browser && typeof browser === 'object') {
@@ -341,6 +342,26 @@ export class DependencyPreBundler {
                     'global': 'globalThis'
                 },
                 plugins: [
+                    {
+                        // A Node built-in reached from browser code (usually a
+                        // server-only branch) gets an empty stub instead of
+                        // failing the whole pre-bundle, as Vite does.
+                        name: 'lunx:browser-external',
+                        setup(build) {
+                            const builtins = new Set(builtinModules);
+                            build.onResolve({ filter: /^[a-z_:/]+$/ }, (args) => {
+                                const name = args.path.replace(/^node:/, '');
+                                if (!builtins.has(name) && !builtins.has(name.split('/')[0]!)) return null;
+                                return { path: name, namespace: 'lunx-browser-external' };
+                            });
+                            build.onLoad({ filter: /.*/, namespace: 'lunx-browser-external' }, (args) => ({
+                                // CommonJS, so named imports become lazy property reads:
+                                // only code that actually runs the Node path throws.
+                                contents: `const stub = new Proxy({}, { get(_, key) { if (typeof key === 'symbol' || key === '__esModule' || key === 'then') return undefined; throw new Error('Module "${args.path}" is a Node built-in, not available in the browser (accessed .' + String(key) + ')'); } });\nmodule.exports = stub;\n`,
+                                loader: 'js',
+                            }));
+                        },
+                    },
                     // Plugin to fix CJS → ESM named exports
                     {
                         name: 'cjs-esm-interop',

@@ -31,7 +31,6 @@ export class AngularCompilerAdapter {
     (globalThis as any).__angularCompilerInitTime = (this as any).compilerInitTime;
     
     // Log for test harness to capture
-    console.log(`[LUNX-TEST] Angular compiler init time: ${(this as any).compilerInitTime}ms`);
   }
 
   private getCache(hash: string): { code: string, map?: string } | null {
@@ -59,14 +58,12 @@ export class AngularCompilerAdapter {
     const statusPath = path.join(os.tmpdir(), 'lunx-hmr-status.txt');
     if (cached) {
       if (id.endsWith('.ts')) {
-         console.log(`[LUNX-TEST] Ivy cache hit (served from cache)`);
          require('fs').writeFileSync(statusPath, 'hit');
       }
       return { code: cached.code, map: cached.map ? JSON.parse(cached.map) : undefined };
     }
 
     if (id.endsWith('.ts')) {
-       console.log(`[LUNX-TEST] Ivy recompile: yes`);
        require('fs').writeFileSync(statusPath, 'recompile');
     }
     
@@ -190,7 +187,10 @@ export class LunxAngularAdapter {
   }
 
   plugins() {
-    return [this.compiler.createPlugin()];
+    // Angular sources are compiled by lunx's universal transformer (dev and
+    // build). The adapter's own plugin was a placeholder that replaced
+    // @Component(...) with a comment, so it must not run in a real build.
+    return [];
   }
 }
 

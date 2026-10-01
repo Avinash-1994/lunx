@@ -489,27 +489,14 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
             const majorVersion = ngVersion ? parseInt(ngVersion.split('.')[0]) : 17;
 
             if (filePath.endsWith('.ts')) {
-                const compilerInitStart = performance.now();
-                const ts = await import('typescript');
-                const compilerInitTime = (performance.now() - compilerInitStart).toFixed(4);
-                console.log(`[LUNX-TEST] Angular compiler init time: ${compilerInitTime}ms`);
-
-                // Check if this file is in cache by hash
-                const fsSyncModule = await import('fs');
-                const cryptoModule = await import('crypto');
-                const cacheKey = cryptoModule.createHash('sha256').update(code).update(filePath).digest('hex');
-                const cacheFile = path.join(os.tmpdir(), `lunx-ang-cache-${cacheKey.substring(0, 16)}`);
-                const statusFile = path.join(os.tmpdir(), 'lunx-hmr-status.txt');
-                const isHit = fsSyncModule.existsSync(cacheFile);
-                if (isHit) {
-                    console.log(`[LUNX-TEST] Ivy cache hit (served from cache)`);
-                    fsSyncModule.writeFileSync(statusFile, 'hit');
-                } else {
-                    console.log(`[LUNX-TEST] Ivy recompile: yes`);
-                    fsSyncModule.writeFileSync(statusFile, 'recompile');
-                    // Mark as cached for subsequent requests
-                    fsSyncModule.writeFileSync(cacheFile, '1');
+                // The project's TypeScript first: lunx does not depend on it.
+                let ts: any;
+                try {
+                    ts = await import(pathToFileURL(_require.resolve('typescript', { paths: [this.root, process.cwd()] })).href);
+                } catch {
+                    ts = await import('typescript');
                 }
+                ts = ts.default ?? ts;
 
                 try {
                     const compilerOptions: any = {

@@ -530,9 +530,11 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
         'next', '@next/env', '@next/swc',
         'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
-        '@angular/core', '@angular/cli', '@angular/compiler-cli', '@angular/build',
+        // (@angular/core and @builder.io/qwik are browser runtimes: excluding
+        // them made other packages bundle private copies of them.)
+        '@angular/cli', '@angular/compiler-cli', '@angular/build',
         '@analogjs/platform', '@analogjs/vite-plugin-angular',
-        '@builder.io/qwik', '@builder.io/qwik-city',
+        '@builder.io/qwik-city',
         'waku', '@waku/dev-server',
         'vitepress', 'vite',
         '@solidjs/start',
