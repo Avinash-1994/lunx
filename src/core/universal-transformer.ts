@@ -156,7 +156,7 @@ export class UniversalTransformer {
                     loader: 'tsx',
                     format: targetFormat,
                     platform: options.target === 'node' ? 'node' : 'browser',
-                    target: isDev ? 'es2020' : 'esnext',
+                    target: 'esnext',
                     minify: false
                 });
                 result.code = finalResult.code;
@@ -752,13 +752,18 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
                     loader: (ext === '.mjs' ? 'js' : ext.slice(1)) as any,
                     sourcemap: isDev ? 'inline' : false,
                     format: 'esm',
-                    target: 'es2020',
+                    // Only strip syntax: lowering to an older target rejects
+                    // valid modern code (top-level await) for no benefit.
+                    target: 'esnext',
                     tsconfigRaw: { compilerOptions: { experimentalDecorators: true } }
                 });
                 return { code: result.code, map: result.map };
             } catch (error: any) {
-                log.error(`Vanilla transform failed for ${filePath}:`, error.message);
-                return { code };
+                // Serving the untransformed source would hand the browser
+                // TypeScript; fail loudly so the overlay shows the cause.
+                const detail = error.errors?.[0]?.text ?? error.message;
+                log.error(`Transform failed for ${filePath}: ${detail}`);
+                throw new Error(`${path.basename(filePath)}: ${detail}`);
             }
         }
         return { code };

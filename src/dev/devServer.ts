@@ -1718,16 +1718,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         // source. Pre-transforming here stripped JSX with SWC's *classic*
         // default, emitting `React.createElement` with no matching import, so
         // any component that did not hand-write `import React` died at runtime.
-        if (ext === '.ts' || ext === '.js' || ext === '.mjs') {
-          try {
-            const transformed = nativeWorker.transformSync(raw, filePath);
-            raw = typeof transformed === 'string' ? transformed : (transformed?.code ?? raw);
-          } catch (e: any) {
-            if (process.env.DEBUG) {
-              log.debug(`NativeWorker skipped for ${filePath}: ${e.message}`, { category: 'build' });
-            }
-          }
-        }
+        // (No native pre-transform here: the Rust transform_js lowers ESM to
+        // the legacy bundler's CommonJS runtime format, which a browser
+        // cannot load as a module -- "require is not defined" on every
+        // .ts/.js file whenever the native package was installed.)
 
         // Plugin transform (JS plugins like Tailwind)
         raw = await pluginManager.transform(raw, filePath);
