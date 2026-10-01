@@ -273,7 +273,9 @@ const tsxLoader = ['--import', 'tsx'];
 
 const selected = only ? FRAMEWORKS.filter((f) => only.includes(f.name)) : FRAMEWORKS;
 const results = [];
-const browser = await chromium.launch({ headless: !headed });
+// CHROMIUM_PATH lets CI / sandboxes reuse a pre-installed browser instead of
+// matching Playwright's pinned download.
+const browser = await chromium.launch({ headless: !headed, executablePath: process.env.CHROMIUM_PATH || undefined });
 
 for (const framework of selected) {
     const result = {

@@ -10,6 +10,7 @@ import fs from 'fs';
 import os from 'os';
 import { BuildConfig } from '../config/index.js';
 import { createRequire } from 'module';
+import { displayHost, isPortFree, resolveBindHost } from '../utils/host.js';
 
 const require = createRequire(import.meta.url);
 const pkgVersion = require('../../package.json').version;
@@ -25,26 +26,12 @@ export async function startDevServer(cfg: BuildConfig) {
 
     // 1. Find available port FIRST (before creating server)
     let port = cfg.server?.port || cfg.port || 5173;
-    // `0.0.0.0` is IPv4-only, but browsers resolve `localhost` to ::1 first, so
-    // binding it leaves WebSocket (HMR) connections hanging on IPv6. `::` binds
-    // dual-stack and serves both families.
-    const configuredHost = cfg.server?.host;
-    const host = !configuredHost || configuredHost === '0.0.0.0' ? '::' : configuredHost;
-
-    // Check port availability
-    const isPortAvailable = (p: number): Promise<boolean> => {
-        return new Promise((resolve) => {
-            const testServer = http.createServer();
-            testServer.once('error', () => resolve(false));
-            testServer.listen(p, host, () => {
-                testServer.close(() => resolve(true));
-            });
-        });
-    };
+    // Dual-stack `::` where the host supports IPv6, `0.0.0.0` where it does not.
+    const host = await resolveBindHost(cfg.server?.host);
 
     // Find available port
     if (!cfg.server?.strictPort) {
-        while (!(await isPortAvailable(port))) {
+        while (!(await isPortFree(port, host))) {
             console.log(`\x1b[33m⚠\x1b[0m  Port ${port} is in use, trying ${port + 1}...`);
             port++;
             if (port > (cfg.server?.port || cfg.port || 5173) + 100) {
@@ -134,7 +121,7 @@ export async function startDevServer(cfg: BuildConfig) {
             console.log(`\x1b[90m   ─────────────────────────────────────\x1b[0m`);
 
             // Links - show localhost for local access, actual network IP for network access
-            const localHost = host === '0.0.0.0' ? 'localhost' : host;
+            const localHost = displayHost(host);
             console.log(`   \x1b[1mLocal\x1b[0m    \x1b[36mhttp://${localHost}:${port}/\x1b[0m`);
             if (networkIP) {
                 console.log(`   \x1b[1mNetwork\x1b[0m  \x1b[36mhttp://${networkIP}:${port}/\x1b[0m`);
