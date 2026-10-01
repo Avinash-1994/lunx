@@ -159,17 +159,34 @@ export async function build(rawConfig: BuildConfig) {
     }
   }
 
-  const { FrameworkPipeline } = await import('../core/pipeline/framework-pipeline.js');
-  const pipeline = await FrameworkPipeline.auto(config);
+  // Rolldown (Rust) is the default production bundler. The legacy engine
+  // still owns module federation, SSR/node targets, and `build.bundler: 'legacy'`.
+  const { rolldownAvailable, rolldownBuild } = await import('./rolldown-engine.js');
+  const useRolldown =
+    (config.build as any)?.bundler !== 'legacy' &&
+    !config.federation &&
+    config.preset !== 'ssr' &&
+    (config.platform ?? 'browser') === 'browser' &&
+    (await rolldownAvailable());
 
+  let pipeline: any = null;
   try {
-    const result = await pipeline.build();
-    if (!result.success) {
-      const errorMsg = (result as any).error?.message || 'Unknown build error';
-      throw new Error(errorMsg);
+    let result: any;
+    if (useRolldown) {
+      const { detectFramework } = await import('../core/framework-detector.js');
+      const framework = config.framework || (await detectFramework(config.root));
+      result = await rolldownBuild(config, framework);
+      console.log(`[lunx] bundled ${result.modules.length} modules with rolldown in ${Math.round(result.durationMs)}ms`);
+    } else {
+      const { FrameworkPipeline } = await import('../core/pipeline/framework-pipeline.js');
+      pipeline = await FrameworkPipeline.auto(config);
+      result = await pipeline.build();
+      if (!result.success) {
+        const errorMsg = (result as any).error?.message || 'Unknown build error';
+        throw new Error(errorMsg);
+      }
     }
 
-    // Phase 3.1 & 3.2 — Output Analysis & Generation
     if (config.mode === 'production') {
       const security = await import('@lunx/security');
       // Resolve against the project root, not the process cwd: with
@@ -205,9 +222,19 @@ export async function build(rawConfig: BuildConfig) {
         const pkgPath = path.join(config.root, 'package.json');
         
         // S1.1 - Extract actual used dependencies from the build graph
-        const graph = pipeline.getEngine().getGraph();
+        const graph = pipeline?.getEngine().getGraph();
         let deps: string[] = [];
-        
+
+        if (!graph && Array.isArray(result.modules)) {
+          const depSet = new Set<string>();
+          for (const file of result.modules as string[]) {
+            const rest = file.split(/node_modules[\\\/]/).pop()!.split(/[\\\/]/);
+            if (!file.includes('node_modules')) continue;
+            depSet.add(rest[0].startsWith('@') && rest.length > 1 ? `${rest[0]}/${rest[1]}` : rest[0]);
+          }
+          deps = Array.from(depSet);
+        }
+
         if (graph) {
           const depSet = new Set<string>();
           for (const node of graph.nodes.values()) {
@@ -258,7 +285,7 @@ export async function build(rawConfig: BuildConfig) {
               let html = fs.readFileSync(p, 'utf8');
               html = security.injectSRIIntoHTML(html, sriManifest);
               if (!html.includes('Content-Security-Policy')) {
-                html = html.replace(/<head[^>]*>/i, `$&\\n    ${cspResult.metaTag}`);
+                html = html.replace(/<head[^>]*>/i, `$&\n    ${cspResult.metaTag}`);
               }
               fs.writeFileSync(p, html, 'utf8');
             }
@@ -290,6 +317,6 @@ export async function build(rawConfig: BuildConfig) {
     console.error('❌ Build failed:', error.message);
     throw error;
   } finally {
-    await pipeline.close();
+    await pipeline?.close();
   }
 }

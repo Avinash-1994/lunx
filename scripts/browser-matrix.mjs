@@ -375,6 +375,12 @@ for (const framework of selected) {
                     MARKER_AFTER,
                     { timeout: 20_000 },
                 );
+                // The production CSS pipeline is separate from dev's, so check it too.
+                const previewColour = await previewPage.evaluate(() => {
+                    const el = document.querySelector('.marker') ?? document.querySelector('app-root')?.shadowRoot?.querySelector('h1');
+                    return el ? getComputedStyle(el).color : null;
+                });
+                if (previewColour !== 'rgb(0, 187, 119)') previewErrors.push(`production marker colour was ${previewColour}`);
                 result.preview = previewErrors.length === 0 ? 'pass' : 'fail';
                 if (previewErrors.length > 0) result.notes.push(`preview: ${previewErrors[0]}`);
             } catch {

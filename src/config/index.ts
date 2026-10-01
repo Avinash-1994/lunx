@@ -72,6 +72,18 @@ export const BuildConfigSchema = z.object({
     cssModules: z.boolean().default(false),
     targets: z.array(z.string()).optional(),
     manualChunks: z.record(z.string(), z.array(z.string())).optional(),
+    /** Production bundler: 'rolldown' (Rust, default) or the 'legacy' JS engine. */
+    bundler: z.enum(['rolldown', 'legacy']).optional(),
+  }).optional(),
+  /** Public base path the app is served from, e.g. '/my-app/'. */
+  base: z.string().optional(),
+  /** Global constant replacements, e.g. { __APP_VERSION__: '"1.2.3"' }. */
+  define: z.record(z.string(), z.string()).optional(),
+  resolve: z.object({
+    alias: z.union([
+      z.record(z.string(), z.string()),
+      z.array(z.object({ find: z.string(), replacement: z.string() })),
+    ]).optional(),
   }).optional(),
   server: z.object({
     host: z.string().optional(),
@@ -141,7 +153,11 @@ export type BuildConfig = {
     cssModules?: boolean;
     targets?: string[];
     manualChunks?: Record<string, string[]>;
+    bundler?: 'rolldown' | 'legacy';
   };
+  base?: string;
+  define?: Record<string, string>;
+  resolve?: { alias?: Record<string, string> | Array<{ find: string; replacement: string }> };
   server?: {
     host?: string;
     port?: number;
@@ -194,7 +210,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'entry', 'outDir', 'framework', 'preset', 'mode', 'platform', 'port',
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
-  'prebundle', 'cache', 'compatRollup'
+  'prebundle', 'cache', 'compatRollup', 'define', 'resolve'
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {

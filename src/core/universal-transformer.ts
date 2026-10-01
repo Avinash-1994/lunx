@@ -60,6 +60,12 @@ export class UniversalTransformer {
      * Transform code based on framework
      * Automatically detects and uses the installed version
      */
+    /** The URL a module is served at — the key HMR updates are addressed by. */
+    private hmrId(filePath: string): string {
+        const rel = path.relative(this.root, filePath).replace(/\\/g, '/');
+        return rel.startsWith('..') || path.isAbsolute(rel) ? `/@fs/${filePath.replace(/\\/g, '/').replace(/^\//, '')}` : `/${rel}`;
+    }
+
     async transform(options: TransformOptions): Promise<TransformResult> {
         const { filePath, code, framework, isDev = true } = options;
         let frameworkToUse = framework;
@@ -165,6 +171,13 @@ export class UniversalTransformer {
             }
         }
 
+        // Give modules that use HMR their `import.meta.hot`. Prepended on the
+        // first line so source-map line numbers are unaffected.
+        if (isDev && result.code.includes('import.meta.hot') && !options.filePath.includes('node_modules')) {
+            const id = JSON.stringify(this.hmrId(options.filePath));
+            result.code = `import { createHotContext as __lunx_createHot } from '/@lunx/hmr-client'; import.meta.hot = __lunx_createHot(${id}); ` + result.code;
+        }
+
         // Cache the result (Advanced Determinism)
         if (this.cacheEnabled) {
             const h = canonicalHash(code + frameworkToUse + (isDev ? 'dev' : 'prod')).substring(0, 16);
@@ -224,22 +237,33 @@ export class UniversalTransformer {
 
             let finalCode = output?.code || code;
 
-            // Inject HMR context for React
-            if (isDev) {
-                // Normalize path to prevent escape sequence issues on Windows
-                const normalizedPath = filePath.replace(/\\/g, '/');
+            // React Refresh. Registrations are namespaced by module so two
+            // files that both declare \`App\` do not overwrite each other.
+            // Preact needs @prefresh rather than react-refresh, so it reloads.
+            if (isDev && !jsxOptions?.importSource) {
+                const id = JSON.stringify(this.hmrId(filePath));
+                // One line, so the inline source map's line numbers stay correct.
+                const hmrHeader = 'const __lunx_refresh = window.__lunx_react_refresh__; ' +
+                    'const __lunx_prevRefreshReg = window.$RefreshReg$, __lunx_prevRefreshSig = window.$RefreshSig$; ' +
+                    `if (__lunx_refresh) { window.$RefreshReg$ = (type, name) => __lunx_refresh.register(type, ${id} + ' ' + name); ` +
+                    'window.$RefreshSig$ = __lunx_refresh.createSignatureFunctionForTransform; } ';
                 const hmrFooter = `
-
-// Lunx Advanced HMR (React)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept();
+// Lunx HMR (React Refresh)
+window.$RefreshReg$ = __lunx_prevRefreshReg;
+window.$RefreshSig$ = __lunx_prevRefreshSig;
+if (import.meta.hot && __lunx_refresh) {
+    import.meta.hot.accept((mod) => {
+        if (!mod) return;
+        // Only modules whose every export is a component can be refreshed in
+        // place; anything else (an entry, a hook module, constants) reloads.
+        const exports = Object.values(mod);
+        if (exports.length === 0 || !exports.every((e) => __lunx_refresh.isLikelyComponentType(e))) {
+            import.meta.hot.invalidate();
+        }
+    });
 }
                 `;
-                finalCode = finalCode + hmrFooter;
+                finalCode = hmrHeader + finalCode + hmrFooter;
             }
 
             return {
@@ -283,26 +307,7 @@ if (import.meta.hot) {
                 const compilerUrl = pathToFileURL(compilerPath).href;
                 compiler = await import(compilerUrl);
             } catch {
-                log.warn('No Vue 3 compiler found, using fallback with HMR');
-                // Fallback: Return raw code with HMR wrapper
-                if (isDev) {
-                    const normalizedPath = filePath.replace(/\\/g, '/');
-                    const wrappedCode = `
-// Vue fallback (compiler missing)
-const _sfc_main = { template: \`${code.replace(/`/g, '\\`')}\` };
-export default _sfc_main;
-
-// Lunx Advanced HMR (Vue - Fallback)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept();
-}
-                    `;
-                    return { code: wrappedCode };
-                }
+                log.warn('No Vue 3 compiler found; serving the template uncompiled');
                 return { code: `export default { template: \`${code.replace(/`/g, '\\`')}\` };` };
             }
 
@@ -404,23 +409,17 @@ if (import.meta.hot) {
                 export default _sfc_main;
             `;
 
-            // Add HMR footer for Vue (only in dev mode)
+            // Vue's own HMR runtime (present in its dev build) re-renders the
+            // component in place; the record id must be stable across edits.
             if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
+                const hmrId = canonicalHash(this.hmrId(filePath)).substring(0, 8);
                 output += `
-
-// Lunx Advanced HMR (Vue)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    _sfc_main.__hmrId = "${scopeId}";
-    import.meta.hot.accept((modules) => {
-        const newMod = modules[0];
-        if (!newMod) return;
-        // Vue HMR: Component hot-reload
-        // Real Vue HMR is complex, for now we trigger reload
+// Lunx HMR (Vue)
+_sfc_main.__hmrId = "${hmrId}";
+if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
+    __VUE_HMR_RUNTIME__.createRecord("${hmrId}", _sfc_main);
+    import.meta.hot.accept((mod) => {
+        if (mod) __VUE_HMR_RUNTIME__.reload("${hmrId}", mod.default);
     });
 }
                 `;
@@ -461,48 +460,13 @@ if (import.meta.hot) {
                 dev: isDev,
                 css: 'injected' as any,
                 generate: isSvelte5 ? 'client' : 'dom',
+                // Svelte 5 emits its own import.meta.hot handling.
+                ...(isSvelte5 && isDev ? { hmr: true } : {}),
                 hydratable: true,
                 enableSourcemap: isDev
             } as any);
 
             let finalCode = result.js.code;
-
-            // Advanced HMR for Svelte (Production-Grade)
-            if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
-                const componentId = canonicalHash(filePath).substring(0, 16);
-                finalCode += `
-
-// Lunx Advanced HMR (Svelte)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Svelte HMR: Re-create component instances
-        const instances = window.__LUNX_SVELTE_INSTANCES__ || (window.__LUNX_SVELTE_INSTANCES__ = new Map());
-        const componentInstances = instances.get("${componentId}") || [];
-        componentInstances.forEach(instance => {
-            if (instance && instance.$set) {
-                // Preserve state and re-render
-                const state = instance.$capture_state ? instance.$capture_state() : {};
-                instance.$destroy();
-                const NewComponent = newModule.default;
-                const newInstance = new NewComponent({
-                    target: instance.$$.root,
-                    props: instance.$$.props
-                });
-                if (newInstance.$inject_state && Object.keys(state).length > 0) {
-                    newInstance.$inject_state(state);
-                }
-            }
-        });
-    });
-}
-                `;
-            }
 
             return {
                 code: finalCode,
@@ -561,38 +525,6 @@ if (import.meta.hot) {
 
                     let finalCode = result.outputText;
 
-                    // Advanced HMR for Angular (Production-Grade)
-                    if (isDev) {
-                        const normalizedPath = filePath.replace(/\\/g, '/');
-                        const componentId = canonicalHash(filePath).substring(0, 16);
-                        finalCode += `
-
-// Lunx Advanced HMR (Angular)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Angular HMR: Re-bootstrap components
-        const registry = window.__LUNX_ANGULAR_REGISTRY__ || (window.__LUNX_ANGULAR_REGISTRY__ = new Map());
-        const components = registry.get("${componentId}") || [];
-        components.forEach(({ componentRef, viewContainerRef }) => {
-            if (componentRef && viewContainerRef) {
-                const NewComponent = newModule.default || Object.values(newModule)[0];
-                if (NewComponent) {
-                    const index = viewContainerRef.indexOf(componentRef.hostView);
-                    viewContainerRef.remove(index);
-                    viewContainerRef.createComponent(NewComponent);
-                }
-            }
-        });
-    });
-}
-                        `;
-                    }
-
                     return { code: finalCode, map: result.sourceMapText };
                 } catch {
                     return this.transformVanilla(code, filePath, isDev);
@@ -642,38 +574,6 @@ if (import.meta.hot) {
 
             let finalCode = output?.code || code;
 
-            // Inject HMR context for Solid
-            if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
-                const hmrFooter = `
-
-// Lunx Advanced HMR (Solid)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Solid HMR: Re-render root components
-        const roots = window.__LUNX_SOLID_ROOTS__ || (window.__LUNX_SOLID_ROOTS__ = new Map());
-        const componentRoots = roots.get("${normalizedPath}") || [];
-        componentRoots.forEach(({ dispose, container, component }) => {
-            if (dispose) dispose();
-            const NewComponent = newModule.default || newModule[component];
-            if (NewComponent && container) {
-                // Use server-relative path so the dev server resolves via exports field
-                import('/node_modules/solid-js/web').then(({ render }) => {
-                    render(() => NewComponent({}), container);
-                });
-            }
-        });
-    });
-}
-                `;
-                finalCode = finalCode + hmrFooter;
-            }
-
             return { code: finalCode, map: output?.map ? JSON.stringify(output.map) : undefined };
         } catch (error: any) {
             log.warn(`Solid transform failed (babel-preset-solid missing?), using esbuild fallback with HMR`);
@@ -689,23 +589,6 @@ if (import.meta.hot) {
                 });
 
                 let finalCode = result.code;
-
-                // Still add HMR even in fallback
-                if (isDev) {
-                    const normalizedPath = filePath.replace(/\\/g, '/');
-                    const hmrFooter = `
-
-// Lunx Advanced HMR (Solid - Fallback)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept();
-}
-                    `;
-                    finalCode = finalCode + hmrFooter;
-                }
 
                 return { code: finalCode, map: result.map };
             } catch (fallbackError: any) {
@@ -808,43 +691,6 @@ if (import.meta.hot) {
             });
 
             let finalCode = result.outputText;
-
-            // Advanced HMR for Lit (Production-Grade)
-            if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
-                const componentId = canonicalHash(filePath).substring(0, 16);
-                finalCode += `
-
-// Lunx Advanced HMR (Lit)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Lit HMR: Re-register custom elements
-        const registry = window.__LUNX_LIT_REGISTRY__ || (window.__LUNX_LIT_REGISTRY__ = new Map());
-        const elements = registry.get("${componentId}") || [];
-        elements.forEach(({ tagName, constructor }) => {
-            const instances = document.querySelectorAll(tagName);
-            instances.forEach(instance => {
-                const NewClass = newModule.default || newModule[constructor.name];
-                if (NewClass && customElements.get(tagName)) {
-                    const attrs = Array.from(instance.attributes);
-                    const children = Array.from(instance.childNodes);
-                    const parent = instance.parentNode;
-                    const newElement = document.createElement(tagName);
-                    attrs.forEach(attr => newElement.setAttribute(attr.name, attr.value));
-                    children.forEach(child => newElement.appendChild(child.cloneNode(true)));
-                    parent?.replaceChild(newElement, instance);
-                }
-            });
-        });
-    });
-}
-                `;
-            }
 
             return { code: finalCode, map: result.sourceMapText };
         } catch (error: any) {

@@ -2,6 +2,12 @@ import crypto from 'crypto';
 import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
+
+// One version stamp per server session. It must be identical in every module
+// that imports a dependency: a per-request timestamp gives each importer its
+// own copy of React/Vue, which breaks hooks, context and the HMR registries.
+const depsVersion = Date.now().toString(36);
 import { anomalyDetector } from '../security/anomaly.js';
 import type { WebSocketServer, WebSocket } from '../internal/ws.js';
 import { fileURLToPath } from 'url';
@@ -71,7 +77,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
           if (singletonRedirects.has(pkgRoot)) {
             const safeName = specifier.replace(/[/@]/g, '_');
             const hostBase = singletonRedirects.get(pkgRoot)!;
-            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js?v=${Date.now()}`;
+            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js?v=${depsVersion}`;
             replacements.push({ start: node.start, end: node.end, replacement: `'${singletonUrl}'` });
             return;
           }
@@ -80,7 +86,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
         let replacement = `/node_modules/${specifier}`;
         if (preBundledDeps && preBundledDeps.has(specifier)) {
           // Exact match: this full specifier (e.g. 'solid-js/web') was pre-bundled
-          replacement = `${preBundledDeps.get(specifier)}?v=${Date.now()}`;
+          replacement = `${preBundledDeps.get(specifier)}?v=${depsVersion}`;
         } else if (preBundledDeps) {
           // Subpath check: specifier is 'solid-js/web' but only 'solid-js' is in preBundledDeps
           const parts = specifier.split('/');
@@ -95,7 +101,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
             if (specifier.endsWith('.js') && !preBundledDeps.has(specifier)) {
               replacement = `/node_modules/${specifier}`;
             } else {
-              replacement = `/@lunx-deps/${safeName}.js?v=${Date.now()}`;
+              replacement = `/@lunx-deps/${safeName}.js?v=${depsVersion}`;
             }
           }
         }
@@ -1147,6 +1153,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         RefreshRuntime.register(type, id);
       };
       window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+      window.__lunx_react_refresh__ = RefreshRuntime;
       window.__vite_plugin_react_preamble_installed__ = true;
     </script>
           `;
@@ -1323,16 +1330,22 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
     // Phase 3.4 — HMR client runtime route
     if (url === '/@lunx/hmr-client' || url === '/@lunx/hmr-client.js') {
-      const srcPath = path.resolve(__dirname, '../../packages/lunx-hmr-client/src/index.ts');
+      // Source when running from the repo, compiled output in a packaged install.
+      const tsPath = path.resolve(__dirname, '../runtime/hmr-client.ts');
+      const jsPath = path.resolve(__dirname, '../runtime/hmr-client.js');
       try {
-        const raw = await fs.readFile(srcPath, 'utf-8');
-        const { transform } = await import('esbuild');
-        const result = await transform(raw, { loader: 'ts', format: 'esm', target: 'es2020' });
-        res.writeHead(200, { 'Content-Type': 'application/javascript' });
-        res.end(result.code);
+        let code: string;
+        if (existsSync(tsPath)) {
+          const { transform } = await import('esbuild');
+          code = (await transform(await fs.readFile(tsPath, 'utf-8'), { loader: 'ts', format: 'esm', target: 'es2020' })).code;
+        } else {
+          code = await fs.readFile(jsPath, 'utf-8');
+        }
+        res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+        res.end(code);
       } catch (e: any) {
         log.warn(`[lunx] /@lunx/hmr-client: ${e.message}`);
-        res.writeHead(404); res.end('/* @lunx/hmr-client not built */');
+        res.writeHead(404); res.end('/* lunx HMR runtime missing */');
       }
       return;
     }
@@ -1799,6 +1812,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       RefreshRuntime.injectIntoGlobalHook(window);
       window.$RefreshReg$ = (type, id) => { RefreshRuntime.register(type, id); };
       window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+      window.__lunx_react_refresh__ = RefreshRuntime;
       window.__vite_plugin_react_preamble_installed__ = true;
     </script>
         `;
@@ -2049,7 +2063,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             }
 
             // Normalize path for client (relative to root)
-            const rel = '/' + path.relative(cfg.root, affectedFile);
+            const rel = '/' + path.relative(cfg.root, affectedFile).split(path.sep).join('/');
 
             // Queue update via throttle
             hmrThrottle.queueUpdate(rel, type);
