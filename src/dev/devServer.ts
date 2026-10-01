@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { applyAlias, collectAliases, type AliasEntry } from '../config/aliases.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css.js';
+import { transformGlobImports } from '../build/glob-import.js';
 
 // One version stamp per server session. It must be identical in every module
 // that imports a dependency: a per-request timestamp gives each importer its
@@ -1757,7 +1758,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             }
           }
 
-          let code = await rewriteImports(transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects, aliases);
+          const globbed = transformGlobImports(transformResult.code, filePath, cfg.root);
+          let code = await rewriteImports(globbed ?? transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects, aliases);
 
           res.writeHead(200, {
             'Content-Type': 'application/javascript',

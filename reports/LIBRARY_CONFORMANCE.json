@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-01T11:00:17.385Z",
+  "generatedAt": "2026-10-01T11:02:07.724Z",
   "results": {
     "dev": {
       "rows": [
@@ -116,10 +116,34 @@
           "expected": "asset-url-ok",
           "actual": "asset-url-ok",
           "pass": true
+        },
+        {
+          "name": "glob-lazy",
+          "expected": "./glob/a.ts,./glob/b.ts:a+b",
+          "actual": "./glob/a.ts,./glob/b.ts:a+b",
+          "pass": true
+        },
+        {
+          "name": "glob-eager",
+          "expected": "en,fr",
+          "actual": "en,fr",
+          "pass": true
+        },
+        {
+          "name": "glob-raw",
+          "expected": "raw-ok",
+          "actual": "raw-ok",
+          "pass": true
+        },
+        {
+          "name": "raw-import",
+          "expected": "asset-url-ok",
+          "actual": "asset-url-ok",
+          "pass": true
         }
       ],
-      "passed": 19,
-      "total": 19
+      "passed": 23,
+      "total": 23
     },
     "build": {
       "rows": [
@@ -236,10 +260,34 @@
           "expected": "asset-url-ok",
           "actual": "asset-url-ok",
           "pass": true
+        },
+        {
+          "name": "glob-lazy",
+          "expected": "./glob/a.ts,./glob/b.ts:a+b",
+          "actual": "./glob/a.ts,./glob/b.ts:a+b",
+          "pass": true
+        },
+        {
+          "name": "glob-eager",
+          "expected": "en,fr",
+          "actual": "en,fr",
+          "pass": true
+        },
+        {
+          "name": "glob-raw",
+          "expected": "raw-ok",
+          "actual": "raw-ok",
+          "pass": true
+        },
+        {
+          "name": "raw-import",
+          "expected": "asset-url-ok",
+          "actual": "asset-url-ok",
+          "pass": true
         }
       ],
-      "passed": 19,
-      "total": 19
+      "passed": 23,
+      "total": 23
     }
   }
 }

@@ -16,6 +16,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import type { BuildConfig } from '../config/index.js';
+import { transformGlobImports } from './glob-import.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 
 const gzip = promisify(zlib.gzip);
@@ -147,6 +148,14 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
                 const fw = file.endsWith('.vue') ? 'vue' : file.endsWith('.svelte') ? 'svelte' : framework;
                 const out = await transformer.transform({ filePath: file, code, framework: fw as any, root, isDev: false });
                 return { code: out.code, map: null, moduleType: 'js' };
+            },
+        },
+        {
+            name: 'lunx:glob-import',
+            transform(code: string, id: string) {
+                if (id.includes('node_modules') || !code.includes('import.meta.glob')) return null;
+                const out = transformGlobImports(code, cleanId(id), root);
+                return out === null ? null : { code: out, map: null };
             },
         },
         {

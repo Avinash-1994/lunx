@@ -114,6 +114,10 @@ const CASES = {
     'worker': 'worker-ok',
     'wasm': '5',
     'asset-url': 'asset-url-ok',
+    'glob-lazy': './glob/a.ts,./glob/b.ts:a+b',
+    'glob-eager': 'en,fr',
+    'glob-raw': 'raw-ok',
+    'raw-import': 'asset-url-ok',
 };
 
 const MAIN = `import { hello, answer } from 'cjs-only';
@@ -131,6 +135,7 @@ import { kind } from 'module-field';
 import chainPkg from 'cjs-chain';
 import data from './data.json';
 import wasmUrl from './add.wasm?url';
+import noteRaw from './note.txt?raw';
 
 const out = document.getElementById('out')!;
 const report = (name: string, value: unknown) => {
@@ -173,6 +178,20 @@ await attempt('asset-url', async () => {
   const text = await (await fetch(new URL('./note.txt', import.meta.url))).text();
   return text.trim();
 });
+await attempt('glob-lazy', async () => {
+  const mods = import.meta.glob('./glob/*.ts');
+  const values = await Promise.all(Object.values(mods).map((load) => load().then((m: any) => m.name)));
+  return Object.keys(mods).join(',') + ':' + values.join('+');
+});
+await attempt('glob-eager', () => {
+  const mods = import.meta.glob('./i18n/*.json', { eager: true, import: 'default' }) as Record<string, { lang: string }>;
+  return Object.values(mods).map((m) => m.lang).join(',');
+});
+await attempt('glob-raw', async () => {
+  const mods = import.meta.glob('./glob/*.txt', { query: '?raw', import: 'default' });
+  return (await Object.values(mods)[0]!() as string).trim();
+});
+await attempt('raw-import', () => noteRaw.trim());
 document.body.dataset.done = '1';
 `;
 
@@ -184,6 +203,11 @@ const APP_FILES = {
     'src/tla.ts': `const value = await Promise.resolve('tla-ok');\nexport const tla = value;\n`,
     'src/worker.ts': `self.onmessage = () => { (self as any).postMessage('worker-ok'); };\n`,
     'src/note.txt': 'asset-url-ok\n',
+    'src/glob/a.ts': `export const name = 'a';\n`,
+    'src/glob/b.ts': `export const name = 'b';\n`,
+    'src/glob/c.txt': 'raw-ok\n',
+    'src/i18n/en.json': JSON.stringify({ lang: 'en' }),
+    'src/i18n/fr.json': JSON.stringify({ lang: 'fr' }),
     'tsconfig.json': JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'bundler', strict: false, resolveJsonModule: true } }),
 };
 
