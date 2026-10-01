@@ -118,8 +118,8 @@ export class FSWatcher extends EventEmitter {
     private readonly roots: string[];
     private closed = false;
     private ready = false;
-    /** True when the platform accepted `recursive: true`. */
-    private recursive = false;
+    /** Directory roots covered by one native recursive watcher. */
+    private recursiveRoots = new Set<string>();
 
     constructor(paths: string | string[], options: WatchOptions = {}) {
         super();
@@ -161,8 +161,8 @@ export class FSWatcher extends EventEmitter {
             return;
         }
 
+        await this.watchDirectory(root, true);
         await this.scan(root, 0);
-        await this.watchDirectory(root);
     }
 
     /** Seeds `known` so later events can be classified, and emits initial adds if asked. */
@@ -181,7 +181,7 @@ export class FSWatcher extends EventEmitter {
                 this.known.set(full, { mtimeMs: 0, size: 0, isDir: true });
                 if (!this.options.ignoreInitial) this.fire('addDir', full);
                 // Without recursive support we need a watcher on every directory.
-                if (!this.recursive) await this.watchDirectory(full);
+                await this.watchDirectory(full);
                 await this.scan(full, depth + 1);
             } else if (entry.isFile()) {
                 try {
@@ -195,8 +195,13 @@ export class FSWatcher extends EventEmitter {
         }
     }
 
-    private async watchDirectory(dir: string): Promise<void> {
-        if (this.closed || this.watchers.has(dir)) return;
+    private coveredByRecursive(dir: string): boolean {
+        for (const root of this.recursiveRoots) if (dir === root || dir.startsWith(root + path.sep)) return true;
+        return false;
+    }
+
+    private async watchDirectory(dir: string, allowRecursive = false): Promise<void> {
+        if (this.closed || this.watchers.has(dir) || this.coveredByRecursive(dir)) return;
 
         const handler = (_event: string, filename: string | Buffer | null) => {
             if (!filename) return;
@@ -204,19 +209,22 @@ export class FSWatcher extends EventEmitter {
             this.queue(path.resolve(dir, name));
         };
 
-        // Try one recursive watcher for the whole tree before falling back to per-directory.
-        if (!this.recursive && this.watchers.size === 0) {
+        // One native recursive watcher where the OS provides it (FSEvents,
+        // ReadDirectoryChangesW). Not on Linux: Node implements recursion
+        // there in JS, walking and stat-ing the whole tree -- node_modules
+        // included, `ignored` not consulted -- which made startup scale with
+        // the size of node_modules. Per-directory watchers honour `ignored`.
+        if (allowRecursive && process.platform !== 'linux') {
             try {
                 const w = fs.watch(dir, { persistent: this.options.persistent, recursive: true }, handler);
                 w.on('error', (err) => this.emit('error', err));
                 this.watchers.set(dir, w);
-                this.recursive = true;
+                this.recursiveRoots.add(dir);
                 return;
             } catch {
-                this.recursive = false;
+                /* fall through to a per-directory watcher */
             }
         }
-        if (this.recursive) return;
 
         try {
             const w = fs.watch(dir, { persistent: this.options.persistent }, handler);
@@ -274,7 +282,7 @@ export class FSWatcher extends EventEmitter {
         if (stat.isDirectory()) {
             if (previous) return;
             this.known.set(fullPath, { mtimeMs: 0, size: 0, isDir: true });
-            if (!this.recursive) await this.watchDirectory(fullPath);
+            await this.watchDirectory(fullPath);
             this.fire('addDir', fullPath);
             // A directory can appear with children already inside it (git checkout, mv).
             await this.scan(fullPath, 0);

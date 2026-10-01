@@ -417,6 +417,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   log.debug('Scanning dependencies for pre-bundling...');
   const entryPoint = path.join(cfg.root, 'public', 'index.html');
   let preBundledDeps = new Map<string, string>();
+  // Pre-bundling runs in the background, like Vite's optimizer: the page and
+  // HMR client are served at once, and only module requests (whose imports
+  // must point at the bundled deps) wait for it.
+  let prebundleReady: Promise<void> = Promise.resolve();
 
   try {
     // 1. Load package.json dependencies
@@ -489,6 +493,18 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       const pkgJson = JSON.parse(pkgJsonRaw);
       pkgDepsList = Object.keys({ ...pkgJson.dependencies, ...pkgJson.peerDependencies });
     } catch { }
+
+    // Pre-bundle what the app imports, not everything it lists: a crawl of
+    // the sources from the entry is a few ms; bundling unused dependencies
+    // cost ~1s per boot. Anything missed is still bundled on first request.
+    try {
+      const { scanDeps } = await import('./dep-scan.js');
+      const scan = await scanDeps(cfg.root, cfg.entry?.length ? cfg.entry : ['index.html'], aliases);
+      if (scan.files > 0) pkgDepsList = [...scan.deps];
+      _mark(`scanned ${scan.files} files, ${scan.deps.size} deps`);
+    } catch (e: any) {
+      log.debug(`dependency scan failed, pre-bundling package.json deps: ${e.message}`);
+    }
 
     // 3. User Config (prebundle)
     const prebundleConfig = cfg.prebundle || { enabled: true, include: [], exclude: [] };
@@ -563,14 +579,21 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
       if (validDeps.size > 0) {
         // 4. Pass to PreBundler
-        preBundledDeps = await preBundler.preBundleDependencies(Array.from(validDeps));
-        log.debug('Dependencies pre-bundled successfully', { count: preBundledDeps.size });
+        prebundleReady = preBundler.preBundleDependencies(Array.from(validDeps)).then(
+          (deps) => {
+            preBundledDeps = deps;
+            _mark('prebundle done');
+            log.debug('Dependencies pre-bundled successfully', { count: deps.size });
+          },
+          (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
+        );
       }
     }
 
-    // Warmup Build (Phase C1/C2) - Check for errors immediately
-    log.info('→ Dev Server: Warming up graph...');
-    const buildResult = await pipeline.build();
+    if (process.env.LUNX_DEV_WARMUP === '1') await prebundleReady;
+    // A full build before serving cost ~0.75s of every boot. Modules are
+    // compiled on request and errors reach the overlay, so it is opt-in.
+    const buildResult = process.env.LUNX_DEV_WARMUP === '1' ? await pipeline.build() : { success: true, skipped: true };
     if (!buildResult.success) {
       const error = (buildResult as any).error;
       const errorMsg = error?.message || 'Unknown error during warmup';
@@ -584,7 +607,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         plugin: 'lunx:pipeline'
       });
       log.error('→ Dev Server: Warmup build failed - Fix the errors above');
-    } else {
+    } else if (!(buildResult as any).skipped) {
       console.log(`\x1b[32mCompiled successfully!\x1b[0m\n`);
     }
   } catch (error: any) {
@@ -807,6 +830,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   };
 
   const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    const reqPath = (req.url || '/').split('?')[0]!;
+    if (reqPath !== '/' && !reqPath.endsWith('.html') && !reqPath.startsWith('/@lunx/hmr-client') && !reqPath.startsWith('/__lunx')) {
+      await prebundleReady;
+    }
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -1940,6 +1967,9 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   if (existingServer) {
     server = existingServer;
     (server as any).__lunx_handler = requestHandler;
+    (server as any).__lunx_onHandler?.();
+    _mark('handler ready');
+    if (process.env.LUNX_DEBUG_BOOT) console.error(`process +${Math.round(process.uptime() * 1000 - (Date.now() - _t0))}ms → ` + _phases.map((p) => `${p.name}: ${p.ms}ms`).join(' | '));
   } else {
     const { createUWSServer } = await import('./uWS-shim.js');
     server = createUWSServer(httpsOptions);

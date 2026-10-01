@@ -45,8 +45,19 @@ export async function startDevServer(cfg: BuildConfig) {
     cfg.server.port = port;
     cfg.port = port;
 
+    // Resolved by the full dev server as soon as its request handler exists.
+    let markHandlerReady!: () => void;
+    const handlerReady = new Promise<void>((resolve) => (markHandlerReady = resolve));
+    const startInit = () => {
+        initPromise ??= (async () => {
+            const { startDevServer: initFull } = await import('./devServer.js');
+            features = await initFull(cfg, server);
+        })();
+        return initPromise;
+    };
+
     // 2. Create hyper-responsive HTTP server
-    const server = http.createServer(async (req, res) => {
+    const server: http.Server = http.createServer(async (req, res) => {
         if (features && (server as any).__lunx_handler) {
             return (server as any).__lunx_handler(req, res);
         }
@@ -54,19 +65,15 @@ export async function startDevServer(cfg: BuildConfig) {
         const url = req.url || '/';
         const [pathname] = url.split('?');
 
-        if (!initPromise) {
-            initPromise = (async () => {
-                const { startDevServer: initFull } = await import('./devServer.js');
-                features = await initFull(cfg, server);
-            })();
-        }
+        startInit();
 
         // Every request, HTML included, waits for the real pipeline.
         // Serving index.html straight off disk used to skip the dev server's
         // HTML transforms -- the HMR client and the React Refresh preamble
         // among them -- so the very first page load of a cold start died with
-        // "$RefreshReg$ is not defined" and never recovered.
-        await initPromise;
+        // "$RefreshReg$ is not defined" and never recovered. Waiting only for
+        // the request handler (not watchers etc.) keeps that and saves ~250ms.
+        await Promise.race([initPromise, handlerReady]);
         if ((server as any).__lunx_handler) {
             return (server as any).__lunx_handler(req, res);
         }
@@ -80,6 +87,9 @@ export async function startDevServer(cfg: BuildConfig) {
     await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
         server.listen(port, host, async () => {
+            // Start the full pipeline first; the banner below can wait.
+            (server as any).__lunx_onHandler = markHandlerReady;
+            startInit().catch(() => {});
             const duration = (performance.now() - startTime).toFixed(2);
 
             // Get network IP
@@ -166,13 +176,6 @@ export async function startDevServer(cfg: BuildConfig) {
                 detectedAdapter = found?.name ?? 'none';
             } catch { detectedAdapter = null; }
 
-            // 4. Start full server initialization immediately (before any requests)
-            if (!initPromise) {
-                initPromise = (async () => {
-                    const { startDevServer: initFull } = await import('./devServer.js');
-                    features = await initFull(cfg, server);
-                })();
-            }
 
             resolve();
         });
