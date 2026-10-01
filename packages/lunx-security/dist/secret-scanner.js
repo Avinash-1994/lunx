@@ -8,11 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 /** Default secret detection patterns (S2.2 spec) */
 export const DEFAULT_SECRET_PATTERNS = [
-    { name: 'AWS Access Key', pattern: /AKIA[0-9A-Z]{16}/ },
+    { name: 'AWS Access Key', pattern: /AKIA[0-9A-Z]{16}/ }, // lunx-scan-ignore
     { name: 'Generic API Key', pattern: /(api[_-]?key|apikey)\s*[:=]\s*['"][^'"]{20,}['"]/i },
-    { name: 'RSA Private Key', pattern: /-----BEGIN RSA PRIVATE KEY-----/ },
-    { name: 'EC Private Key', pattern: /-----BEGIN EC PRIVATE KEY-----/ },
-    { name: 'OpenSSH Private Key', pattern: /-----BEGIN OPENSSH PRIVATE KEY-----/ },
+    { name: 'RSA Private Key', pattern: /-----BEGIN RSA PRIVATE KEY-----/ }, // lunx-scan-ignore
+    { name: 'EC Private Key', pattern: /-----BEGIN EC PRIVATE KEY-----/ }, // lunx-scan-ignore
+    { name: 'OpenSSH Private Key', pattern: /-----BEGIN OPENSSH PRIVATE KEY-----/ }, // lunx-scan-ignore
     { name: 'JWT Token', pattern: /eyJ[A-Za-z0-9-_=]{20,}\.[A-Za-z0-9-_=]{20,}\.?[A-Za-z0-9-_.+/=]*/ },
     { name: 'MongoDB URL', pattern: /mongodb:\/\/[^@\s]+@/ },
     { name: 'Postgres URL', pattern: /postgres:\/\/[^@\s]+@/ },

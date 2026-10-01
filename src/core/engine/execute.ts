@@ -248,6 +248,20 @@ export async function executeParallel(execPlan: ExecutionPlan, buildPlan: BuildP
                         }
                     );
 
+                    // Step 1b: Package-internal subpath imports (`#client/constants`).
+                    // They start with `#`, so the bare-specifier pattern below
+                    // never matched them and they reached the bundle verbatim.
+                    moduleCode = moduleCode.replace(
+                        /require\s*\(\s*["'](#[^"']+)["']\s*\)/g,
+                        (match, specifier) => {
+                            const depId = specMap[specifier];
+                            if (depId) {
+                                return `require("${shortIdMap.get(depId, isProd) || depId}")`;
+                            }
+                            return match;
+                        }
+                    );
+
                     // Step 2: Resolve bare/scoped specifiers via specMap first, then Node resolve
                     moduleCode = moduleCode.replace(
                         /\brequire\s*\(\s*["'](@?(?:[a-zA-Z@][^"'\.\s][^"']*|[a-zA-Z][^"'\s/][^"']*\/[^"']+))["']\s*\)/g,
@@ -284,7 +298,35 @@ export async function executeParallel(execPlan: ExecutionPlan, buildPlan: BuildP
                     }
 
                     // Always use 'globalThis.d' as defined in condensed runtime
-                    bundleContent += `\nglobalThis.d("${shortId}",function(module,exports,require,h){\n${moduleCode}\n});`;
+                    // Always use 'globalThis.d' as defined in condensed runtime.
+                    // The parameter names must be ones module code will never
+                    // declare at its own top level. `h` in particular is a stock
+                    // minified identifier, so any dependency with a top-level
+                    // `const h` made the bundle fail to parse with
+                    // "Identifier 'h' has already been declared". The aliases keep
+                    // module/exports/require usable inside; the minifier shortens
+                    // all of them again.
+                    bundleContent += `\nglobalThis.d("${shortId}",function(__lunxModule,__lunxExports,__lunxRequire,__lunxMeta){
+var module=__lunxModule,exports=__lunxExports,require=__lunxRequire;\n${moduleCode}\n});`;
+                }
+            }
+
+            // Style modules are extracted into the CSS chunk, so no JS factory
+            // is emitted for them -- but the importing module still calls
+            // require() for the id. Register an empty stub so the entry does
+            // not die with "Module not found" on `import './app.css'`.
+            if (!isCss) {
+                const declared = new Set<string>();
+                for (const m of bundleContent.matchAll(/globalThis\.d\("([^"]+)"/g)) declared.add(m[1]!);
+
+                for (const [modId, node] of ctx.graph.nodes) {
+                    const nodePath = (node as any)?.path ?? modId;
+                    if (!/\.(css|scss|sass|less|styl|stylus|pcss|postcss)(\?|$)/i.test(nodePath)) continue;
+                    const shortId = shortIdMap.get(modId, isProd) || modId;
+                    if (declared.has(shortId)) continue;
+                    declared.add(shortId);
+                    bundleContent += `
+globalThis.d("${shortId}",function(module,exports){module.exports={};});`;
                 }
             }
 
@@ -374,7 +416,13 @@ export async function executeParallel(execPlan: ExecutionPlan, buildPlan: BuildP
     }
 
     // Phase 1: GLOBAL NATIVE MINIFICATION
-    if (isProd) {
+    //
+    // Runs before optimizeArtifacts()' esbuild pass. Two passes sounds wrong,
+    // but measured on a React app the pair emits 229.9 KB where esbuild alone
+    // emits 245.4 KB (-6.3%), for ~1.1 s more build time. `build.globalMinify:
+    // false` trades that size back for the time. It previously ran even with
+    // `minify: false`, silently ignoring the setting.
+    if (isProd && ctx.config.minify !== false && ctx.config.globalMinify !== false) {
         await globalOptimizer.optimize(artifacts);
     }
 

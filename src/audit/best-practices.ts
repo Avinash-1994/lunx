@@ -1,4 +1,4 @@
-import { Page } from 'puppeteer';
+import type { Page } from 'puppeteer';
 import { AuditGroup, AuditResult, AuditContext } from './types.js';
 
 export class BestPracticesAudit {

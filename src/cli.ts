@@ -75,8 +75,7 @@ async function main() {
   // BUG-CLI-01: short-circuit block REMOVED — yargs is the single handler for all commands
 
   const { log } = await import('./utils/logger.js');
-  const { default: yargs } = await import('yargs');
-  const { hideBin } = await import('yargs/helpers');
+  const { default: yargs, hideBin } = await import('./internal/cli-args.js');
 
   // Import extracted command modules
   const { default: devCmd }      = await import('./cli/commands/dev.js');
@@ -87,7 +86,7 @@ async function main() {
 
   const pkg = require('../package.json');
 
-  const argv = (yargs as any)(hideBin(process.argv))
+  const argv = await (yargs as any)(hideBin(process.argv))
     // BUG-CLI-04: --version flag
     .version(pkg.version)
     .alias('version', 'v')
@@ -162,16 +161,29 @@ async function main() {
       (yargs: any) => yargs.positional('module', { type: 'string', describe: 'Module path to trace' }),
       async (args: any) => {
         const { loadConfig } = await import('./config/index.js');
-        const { FrameworkPipeline } = await import('./core/pipeline/framework-pipeline.js');
+        const { resolveProjectGraph } = await import('./resolve/build-graph.js');
         const config = await loadConfig(process.cwd());
-        const pipeline = await FrameworkPipeline.auto(config);
-        const engine = pipeline.getEngine();
-        const graph = engine.getGraph?.();
-        if (!graph) { console.error('No dependency graph — run lunx build first.'); process.exit(1); }
+        // Resolve the graph here rather than asking the user to run a build:
+        // the engine keeps its graph in memory, so `lunx build` in a previous
+        // process could never have satisfied this command.
+        const { graph, entryIds } = await resolveProjectGraph(config);
         const target = args.module as string;
-        const entries = config.entry ?? [];
+        // Walk from the graph's own entry node ids. Seeding from `config.entry`
+        // meant starting at "index.html", which is not a module and has no
+        // node, so every lookup missed and every module was "not found".
+        // Node ids are content hashes, so matching the target against an id
+        // could never succeed; the file path is what the user typed.
+        const pathOf = (id: string) => graph.nodes?.get(id)?.path ?? id;
+        const matches = (id: string) => {
+          const p = pathOf(id).replace(/\\/g, '/').toLowerCase();
+          const t = target.replace(/\\/g, '/').toLowerCase();
+          // A bare package name should match the package, not any path that
+          // merely contains the word.
+          return p.endsWith(t) || p.includes(`/node_modules/${t}/`) || p.includes(t);
+        };
+
         let found = false;
-        for (const entry of entries) {
+        for (const entry of entryIds) {
           const queue: string[][] = [[entry]];
           const visited = new Set<string>();
           while (queue.length) {
@@ -179,9 +191,11 @@ async function main() {
             const node = chain[chain.length - 1];
             if (visited.has(node)) continue;
             visited.add(node);
-            if (node.includes(target) || node.endsWith(target)) {
+            if (chain.length > 1 && matches(node)) {
               console.log('\n  Import chain:');
-              chain.forEach((m, i) => console.log(`  ${'  '.repeat(i)}${i === 0 ? '→' : '└'} ${m}`));
+              chain.forEach((m, i) =>
+                console.log(`  ${'  '.repeat(i)}${i === 0 ? '→' : '└'} ${path.relative(process.cwd(), pathOf(m)) || pathOf(m)}`)
+              );
               found = true; break;
             }
             const graphNode = graph.nodes?.get(node);
@@ -208,12 +222,36 @@ async function main() {
         const { FrameworkPipeline } = await import('./core/pipeline/framework-pipeline.js');
         const pipeline = await FrameworkPipeline.auto(config);
         if (!args['no-types']) {
+          // `npx tsc` goes to the registry when typescript is absent from the
+          // project and prints npx's own "This is not the tsc command you are
+          // looking for", which tells the user nothing about their project.
+          // Resolve the compiler from the project and say plainly when it is
+          // missing.
+          const { createRequire } = await import('module');
+          const projectRequire = createRequire(path.join(process.cwd(), "package.json"));
+          let tscPath: string | null = null;
           try {
-            const { execSync } = await import('child_process');
-            process.stderr.write('[lunx:check] Running TypeScript type-check...\n');
-            execSync('npx tsc --noEmit 2>&1', { cwd: process.cwd(), stdio: 'inherit' });
-            process.stderr.write('[lunx:check] TypeScript ✅\n');
-          } catch { exitCode = 1; }
+            tscPath = projectRequire.resolve('typescript/lib/tsc.js');
+          } catch {
+            tscPath = null;
+          }
+
+          if (!tscPath) {
+            process.stderr.write(
+              '[lunx:check] Skipping type-check: TypeScript is not installed in this project.\n' +
+                '             Add it with `npm i -D typescript`, or pass --no-types.\n'
+            );
+          } else {
+            try {
+              const { execFileSync } = await import('child_process');
+              process.stderr.write('[lunx:check] Running TypeScript type-check...\n');
+              execFileSync(process.execPath, [tscPath, '--noEmit'], {
+                cwd: process.cwd(),
+                stdio: 'inherit',
+              });
+              process.stderr.write('[lunx:check] TypeScript ✅\n');
+            } catch { exitCode = 1; }
+          }
         }
         if (!args['no-circular']) {
           try {
@@ -378,7 +416,10 @@ async function main() {
       'Create a new Lunx project',
       (yargs: any) => yargs
         .positional('name', { type: 'string', description: 'Project name' })
-        .option('framework', { type: 'string', description: 'Framework to use' })
+        // `--template` is what every other scaffolder calls this flag
+        // (create-vite, create-next-app), so accept it as an alias rather than
+        // rejecting it with "Unknown argument".
+        .option('framework', { type: 'string', alias: 'template', description: 'Framework to use' })
         .option('ts', { type: 'boolean', description: 'Use TypeScript', default: true })
         .option('tailwind', { type: 'boolean', description: 'Add Tailwind CSS', default: false }),
       async (args: any) => {

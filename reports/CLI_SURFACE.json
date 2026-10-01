@@ -1,0 +1,107 @@
+[
+  {
+    "name": "info",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "env",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "doctor",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "init",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "check",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "build",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "analyze",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "inspect",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "why",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "report",
+    "verdict": "DELIBERATE",
+    "note": "exit 1 — Error: `lunx audit` needs Puppeteer, which is not installed."
+  },
+  {
+    "name": "verify",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "test",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "css",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "migrate",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "security",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "audit",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "create",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "bootstrap",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "dev",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "preview",
+    "verdict": "PASS",
+    "note": ""
+  },
+  {
+    "name": "ssr",
+    "verdict": "PASS",
+    "note": ""
+  }
+]

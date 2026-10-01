@@ -1,0 +1,432 @@
+/**
+ * Cross-framework browser conformance matrix.
+ *
+ * For every supported framework this script:
+ *   1. scaffolds a minimal app in a temp directory,
+ *   2. starts `lunx dev` on a free port,
+ *   3. loads it in a real Chromium page and asserts the app mounted,
+ *   4. asserts CSS was applied and no console errors were logged,
+ *   5. edits a source file and asserts the change reaches the browser (HMR),
+ *   6. runs `lunx build` and serves `dist/`, asserting the production output
+ *      renders the same thing,
+ *   7. records dev-server boot, first-paint and build timings.
+ *
+ * Run: npx tsx scripts/browser-matrix.mjs [--only react,vue] [--headed]
+ */
+
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import http from 'node:http';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const CLI = path.join(REPO, 'src', 'cli.ts');
+
+const args = process.argv.slice(2);
+const only = args.find((a) => a.startsWith('--only='))?.split('=')[1]?.split(',');
+const headed = args.includes('--headed');
+const keepTemp = args.includes('--keep');
+
+// ── Fixtures ────────────────────────────────────────────────────────────────
+
+const SHARED_CSS = `:root { --fg: #0b7; }
+#app, #root { font-family: system-ui, sans-serif; }
+.marker { color: rgb(0, 187, 119); font-weight: 700; }
+`;
+
+/**
+ * Every app renders `.marker` with the text MARKER_BEFORE, styled green.
+ * The HMR step rewrites it to MARKER_AFTER in `hmrFile`.
+ */
+const MARKER_BEFORE = 'LUNX-OK-BEFORE';
+const MARKER_AFTER = 'LUNX-OK-AFTER';
+
+function html(entry, mountId = 'root') {
+    return `<!DOCTYPE html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>
+  <body>
+    <div id="${mountId}"></div>
+    <script type="module" src="/${entry}"></script>
+  </body>
+</html>
+`;
+}
+
+const FRAMEWORKS = [
+    {
+        name: 'vanilla-ts',
+        deps: {},
+        hmrFile: 'src/app.ts',
+        files: {
+            'index.html': html('src/main.ts', 'app'),
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport { render } from './app';\nrender(document.getElementById('app')!);\n`,
+            'src/app.ts': `export function render(el: HTMLElement) {\n  el.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1>';\n}\n`,
+        },
+    },
+    {
+        name: 'react',
+        deps: { react: '19.2.3', 'react-dom': '19.2.3' },
+        hmrFile: 'src/App.tsx',
+        files: {
+            'index.html': html('src/main.tsx'),
+            'src/index.css': SHARED_CSS,
+            'src/main.tsx': `import './index.css';\nimport { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
+            'src/App.tsx': `export default function App() {\n  return <h1 className="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+        },
+    },
+    {
+        name: 'preact',
+        deps: { preact: '10.29.8' },
+        hmrFile: 'src/App.tsx',
+        config: `import { defineConfig } from 'lunx';\nexport default defineConfig({ framework: 'preact' });\n`,
+        files: {
+            'index.html': html('src/main.tsx'),
+            'src/index.css': SHARED_CSS,
+            'src/main.tsx': `import './index.css';\nimport { render } from 'preact';\nimport App from './App';\nrender(<App />, document.getElementById('root')!);\n`,
+            'src/App.tsx': `export default function App() {\n  return <h1 class="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'tsconfig.json': JSON.stringify(
+                { compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'preact', target: 'ES2020', module: 'ESNext', moduleResolution: 'bundler', strict: false } },
+                null,
+                2,
+            ),
+        },
+    },
+    {
+        name: 'vue',
+        deps: { vue: '3.5.26' },
+        hmrFile: 'src/App.vue',
+        files: {
+            'index.html': html('src/main.ts'),
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport { createApp } from 'vue';\nimport App from './App.vue';\ncreateApp(App).mount('#root');\n`,
+            'src/App.vue': `<template>\n  <h1 class="marker">${MARKER_BEFORE}</h1>\n</template>\n`,
+        },
+    },
+    {
+        name: 'svelte',
+        deps: { svelte: '5.55.5' },
+        hmrFile: 'src/App.svelte',
+        files: {
+            'index.html': html('src/main.ts'),
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport { mount } from 'svelte';\nimport App from './App.svelte';\nmount(App, { target: document.getElementById('root')! });\n`,
+            'src/App.svelte': `<h1 class="marker">${MARKER_BEFORE}</h1>\n`,
+        },
+    },
+    {
+        name: 'solid',
+        deps: { 'solid-js': '1.9.15' },
+        hmrFile: 'src/App.tsx',
+        config: `import { defineConfig } from 'lunx';\nexport default defineConfig({ framework: 'solid' });\n`,
+        files: {
+            'index.html': html('src/main.tsx'),
+            'src/index.css': SHARED_CSS,
+            'src/main.tsx': `import './index.css';\nimport { render } from 'solid-js/web';\nimport App from './App';\nrender(() => <App />, document.getElementById('root')!);\n`,
+            'src/App.tsx': `export default function App() {\n  return <h1 class="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+        },
+    },
+    {
+        name: 'lit',
+        deps: { lit: '3.3.3' },
+        hmrFile: 'src/app-root.ts',
+        files: {
+            'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root"><app-root></app-root></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport './app-root';\n`,
+            'src/app-root.ts': `import { LitElement, html, css } from 'lit';\n\nexport class AppRoot extends LitElement {\n  static styles = css\`h1 { color: rgb(0, 187, 119); font-weight: 700; }\`;\n  render() { return html\`<h1 class="marker">${MARKER_BEFORE}</h1>\`; }\n}\ncustomElements.define('app-root', AppRoot);\n`,
+        },
+    },
+];
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function freePort() {
+    return new Promise((resolve, reject) => {
+        const srv = net.createServer();
+        srv.on('error', reject);
+        srv.listen(0, '127.0.0.1', () => {
+            const { port } = srv.address();
+            srv.close(() => resolve(port));
+        });
+    });
+}
+
+async function scaffold(framework, root) {
+    await fsp.mkdir(path.join(root, 'src'), { recursive: true });
+    for (const [rel, content] of Object.entries(framework.files)) {
+        const target = path.join(root, rel);
+        await fsp.mkdir(path.dirname(target), { recursive: true });
+        await fsp.writeFile(target, content);
+    }
+    if (framework.config) await fsp.writeFile(path.join(root, 'lunx.config.ts'), framework.config);
+    await fsp.writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({ name: `lunx-matrix-${framework.name}`, private: true, type: 'module', dependencies: framework.deps }, null, 2),
+    );
+    // Link the repo's node_modules so the app resolves its framework without
+    // a per-app install.
+    const link = path.join(root, 'node_modules');
+    if (!fs.existsSync(link)) {
+        try {
+            fs.symlinkSync(path.join(REPO, 'node_modules'), link, 'junction');
+        } catch {
+            // Fall back to a directory junction failure being non-fatal; the
+            // dev server also resolves from the repo root.
+        }
+    }
+}
+
+function startProcess(commandArgs, cwd, readyPattern, timeoutMs = 90_000) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, commandArgs, {
+            cwd,
+            env: { ...process.env, NO_COLOR: '1', LUNX_QUIET: '' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let output = '';
+        const timer = setTimeout(() => {
+            child.kill();
+            reject(new Error(`timeout waiting for "${readyPattern}"\n${output.slice(-1500)}`));
+        }, timeoutMs);
+
+        const onChunk = (chunk) => {
+            output += chunk.toString();
+            if (output.includes(readyPattern)) {
+                clearTimeout(timer);
+                resolve({ child, output: () => output });
+            }
+        };
+        child.stdout.on('data', onChunk);
+        child.stderr.on('data', onChunk);
+        child.on('error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+        child.on('exit', (code) => {
+            if (!output.includes(readyPattern)) {
+                clearTimeout(timer);
+                reject(new Error(`process exited (${code}) before ready\n${output.slice(-1500)}`));
+            }
+        });
+    });
+}
+
+/** Static file server for the production `dist/`, so `build` output is checked too. */
+function serveDist(dir, port) {
+    const types = {
+        '.html': 'text/html',
+        '.js': 'text/javascript',
+        '.mjs': 'text/javascript',
+        '.css': 'text/css',
+        '.json': 'application/json',
+        '.svg': 'image/svg+xml',
+    };
+    const server = http.createServer((req, res) => {
+        const url = decodeURIComponent((req.url || '/').split('?')[0]);
+        let file = path.join(dir, url === '/' ? 'index.html' : url);
+        if (!file.startsWith(dir)) {
+            res.writeHead(403).end();
+            return;
+        }
+        if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dir, 'index.html');
+        if (!fs.existsSync(file)) {
+            res.writeHead(404).end('not found');
+            return;
+        }
+        res.writeHead(200, { 'content-type': types[path.extname(file)] ?? 'application/octet-stream' });
+        fs.createReadStream(file).pipe(res);
+    });
+    return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
+}
+
+function run(commandArgs, cwd, timeoutMs = 180_000) {
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, commandArgs, {
+            cwd,
+            env: { ...process.env, NO_COLOR: '1' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let output = '';
+        const timer = setTimeout(() => {
+            child.kill();
+            resolve({ code: -1, output: `${output}\n[timeout]` });
+        }, timeoutMs);
+        child.stdout.on('data', (c) => (output += c));
+        child.stderr.on('data', (c) => (output += c));
+        child.on('exit', (code) => {
+            clearTimeout(timer);
+            resolve({ code, output });
+        });
+    });
+}
+
+const tsxLoader = ['--import', 'tsx'];
+
+// ── The matrix ──────────────────────────────────────────────────────────────
+
+const selected = only ? FRAMEWORKS.filter((f) => only.includes(f.name)) : FRAMEWORKS;
+const results = [];
+const browser = await chromium.launch({ headless: !headed });
+
+for (const framework of selected) {
+    const result = {
+        framework: framework.name,
+        dev: 'skip',
+        css: 'skip',
+        consoleClean: 'skip',
+        hmr: 'skip',
+        build: 'skip',
+        preview: 'skip',
+        bootMs: null,
+        paintMs: null,
+        buildMs: null,
+        notes: [],
+    };
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), `lunx-matrix-${framework.name}-`));
+    let devProcess = null;
+    let distServer = null;
+    const page = await browser.newPage();
+    const consoleErrors = [];
+    page.on('console', (msg) => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text().slice(0, 200));
+    });
+    page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message.slice(0, 200)}`));
+
+    try {
+        await scaffold(framework, root);
+        const port = await freePort();
+
+        // 1. dev server boots
+        const bootStart = Date.now();
+        devProcess = await startProcess([...tsxLoader, CLI, 'dev', '--root', root, '--port', String(port)], REPO, 'ready in');
+        result.bootMs = Date.now() - bootStart;
+
+        // 2. the app mounts and renders
+        const paintStart = Date.now();
+        await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await page.waitForFunction(
+            (text) => document.body.innerText.includes(text) || Boolean(document.querySelector('app-root')?.shadowRoot?.textContent?.includes(text)),
+            MARKER_BEFORE,
+            { timeout: 30_000 },
+        );
+        result.paintMs = Date.now() - paintStart;
+        result.dev = 'pass';
+
+        // 3. CSS was processed and applied
+        const colour = await page.evaluate(() => {
+            const el = document.querySelector('.marker') ?? document.querySelector('app-root')?.shadowRoot?.querySelector('h1');
+            return el ? getComputedStyle(el).color : null;
+        });
+        result.css = colour === 'rgb(0, 187, 119)' ? 'pass' : 'fail';
+        if (result.css === 'fail') result.notes.push(`marker colour was ${colour}`);
+
+        // 4. no console errors during a clean load
+        result.consoleClean = consoleErrors.length === 0 ? 'pass' : 'fail';
+        if (consoleErrors.length > 0) result.notes.push(`console: ${consoleErrors[0]}`);
+
+        // 5. HMR: edit a source file, expect the browser to show the new text
+        const hmrPath = path.join(root, framework.hmrFile);
+        const before = await fsp.readFile(hmrPath, 'utf8');
+        await fsp.writeFile(hmrPath, before.replace(MARKER_BEFORE, MARKER_AFTER));
+        try {
+            await page.waitForFunction(
+                (text) => document.body.innerText.includes(text) || Boolean(document.querySelector('app-root')?.shadowRoot?.textContent?.includes(text)),
+                MARKER_AFTER,
+                { timeout: 20_000 },
+            );
+            result.hmr = 'pass';
+        } catch {
+            result.hmr = 'fail';
+            result.notes.push('edit did not reach the browser within 20s');
+        }
+
+        devProcess.child.kill();
+        devProcess = null;
+
+        // 6. production build
+        const buildStart = Date.now();
+        const build = await run([...tsxLoader, CLI, 'build', '--root', root], REPO);
+        result.buildMs = Date.now() - buildStart;
+        const distDir = path.join(root, 'dist');
+        const built = build.code === 0 && fs.existsSync(path.join(distDir, 'index.html'));
+        result.build = built ? 'pass' : 'fail';
+        if (!built) result.notes.push(`build exit ${build.code}: ${build.output.trim().split('\n').slice(-2).join(' | ').slice(0, 200)}`);
+
+        // 7. the built output renders the same thing
+        if (built) {
+            const previewPort = await freePort();
+            distServer = await serveDist(distDir, previewPort);
+            const previewErrors = [];
+            const previewPage = await browser.newPage();
+            previewPage.on('pageerror', (err) => previewErrors.push(err.message.slice(0, 160)));
+            try {
+                await previewPage.goto(`http://127.0.0.1:${previewPort}/`, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+                await previewPage.waitForFunction(
+                    (text) => document.body.innerText.includes(text) || Boolean(document.querySelector('app-root')?.shadowRoot?.textContent?.includes(text)),
+                    MARKER_AFTER,
+                    { timeout: 20_000 },
+                );
+                result.preview = previewErrors.length === 0 ? 'pass' : 'fail';
+                if (previewErrors.length > 0) result.notes.push(`preview: ${previewErrors[0]}`);
+            } catch {
+                result.preview = 'fail';
+                result.notes.push('built output did not render the marker');
+            }
+            await previewPage.close();
+        }
+    } catch (err) {
+        result.notes.push(String(err.message).split('\n')[0].slice(0, 220));
+        if (result.dev === 'skip') result.dev = 'fail';
+        for (const e of consoleErrors.slice(0, 2)) result.notes.push(`console: ${e}`);
+        try {
+            const body = await page.evaluate(() => document.body.innerHTML.slice(0, 220));
+            result.notes.push(`body: ${body.replace(/\s+/g, ' ')}`);
+        } catch {
+            /* page may already be gone */
+        }
+    } finally {
+        devProcess?.child.kill();
+        distServer?.close();
+        await page.close();
+        if (!keepTemp) await fsp.rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+
+    results.push(result);
+    const line = [
+        result.framework.padEnd(11),
+        `dev:${result.dev}`.padEnd(10),
+        `css:${result.css}`.padEnd(10),
+        `console:${result.consoleClean}`.padEnd(14),
+        `hmr:${result.hmr}`.padEnd(10),
+        `build:${result.build}`.padEnd(12),
+        `preview:${result.preview}`.padEnd(14),
+        result.bootMs !== null ? `boot ${result.bootMs}ms` : '',
+    ].join(' ');
+    console.log(line);
+    for (const note of result.notes) console.log(`            ↳ ${note}`);
+}
+
+await browser.close();
+
+// ── Report ──────────────────────────────────────────────────────────────────
+
+const checks = ['dev', 'css', 'consoleClean', 'hmr', 'build', 'preview'];
+const total = results.length * checks.length;
+const passed = results.reduce((n, r) => n + checks.filter((c) => r[c] === 'pass').length, 0);
+const failed = results.reduce((n, r) => n + checks.filter((c) => r[c] === 'fail').length, 0);
+
+console.log(`\n${passed}/${total} checks passed (${failed} failed, ${total - passed - failed} skipped)`);
+
+const reportPath = path.join(REPO, 'reports', 'BROWSER_MATRIX.json');
+await fsp.mkdir(path.dirname(reportPath), { recursive: true });
+await fsp.writeFile(reportPath, JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2));
+console.log(`report: ${path.relative(REPO, reportPath)}`);
+
+process.exit(failed === 0 ? 0 : 1);

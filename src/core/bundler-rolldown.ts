@@ -6,7 +6,23 @@
  * Delivers 1.8x - 2x faster production builds compared to esbuild/Rollup.
  */
 
-import { rolldown, RolldownOptions, OutputOptions } from 'rolldown';
+// Rolldown is an optional accelerator, not a dependency of lunx, so it is
+// loaded on demand: a static import took this whole module down with
+// ERR_MODULE_NOT_FOUND wherever it is not installed.
+import type { RolldownOptions, OutputOptions } from 'rolldown';
+
+async function loadRolldown() {
+    try {
+        return (await import('rolldown')).rolldown;
+    } catch {
+        throw new Error(
+            [
+                'The Rolldown bundler is not installed.',
+                '  Install it with:  npm i -D rolldown',
+            ].join(String.fromCharCode(10))
+        );
+    }
+}
 import path from 'path';
 import fs from 'fs/promises';
 import { log } from '../utils/logger.js';
@@ -77,6 +93,7 @@ export class RolldownBundler {
             };
 
             // Create bundle
+            const rolldown = await loadRolldown();
             const builder = await rolldown(inputOptions);
 
             // Generate output

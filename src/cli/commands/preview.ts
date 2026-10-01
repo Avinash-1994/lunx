@@ -8,6 +8,11 @@ const require = createRequire(import.meta.url);
 export default {
   options: (yargs: any) => {
     return yargs
+      .option('root', {
+        alias: 'r',
+        type: 'string',
+        description: 'Project root directory (defaults to the current directory)'
+      })
       .option('port', {
         alias: 'p',
         type: 'number',
@@ -33,12 +38,15 @@ export default {
   handler: async (args: any) => {
     const { preview } = await import('../../commands/preview.js');
 
+    const path = await import('path');
+    const root = args.root ? path.resolve(process.cwd(), args.root) : process.cwd();
+
     // Read outDir from config if not provided via CLI arg
     let outDir = args.outDir;
     if (!outDir) {
       try {
         const { loadConfig } = await import('../../config/index.js');
-        const config = await loadConfig(process.cwd());
+        const config = await loadConfig(root);
         outDir = (config as any).outDir ?? 'dist';
       } catch {
         outDir = 'dist';
@@ -49,7 +57,7 @@ export default {
       port: args.port,
       host: args.host,
       open: args.open,
-      outDir,
+      outDir: path.resolve(root, outDir),
     });
   }
 };

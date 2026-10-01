@@ -3,21 +3,16 @@
 // We attempt to load it at runtime and fall back to Node's built-in http+ws
 // on Windows / macOS (or in any environment where the native binary is absent).
 
-import { IncomingMessage, ServerResponse } from 'http';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { Socket } from 'net';
 import { EventEmitter } from 'events';
+import { WebSocketServer } from '../internal/ws.js';
+import { tryLoadUWS } from '../internal/uws.js';
 
-// Attempt to load uWebSockets.js at runtime — graceful fallback when unavailable
-// (Windows, macOS, or any CI environment that doesn't have the Linux .node binary)
-let uWS: any = null;
-try {
-    // createRequire is needed because uWebSockets.js is a CJS package
-    const { createRequire } = await import('module');
-    const req = createRequire(import.meta.url);
-    uWS = req('uWebSockets.js');
-} catch {
-    // uWebSockets.js not available — will use http+ws fallback below
-}
+// uWebSockets.js is optional and not declared as a dependency (it is a git-only
+// package). When the user has installed it we take the fast path; otherwise the
+// node:http + internal WebSocket fallback below is used on every platform.
+const uWS: any = tryLoadUWS();
 
 /**
  * Creates a server using uWebSockets.js when available (Linux, high-perf path),
@@ -188,9 +183,6 @@ export function createUWSServer(httpsOptions?: any) {
 // ── Node http + ws fallback (Windows / macOS / CI without uWebSockets.js) ────
 // Returns an object with the same interface as the uWS path above.
 function createNodeFallbackServer(_httpsOptions?: any) {
-    const { createServer } = require('http') as typeof import('http');
-    const { WebSocketServer } = require('ws') as typeof import('ws');
-
     const connectMiddlewares: any[] = [];
     const wssEmitter = new EventEmitter() as any;
     wssEmitter.clients = new Set();

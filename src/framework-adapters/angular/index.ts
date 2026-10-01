@@ -2,7 +2,7 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
-import Database from 'better-sqlite3';
+import { CacheStore } from '../../internal/store.js';
 
 const require = createRequire(import.meta.url);
 
@@ -12,30 +12,12 @@ export interface AngularAdapterOptions {
 }
 
 export class AngularCompilerAdapter {
-  private cacheDb: Database.Database;
+  private cacheDb: CacheStore<{ code: string; map?: string }>;
   private compilerCli: any;
   
   constructor(private rootPath: string, private options: AngularAdapterOptions = {}) {
-    // Initialize SQLite Cache
-    const cacheDir = path.join(this.rootPath, '.lunx');
-    try {
-      // Create cache dir if it doesn't exist. In real world we use fs.mkdirSync
-      import('fs').then(fs => {
-        if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-      });
-      this.cacheDb = new Database(path.join(cacheDir, 'angular-cache.db'));
-      this.cacheDb.exec(`
-        CREATE TABLE IF NOT EXISTS ng_cache (
-          hash TEXT PRIMARY KEY,
-          code TEXT,
-          map TEXT,
-          timestamp INTEGER
-        )
-      `);
-    } catch (e) {
-      // Fallback to in-memory if DB fails
-      this.cacheDb = new Database(':memory:');
-    }
+    // Content-addressed compile cache on disk; creates its own directory lazily.
+    this.cacheDb = new CacheStore(path.join(this.rootPath, '.lunx', 'angular-cache'));
 
     // Try resolving @angular/compiler-cli
     const compilerInitStart = performance.now();
@@ -53,19 +35,11 @@ export class AngularCompilerAdapter {
   }
 
   private getCache(hash: string): { code: string, map?: string } | null {
-    try {
-      const stmt = this.cacheDb.prepare('SELECT code, map FROM ng_cache WHERE hash = ?');
-      const row = stmt.get(hash) as any;
-      if (row) return { code: row.code, map: row.map };
-    } catch (e) { /* ignore */ }
-    return null;
+    return this.cacheDb.get(hash);
   }
 
   private setCache(hash: string, code: string, map?: string) {
-    try {
-      const stmt = this.cacheDb.prepare('INSERT OR REPLACE INTO ng_cache (hash, code, map, timestamp) VALUES (?, ?, ?, ?)');
-      stmt.run(hash, code, map || '', Date.now());
-    } catch (e) { /* ignore */ }
+    this.cacheDb.set(hash, { code, map });
   }
 
   private hashSource(source: string, id: string): string {

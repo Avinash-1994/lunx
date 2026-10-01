@@ -1,3 +1,10 @@
+/**
+ * `fetch` accessor.
+ *
+ * Node >= 20 (our declared engine floor) always ships a global fetch, so the
+ * former `node-fetch` fallback was dead weight in the dependency tree.
+ */
+
 let cachedFetch: typeof fetch | null = null;
 
 export async function getFetch(): Promise<typeof fetch> {
@@ -8,19 +15,7 @@ export async function getFetch(): Promise<typeof fetch> {
     return cachedFetch;
   }
 
-  try {
-    const nodeFetch = await import('node-fetch');
-    const fetchFn = (nodeFetch.default ?? nodeFetch) as typeof fetch;
-
-    if (typeof fetchFn !== 'function') {
-      throw new Error('node-fetch did not export a fetch function');
-    }
-
-    cachedFetch = fetchFn;
-    return cachedFetch;
-  } catch (error) {
-    throw new Error(
-      'No fetch implementation available. Install node-fetch or run on Node 18+ with global fetch support.'
-    );
-  }
+  throw new Error(
+    `No global fetch available on Node ${process.versions.node}. Lunx requires Node >= 20.`
+  );
 }

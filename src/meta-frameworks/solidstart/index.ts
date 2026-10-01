@@ -17,7 +17,23 @@
 import * as path from 'path';
 import { Readable } from 'stream';
 import * as fs from 'fs';
-import { globSync } from 'glob';
+/**
+ * `glob` was imported but never declared as a dependency, so this adapter
+ * failed to load in a real install. Two call sites, both "every .js under a
+ * directory", so a local walk replaces the package outright.
+ */
+function globJsFiles(cwd: string): string[] {
+    const out: string[] = [];
+    const walk = (dir: string, prefix: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+            if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
+            else if (entry.name.endsWith('.js')) out.push(rel);
+        }
+    };
+    walk(cwd, '');
+    return out;
+}
 import { registry } from '@lunx/adapter-core';
 
 // ─── Route Scanner ────────────────────────────────────────────────────────────
@@ -327,8 +343,8 @@ export class SolidStartAdapter {
     const outPath = path.join(this.rootPath, 'build_output');
     
     // Check both potential output directories for .js files
-    const jsFilesDist = fs.existsSync(distPath) ? globSync('**/*.js', { cwd: distPath }) : [];
-    const jsFilesOut = fs.existsSync(outPath) ? globSync('**/*.js', { cwd: outPath }) : [];
+    const jsFilesDist = fs.existsSync(distPath) ? globJsFiles(distPath) : [];
+    const jsFilesOut = fs.existsSync(outPath) ? globJsFiles(outPath) : [];
     
     const jsFilesCount = jsFilesDist.length + jsFilesOut.length;
     

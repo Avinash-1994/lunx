@@ -4,9 +4,9 @@
  * Day 19: tRPC Dashboard Lock
  */
 
-import { initTRPC } from '@trpc/server';
+import { initTRPC } from '../../internal/rpc.js';
 import { MetricsCollector } from '../metrics.js';
-import { z } from 'zod';
+import { z } from '../../internal/schema.js';
 
 const t = initTRPC.create();
 

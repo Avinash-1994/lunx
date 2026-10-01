@@ -32,6 +32,15 @@ export async function runInfo() {
     framework = config.framework ?? 'auto-detect';
   } catch {}
 
+  // Report what is actually loaded. This printed the package version plus
+  // "(rust-notify)" unconditionally, so a bug report from a machine running the
+  // JS fallback looked identical to one running the Rust engine.
+  let nativeInfo = 'not installed — JS fallback';
+  try {
+    const mod = await import('../native/index.js');
+    if (mod.engineUsed === 'native') nativeInfo = `${pkg.version} (rust)`;
+  } catch {}
+
   const cacheDb = path.join(cwd, '.lunx/cache/cache.db');
   let cacheSize = 'not found';
   try {
@@ -45,7 +54,7 @@ export async function runInfo() {
   OS:              ${platform}
   Package manager: ${pm}
   Framework:       ${framework}
-  lunx_native:    ${pkg.version} (rust-notify)
+  lunx_native:    ${nativeInfo}
   Cache:           .lunx/cache/cache.db (${cacheSize})
 
   Copy this when filing a bug report:

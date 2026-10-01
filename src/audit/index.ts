@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer';
+import { loadPuppeteer } from './puppeteer.js';
 import path from 'path';
 import { AccessibilityAudit } from './a11y.js';
 import { PerformanceAudit } from './perf.js';
@@ -24,7 +24,7 @@ export class AuditEngine {
 
         console.log(`ℹ [AUDIT] Launching browser for ${targetUrl}...`);
 
-        const browser = await puppeteer.launch({
+        const browser = await (await loadPuppeteer()).launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'] // Critical for CI environments
         });

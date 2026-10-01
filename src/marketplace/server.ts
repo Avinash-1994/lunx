@@ -5,8 +5,8 @@
  * Day 10: Marketplace MVP Lock
  */
 
-import { initTRPC, TRPCError } from '@trpc/server';
-import { z } from 'zod';
+import { initTRPC, TRPCError } from '../internal/rpc.js';
+import { z } from '../internal/schema.js';
 import { marketplaceDB } from './db.js';
 import { PluginSigner } from '../plugins/signer.js';
 

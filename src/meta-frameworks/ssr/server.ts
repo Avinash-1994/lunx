@@ -3,7 +3,7 @@
  * Universal server-side rendering for Next.js, Nuxt, and Remix
  */
 
-import uWS from 'uWebSockets.js';
+import { loadUWS, type HttpRequest as UWSHttpRequest, type HttpResponse as UWSHttpResponse, type TemplatedApp as UWSTemplatedApp } from '../../internal/uws.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { Route, RouteMatch } from '../types.js';
@@ -13,10 +13,21 @@ import { RemixRouter } from '../remix/router.js';
 import { log } from '../../utils/logger.js';
 import { ReactSSRRenderer } from './react-renderer.js';
 import { VueSSRRenderer } from './vue-renderer.js';
-import * as React from 'react';
 
-// Polyfill React for SSR context where transforms might expect global React
-(global as any).React = React;
+/**
+ * Some transformed output expects a global `React`. It is the user's
+ * dependency, so resolve it lazily and stay silent when the project is not a
+ * React project.
+ */
+async function polyfillGlobalReact(): Promise<void> {
+    if ((global as any).React) return;
+    try {
+        const react = await import('react');
+        (global as any).React = (react as any).default ?? react;
+    } catch {
+        // Not a React project; nothing to polyfill.
+    }
+}
 
 export interface SSRConfig {
     root: string;
@@ -37,7 +48,7 @@ export interface RenderContext {
 }
 
 // Minimal mock to handle Next/Remix server functions that expect Express req/res
-function createMockReq(res: uWS.HttpResponse, req: uWS.HttpRequest): any {
+function createMockReq(res: UWSHttpResponse, req: UWSHttpRequest): any {
     let url = req.getUrl();
     if (req.getQuery().length > 0) url += '?' + req.getQuery();
     
@@ -55,7 +66,7 @@ function createMockReq(res: uWS.HttpResponse, req: uWS.HttpRequest): any {
     };
 }
 
-function createMockRes(res: uWS.HttpResponse): any {
+function createMockRes(res: UWSHttpResponse): any {
     // uWebSockets.js handles backpressure internally, but we need an abstraction
     let writeStatus = 200;
     const writeHeaders: Record<string, string> = {};
@@ -110,13 +121,13 @@ function createMockRes(res: uWS.HttpResponse): any {
 }
 
 export class SSRServer {
-    private app: uWS.TemplatedApp;
+    private app: UWSTemplatedApp;
     private config: SSRConfig;
     private router: NextJsRouter | NuxtRouter | RemixRouter;
 
     constructor(config: SSRConfig) {
         this.config = config;
-        this.app = uWS.App();
+        this.app = loadUWS().App();
 
         // Initialize framework-specific router
         this.router = this.createRouter();
@@ -346,6 +357,7 @@ export class SSRServer {
     }
 
     private async renderReact(Component: any, context: RenderContext): Promise<string> {
+        await polyfillGlobalReact();
         const renderer = new ReactSSRRenderer();
         return await renderer.render(Component, context);
     }

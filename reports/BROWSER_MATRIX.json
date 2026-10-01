@@ -1,0 +1,102 @@
+{
+  "generatedAt": "2026-10-01T10:02:57.665Z",
+  "results": [
+    {
+      "framework": "vanilla-ts",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "fail",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 413,
+      "paintMs": 791,
+      "buildMs": 711,
+      "notes": [
+        "edit did not reach the browser within 20s"
+      ]
+    },
+    {
+      "framework": "react",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 315,
+      "paintMs": 1283,
+      "buildMs": 8085,
+      "notes": []
+    },
+    {
+      "framework": "preact",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 780,
+      "paintMs": 1497,
+      "buildMs": 3086,
+      "notes": []
+    },
+    {
+      "framework": "vue",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 534,
+      "paintMs": 2293,
+      "buildMs": 5101,
+      "notes": []
+    },
+    {
+      "framework": "svelte",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "fail",
+      "bootMs": 342,
+      "paintMs": 9207,
+      "buildMs": 23541,
+      "notes": [
+        "built output did not render the marker"
+      ]
+    },
+    {
+      "framework": "solid",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "fail",
+      "bootMs": 438,
+      "paintMs": 542,
+      "buildMs": 1713,
+      "notes": [
+        "built output did not render the marker"
+      ]
+    },
+    {
+      "framework": "lit",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 422,
+      "paintMs": 1204,
+      "buildMs": 1566,
+      "notes": []
+    }
+  ]
+}

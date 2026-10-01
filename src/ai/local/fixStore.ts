@@ -1,75 +1,78 @@
-import Database from 'better-sqlite3';
 import path from 'path';
-import fs from 'fs';
+import { RecordStore } from '../../internal/store.js';
 import { LearnedError } from '../core/errorMemory.js';
 import { FixAction } from '../healer/fixer.js';
 
+interface ErrorRow {
+    id: string;
+    signature: string;
+    type: string;
+    context: string;
+    timestamp: number;
+}
+
+interface FixRow {
+    id: string;
+    error_id: string;
+    recipe: string;
+    success_count: number;
+    fail_count: number;
+    last_used: number;
+}
+
+/**
+ * Persistent store for learned errors and the fixes that resolved them.
+ *
+ * Backed by two small JSON collections rather than SQLite -- the data is a few
+ * hundred rows and never needed joins, so the native addon was pure install
+ * cost. See `src/internal/store.ts`.
+ */
 export class FixStore {
-    private db: Database.Database;
+    private readonly errors: RecordStore<ErrorRow>;
+    private readonly fixes: RecordStore<FixRow>;
 
     constructor(rootDir: string) {
         const dbDir = path.join(rootDir, '.lunx');
-        if (!fs.existsSync(dbDir)) {
-            fs.mkdirSync(dbDir, { recursive: true });
-        }
-        this.db = new Database(path.join(dbDir, 'ai-fixes.db'));
-        this.init();
-    }
-
-    private init() {
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS errors (
-                id TEXT PRIMARY KEY,
-                signature TEXT,
-                type TEXT,
-                context TEXT,
-                timestamp INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS fixes (
-                id TEXT PRIMARY KEY,
-                error_id TEXT,
-                recipe TEXT,
-                success_count INTEGER DEFAULT 0,
-                fail_count INTEGER DEFAULT 0,
-                last_used INTEGER,
-                FOREIGN KEY(error_id) REFERENCES errors(id)
-            );
-        `);
+        this.errors = new RecordStore<ErrorRow>(path.join(dbDir, 'ai-errors.json'));
+        this.fixes = new RecordStore<FixRow>(path.join(dbDir, 'ai-fixes.json'));
     }
 
     saveError(error: LearnedError) {
-        const stmt = this.db.prepare(`
-            INSERT OR IGNORE INTO errors (id, signature, type, context, timestamp)
-            VALUES (?, ?, ?, ?, ?)
-        `);
-        stmt.run(error.id, error.signature, error.type, JSON.stringify(error.context), error.timestamp);
+        // INSERT OR IGNORE: an error we have already learned keeps its first record.
+        if (this.errors.has(error.id)) return;
+        this.errors.put({
+            id: error.id,
+            signature: error.signature,
+            type: error.type,
+            context: JSON.stringify(error.context),
+            timestamp: error.timestamp,
+        });
     }
 
     saveFix(errorId: string, fix: FixAction) {
         const fixId = this.generateFixId(errorId, fix);
-        const stmt = this.db.prepare(`
-            INSERT OR IGNORE INTO fixes (id, error_id, recipe, last_used)
-            VALUES (?, ?, ?, ?)
-        `);
-        stmt.run(fixId, errorId, JSON.stringify(fix), Date.now());
+        if (this.fixes.has(fixId)) return fixId;
+        this.fixes.put({
+            id: fixId,
+            error_id: errorId,
+            recipe: JSON.stringify(fix),
+            success_count: 0,
+            fail_count: 0,
+            last_used: Date.now(),
+        });
         return fixId;
     }
 
     findFixes(errorId: string): FixAction[] {
-        // Score = (success / (success + fail + 1)) * log(last_used)
-        // This favors successful fixes, but also gives a slight boost to recently used ones
-        const stmt = this.db.prepare(`
-            SELECT recipe, success_count, fail_count 
-            FROM fixes 
-            WHERE error_id = ? 
-        `);
-        const rows = stmt.all(errorId) as { recipe: string, success_count: number, fail_count: number }[];
-
-        return rows.sort((a, b) => {
-            const scoreA = this.calculateScore(a.success_count, a.fail_count);
-            const scoreB = this.calculateScore(b.success_count, b.fail_count);
-            return scoreB - scoreA;
-        }).map(row => JSON.parse(row.recipe));
+        // Score = success / (success + fail); favours fixes that have worked.
+        return this.fixes
+            .find((row) => row.error_id === errorId)
+            .sort(
+                (a, b) =>
+                    this.calculateScore(b.success_count, b.fail_count) -
+                    this.calculateScore(a.success_count, a.fail_count),
+            )
+            .map((row) => JSON.parse(row.recipe) as FixAction);
     }
 
     private calculateScore(success: number, fail: number): number {
@@ -79,14 +82,14 @@ export class FixStore {
     }
 
     recordOutcome(fixId: string, success: boolean) {
-        const stmt = this.db.prepare(`
-            UPDATE fixes 
-            SET success_count = success_count + ?,
-                fail_count = fail_count + ?,
-                last_used = ?
-            WHERE id = ?
-        `);
-        stmt.run(success ? 1 : 0, success ? 0 : 1, Date.now(), fixId);
+        const row = this.fixes.get(fixId);
+        if (!row) return;
+        this.fixes.put({
+            ...row,
+            success_count: row.success_count + (success ? 1 : 0),
+            fail_count: row.fail_count + (success ? 0 : 1),
+            last_used: Date.now(),
+        });
     }
 
     private generateFixId(errorId: string, fix: FixAction): string {
@@ -102,19 +105,15 @@ export class FixStore {
     }
 
     getStats() {
-        const errorCount = this.db.prepare('SELECT COUNT(*) as c FROM errors').get() as { c: number };
-        const fixCount = this.db.prepare('SELECT COUNT(*) as c FROM fixes').get() as { c: number };
-        const successCount = this.db.prepare('SELECT SUM(success_count) as c FROM fixes').get() as { c: number };
-
         return {
-            errors: errorCount.c,
-            fixes: fixCount.c,
-            successfulFixes: successCount.c || 0
+            errors: this.errors.count(),
+            fixes: this.fixes.count(),
+            successfulFixes: this.fixes.sum('success_count'),
         };
     }
 
     deleteError(errorId: string) {
-        this.db.prepare('DELETE FROM fixes WHERE error_id = ?').run(errorId);
-        this.db.prepare('DELETE FROM errors WHERE id = ?').run(errorId);
+        this.fixes.deleteWhere((row) => row.error_id === errorId);
+        this.errors.delete(errorId);
     }
 }

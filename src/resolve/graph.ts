@@ -3,7 +3,7 @@ const _require = createRequire(import.meta.url);
 import { canonicalHash } from '../core/engine/hash.js';
 import { normalizePath, generateModuleId } from './utils.js';
 import fs from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import path from 'path';
 import { PluginManager } from '../core/plugins/manager.js';
 import { scanImports } from '../native/index.js';
@@ -187,22 +187,25 @@ export class DependencyGraph {
       // ignore
     }
 
-    // Capture standard import/export strings
-    const matches = content.matchAll(/(?:import|export)\s+(?:.*?\s+from\s+)?['"](.*?)['"]/g);
-    for (const m of matches) {
-      const s = m[1];
-      if (s && !specifiers.includes(s) && !s.includes(' ') && s.length < 500) {
-        specifiers.push(s);
-      }
-    }
-
-    const sideEffectMatches = content.matchAll(/import\s+['"](.*?)['"]/g);
-    for (const m of sideEffectMatches) {
-      const s = m[1];
-      if (s && !specifiers.includes(s) && !s.includes(' ') && s.length < 500) {
-        specifiers.push(s);
-      }
-    }
+    // Minified ESM has no whitespace after the keyword -- `import"lit-html";`
+    // and `export*from"./x.js"` are both legal. Patterns that required
+    // `import\s+` silently saw no imports at all in published packages, so
+    // their dependencies never reached the graph and the bundle shipped
+    // unresolved bare specifiers.
+    const discoveredSpecifiers: string[] = [...specifiers];
+    const addSpecifier = (value: string | undefined) => {
+      if (!value || value.includes(' ') || value.length >= 500) return;
+      if (!discoveredSpecifiers.includes(value)) discoveredSpecifiers.push(value);
+    };
+    // import x from"y" / export*from"y" / export{a}from"y"
+    for (const m of content.matchAll(/from\s*['"]([^'"]+)['"]/g)) addSpecifier(m[1]);
+    // side-effect: import"y"
+    for (const m of content.matchAll(/import\s*['"]([^'"]+)['"]/g)) addSpecifier(m[1]);
+    // dynamic: import("y")
+    for (const m of content.matchAll(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) addSpecifier(m[1]);
+    // cjs: require("y")
+    for (const m of content.matchAll(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) addSpecifier(m[1]);
+    specifiers = discoveredSpecifiers;
 
     const results: { original: string, resolved: string, kind: string }[] = [];
     for (const s of specifiers) {
@@ -252,14 +255,28 @@ export class DependencyGraph {
         if (existsSync(c)) return normalizePath(c);
       }
     }
+    // Package-internal subpath imports (`#client/constants`), declared in the
+    // owning package.json's `imports` field. Svelte and other modern packages
+    // use them internally; unresolved, they reached the bundle verbatim and
+    // threw "Module not found: #client/constants" at runtime.
+    if (specifier.startsWith('#')) {
+      const internal = resolveSubpathImport(specifier, path.dirname(importer));
+      if (internal) return normalizePath(internal);
+      return null;
+    }
+
     // Deep Scan node_modules for framework packages
     if (!specifier.startsWith('./') && !specifier.startsWith('../') && !specifier.startsWith('/')) {
       try {
         const resolved = _require.resolve(specifier, { paths: [path.dirname(importer), process.cwd()] });
         if (resolved) return normalizePath(resolved);
       } catch (e) {
-        // ignore
+        // require.resolve honours the `require` condition only, so any
+        // ESM-only package (lit, svelte, solid-js and most modern libraries)
+        // throws here. Fall through to the exports-map resolver below.
       }
+      const esm = resolveEsmPackage(specifier, path.dirname(importer));
+      if (esm) return normalizePath(esm);
     }
     return null;
   }
@@ -290,4 +307,149 @@ export class DependencyGraph {
     }
     return Array.from(visited);
   }
+}
+
+
+/**
+ * Resolves a bare specifier against a package's `exports` map using the
+ * `import` condition, with `module`/`main` as fallbacks.
+ *
+ * Node's `require.resolve` only ever applies the `require` condition, so it
+ * cannot see into ESM-only packages. Without this, their internal re-exports
+ * (lit -> @lit/reactive-element, lit-html, ...) were silently dropped from the
+ * graph and the produced bundle threw "Module not found" at runtime.
+ */
+function resolveEsmPackage(specifier: string, fromDir: string): string | null {
+    const scoped = specifier.startsWith('@');
+    const parts = specifier.split('/');
+    const pkgName = scoped ? parts.slice(0, 2).join('/') : parts[0]!;
+    const subpath = specifier.slice(pkgName.length) || '.';
+
+    // Walk up looking for node_modules/<pkgName>.
+    let dir = fromDir;
+    let pkgDir: string | null = null;
+    while (true) {
+        const candidate = path.join(dir, 'node_modules', pkgName);
+        if (existsSync(path.join(candidate, 'package.json'))) {
+            pkgDir = candidate;
+            break;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    if (!pkgDir) return null;
+
+    let manifest: any;
+    try {
+        manifest = JSON.parse(readFileSync(path.join(pkgDir, 'package.json'), 'utf-8'));
+    } catch {
+        return null;
+    }
+
+    const key = subpath === '.' ? '.' : `.${subpath.startsWith('/') ? subpath : `/${subpath}`}`;
+    const target = selectExport(manifest.exports, key)
+        ?? (key === '.' ? manifest.module ?? manifest.main : null)
+        ?? (key === '.' ? null : key.slice(2));
+
+    const tryFile = (rel: string | null): string | null => {
+        if (!rel) return null;
+        const abs = path.resolve(pkgDir!, rel);
+        const candidates = [abs, `${abs}.js`, `${abs}.mjs`, path.join(abs, 'index.js'), path.join(abs, 'index.mjs')];
+        for (const candidate of candidates) {
+            if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+        }
+        return null;
+    };
+
+    return tryFile(typeof target === 'string' ? target : null) ?? tryFile(key === '.' ? 'index.js' : null);
+}
+
+/** Picks a file from an `exports` map, preferring browser/import conditions. */
+function selectExport(exportsField: unknown, key: string): string | null {
+    if (!exportsField) return null;
+    if (typeof exportsField === 'string') return key === '.' ? exportsField : null;
+    if (typeof exportsField !== 'object') return null;
+
+    const map = exportsField as Record<string, unknown>;
+    // A conditions-only map (no "." keys) applies to the root export.
+    const isSubpathMap = Object.keys(map).some((k) => k === '.' || k.startsWith('./'));
+    const entry = isSubpathMap ? map[key] : key === '.' ? map : undefined;
+    if (entry === undefined) return null;
+
+    return pickCondition(entry);
+}
+
+function pickCondition(entry: unknown): string | null {
+    if (typeof entry === 'string') return entry;
+    if (Array.isArray(entry)) {
+        for (const item of entry) {
+            const picked = pickCondition(item);
+            if (picked) return picked;
+        }
+        return null;
+    }
+    if (!entry || typeof entry !== 'object') return null;
+
+    const conditions = entry as Record<string, unknown>;
+    // Bundler order: browser code wants the ESM build.
+    for (const condition of ['browser', 'import', 'module', 'development', 'default', 'require', 'node']) {
+        if (condition in conditions) {
+            const picked = pickCondition(conditions[condition]);
+            if (picked) return picked;
+        }
+    }
+    return null;
+}
+
+
+/** Finds the package.json that owns `fromDir`, walking up to the filesystem root. */
+function findOwningPackage(fromDir: string): { dir: string; manifest: any } | null {
+    let dir = fromDir;
+    while (true) {
+        const candidate = path.join(dir, 'package.json');
+        if (existsSync(candidate)) {
+            try {
+                return { dir, manifest: JSON.parse(readFileSync(candidate, 'utf-8')) };
+            } catch {
+                return null;
+            }
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+}
+
+/** Resolves a `#subpath` import against the owning package's `imports` map. */
+function resolveSubpathImport(specifier: string, fromDir: string): string | null {
+    const owner = findOwningPackage(fromDir);
+    if (!owner?.manifest?.imports) return null;
+
+    const imports = owner.manifest.imports as Record<string, unknown>;
+    let target = pickCondition(imports[specifier]);
+
+    if (!target) {
+        // Wildcard patterns: "#client/*": "./src/internal/client/*.js"
+        for (const [pattern, value] of Object.entries(imports)) {
+            const star = pattern.indexOf('*');
+            if (star === -1) continue;
+            const prefix = pattern.slice(0, star);
+            const suffix = pattern.slice(star + 1);
+            if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix)) continue;
+            const matched = specifier.slice(prefix.length, specifier.length - suffix.length || undefined);
+            const picked = pickCondition(value);
+            if (picked) {
+                target = picked.replace('*', matched);
+                break;
+            }
+        }
+    }
+    if (!target) return null;
+
+    const abs = path.resolve(owner.dir, target);
+    for (const candidate of [abs, `${abs}.js`, `${abs}.mjs`, path.join(abs, 'index.js')]) {
+        if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    }
+    return null;
 }

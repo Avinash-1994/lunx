@@ -66,7 +66,7 @@ export class ConfigWatcher {
 
         // Chokidar fallback
         try {
-            const { default: chokidar } = await import('chokidar');
+            const { default: chokidar } = await import('../internal/watcher.js');
             this.chokidarWatcher = chokidar.watch(configFiles, { ignoreInitial: true });
             this.chokidarWatcher.on('change', (file: string) => {
                 const filename = path.basename(file);

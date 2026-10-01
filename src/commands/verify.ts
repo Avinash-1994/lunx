@@ -10,8 +10,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import kleur from 'kleur';
-import { z } from 'zod';
+import kleur from '../internal/colors.js';
+import { z } from '../internal/schema.js';
 
 export interface VerifyOptions {
     ci?: boolean;
@@ -374,14 +374,12 @@ async function checkCache(options: VerifyOptions): Promise<CheckResult[]> {
         message: 'Cache directory exists'
     });
 
-    // Check cache database
-    const dbPath = path.join(cacheDir, 'build.db');
+    // Check the build cache index
+    const dbPath = path.join(cacheDir, 'build.json');
     if (fs.existsSync(dbPath)) {
         try {
-            // Try to open the database
-            const Database = (await import('better-sqlite3')).default;
-            const db = new Database(dbPath, { readonly: true });
-            db.close();
+            // A readable, parseable index is all the cache needs to be valid.
+            JSON.parse(fs.readFileSync(dbPath, 'utf8'));
 
             checks.push({
                 name: 'Cache Database',

@@ -1,14 +1,18 @@
 
 /**
  * Lunx Marketplace Database
- * Implementation: SQLite (via better-sqlite3) for Local Registry
+ *
+ * Local plugin registry, backed by a JSON record collection rather than
+ * SQLite. The registry holds tens of rows and only ever did lookups by
+ * (name, version) plus a substring search, so the native addon bought nothing.
+ * See `src/internal/store.ts`.
  */
 
-import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import path from 'path';
+import { RecordStore } from '../internal/store.js';
 
-const DB_PATH = path.resolve('.lunx-marketplace.db');
+const DB_PATH = path.resolve('.lunx-marketplace.json');
 const ARTIFACT_ROOT = path.resolve('.lunx-marketplace-artifacts');
 
 export interface PluginRecord {
@@ -24,38 +28,32 @@ export interface PluginRecord {
     created_at: string;
 }
 
+/** Stored shape: the record plus the `name@version` primary key. */
+type PluginRow = PluginRecord & { id: string };
+
+function rowId(name: string, version: string): string {
+    return `${name}@${version}`;
+}
+
+function toRecord(row: PluginRow): PluginRecord {
+    const { id: _id, ...record } = row;
+    return record;
+}
+
+/** Newest first, matching the old `ORDER BY datetime(created_at) DESC, version DESC`. */
+function byNewest(a: PluginRow, b: PluginRow): number {
+    const at = Date.parse(a.created_at);
+    const bt = Date.parse(b.created_at);
+    if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return bt - at;
+    return b.version.localeCompare(a.version, undefined, { numeric: true });
+}
+
 export class MarketplaceDB {
-    private db: Database.Database;
+    private readonly store: RecordStore<PluginRow>;
 
     constructor(dbPath: string = DB_PATH) {
-        this.db = new Database(dbPath);
-        this.init();
-    }
-
-    private init() {
+        this.store = new RecordStore<PluginRow>(dbPath);
         fs.mkdirSync(ARTIFACT_ROOT, { recursive: true });
-
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS plugins (
-                name TEXT NOT NULL,
-                version TEXT NOT NULL,
-                description TEXT,
-                author TEXT NOT NULL,
-                hash TEXT NOT NULL,
-                signature TEXT NOT NULL,
-                public_key TEXT NOT NULL,
-                permissions_json TEXT DEFAULT '{}',
-                artifact_path TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (name, version)
-            )
-        `);
-
-        try {
-            this.db.exec('ALTER TABLE plugins ADD COLUMN artifact_path TEXT');
-        } catch {
-            // Column already exists or SQLite older version; ignore.
-        }
     }
 
     private ensureArtifactDirectory(name: string, version: string) {
@@ -72,36 +70,41 @@ export class MarketplaceDB {
             plugin.artifact_path = artifactPath;
         }
 
-        const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO plugins 
-            (name, version, description, author, hash, signature, public_key, permissions_json, artifact_path)
-            VALUES (@name, @version, @description, @author, @hash, @signature, @public_key, @permissions_json, @artifact_path)
-        `);
-        stmt.run(plugin);
+        this.store.put({
+            ...plugin,
+            // The old schema defaulted created_at to CURRENT_TIMESTAMP.
+            created_at: plugin.created_at || new Date().toISOString(),
+            id: rowId(plugin.name, plugin.version),
+        });
     }
 
     search(query: string): PluginRecord[] {
-        const stmt = this.db.prepare(`
-            SELECT * FROM plugins 
-            WHERE name LIKE @q OR description LIKE @q OR author LIKE @q
-            LIMIT 50
-        `);
-        return stmt.all({ q: `%${query}%` }) as PluginRecord[];
+        const needle = query.toLowerCase();
+        return this.store
+            .find(
+                (row) =>
+                    row.name.toLowerCase().includes(needle) ||
+                    (row.description ?? '').toLowerCase().includes(needle) ||
+                    row.author.toLowerCase().includes(needle),
+            )
+            .slice(0, 50)
+            .map(toRecord);
     }
 
     get(name: string, version?: string): PluginRecord | undefined {
         if (version) {
-            const stmt = this.db.prepare('SELECT * FROM plugins WHERE name = ? AND version = ?');
-            return stmt.get(name, version) as PluginRecord | undefined;
-        } else {
-            const stmt = this.db.prepare('SELECT * FROM plugins WHERE name = ? ORDER BY datetime(created_at) DESC, version DESC LIMIT 1');
-            return stmt.get(name) as PluginRecord | undefined;
+            const row = this.store.get(rowId(name, version));
+            return row ? toRecord(row) : undefined;
         }
+        const newest = this.store.find((row) => row.name === name).sort(byNewest)[0];
+        return newest ? toRecord(newest) : undefined;
     }
 
     listVersions(name: string): PluginRecord[] {
-        const stmt = this.db.prepare('SELECT * FROM plugins WHERE name = ? ORDER BY datetime(created_at) DESC, version DESC');
-        return stmt.all(name) as PluginRecord[];
+        return this.store
+            .find((row) => row.name === name)
+            .sort(byNewest)
+            .map(toRecord);
     }
 
     getArtifact(name: string, version?: string): Buffer | undefined {

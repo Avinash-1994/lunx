@@ -3,7 +3,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
 import { anomalyDetector } from '../security/anomaly.js';
-import type { WebSocketServer, WebSocket } from 'ws';
+import type { WebSocketServer, WebSocket } from '../internal/ws.js';
 import { fileURLToPath } from 'url';
 import { BuildConfig } from '../config/index.js';
 import { log } from '../utils/logger.js';
@@ -214,12 +214,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     const originalLog = console.log;
     console.log = () => { }; // Silence console temporarily
 
-    const dotenvModule = await import('dotenv');
-    const loadEnv = (dotenvModule as any).config || (dotenvModule as any).default?.config;
-    if (loadEnv) {
-      loadEnv({ path: path.join(cfg.root, '.env') });
-      loadEnv({ path: path.join(cfg.root, '.env.local') });
-    }
+    const { config: loadEnv } = await import('../internal/dotenv.js');
+    // .env.local wins over .env, so load it second with override.
+    loadEnv({ path: path.join(cfg.root, '.env') });
+    loadEnv({ path: path.join(cfg.root, '.env.local'), override: true });
 
     console.log = originalLog; // Restore console
   } catch (e) { }
@@ -578,7 +576,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   }
 
   // 2. Setup Proxy
-  const { default: httpProxy } = await import('http-proxy');
+  const { default: httpProxy } = await import('../internal/proxy.js');
   const proxy = httpProxy.createProxyServer({});
 
   proxy.on('error', (err, req, res) => {
@@ -608,9 +606,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         };
       } else {
         log.info('Generating self-signed certificate...', { category: 'server' });
-        const selfsigned = await import('selfsigned');
-        // @ts-ignore
-        const pems = await selfsigned.generate([{ name: 'commonName', value: 'localhost' }], { days: 30 });
+        const { generate } = await import('../internal/self-signed.js');
+        const pems = generate([{ name: 'commonName', value: 'localhost' }], { days: 30 });
         await fs.writeFile(keyPath, pems.private);
         await fs.writeFile(certPath, pems.cert);
         httpsOptions = {
@@ -1369,8 +1366,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       const column = parseInt(urlObj.searchParams.get('column') || '1');
 
       if (file) {
-        const launch = await import('launch-editor');
-        launch.default(file, `${line}:${column}`);
+        const { openInEditor } = await import('../internal/open-editor.js');
+        openInEditor(file, line, column);
         res.writeHead(200);
         res.end('Opened in editor');
       } else {
@@ -1646,8 +1643,13 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs' || ext === '.vue' || ext === '.svelte' || ext === '.astro') {
         let raw = await fs.readFile(filePath, 'utf-8');
 
-        // Native Transform (Caching + Graph) - JS/TS/JSX/TSX via unified loader
-        if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs') {
+        // Native transform fast path for plain JS/TS only.
+        // JSX is deliberately excluded: the universal transformer below knows
+        // the project's framework and picks the right JSX runtime and import
+        // source. Pre-transforming here stripped JSX with SWC's *classic*
+        // default, emitting `React.createElement` with no matching import, so
+        // any component that did not hand-write `import React` died at runtime.
+        if (ext === '.ts' || ext === '.js' || ext === '.mjs') {
           try {
             const transformed = nativeWorker.transformSync(raw, filePath);
             raw = typeof transformed === 'string' ? transformed : (transformed?.code ?? raw);
@@ -1881,8 +1883,17 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     (server as any).requestHandler = requestHandler;
   }
 
-  // WebSocket Server setup directly from uWS shim
+  // WebSocket Server setup.
+  // The uWS shim exposes one as `wsServer`. When we were handed a bare
+  // http.Server (the fast-boot path in devServer.minimal.ts) there is none, so
+  // attach one here -- otherwise nothing answers the HMR upgrade on
+  // /__lunx_hmr and the client retries forever.
   wss = (server as any).wsServer;
+  if (!wss) {
+    const { WebSocketServer } = await import('../internal/ws.js');
+    wss = new WebSocketServer({ server });
+    (server as any).wsServer = wss;
+  }
 
   // Initialize Config Sync Handlers (guard: wss is undefined in SSR preset mode)
   if (wss) setupWssHandlers(wss as any);

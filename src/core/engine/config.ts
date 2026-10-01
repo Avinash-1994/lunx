@@ -84,6 +84,8 @@ function resolveConfig(userConfig: BuildConfig, rootDir: string, mode: BuildMode
         hashing: 'content',
         sourceMaps: sourcemap === 'none' ? false : (sourcemap === undefined ? 'external' : sourcemap),
         minify: userConfig.build?.minify ?? (mode === 'production' || mode === 'build'),
+        globalMinify: userConfig.build?.globalMinify ?? true,
+        compress: userConfig.build?.compress ?? true,
         cssModules: userConfig.build?.cssModules ?? false,
         federation: userConfig.federation,
     };

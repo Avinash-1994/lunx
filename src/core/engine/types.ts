@@ -116,6 +116,10 @@ export interface ResolvedConfig {
     hashing: 'content';
     sourceMaps: boolean | 'inline' | 'external' | 'hidden';
     minify?: boolean;
+    /** Use the SWC whole-bundle minifier instead of esbuild's per-artifact pass. */
+    globalMinify?: boolean;
+    /** Emit precompressed .gz/.br siblings; false disables, object tunes brotli. */
+    compress?: boolean | { brotliQuality?: number };
     cssModules?: boolean;
     federation?: any;
 }

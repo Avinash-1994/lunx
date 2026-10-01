@@ -102,8 +102,39 @@ const __dirname = path.dirname(__filename);
 let native: any;
 let engineUsed: 'native' | 'js' = 'js';
 
-function jsTransformJs(code: string, filename: string, minify: boolean): string {
-    const swc = _require('@swc/core');
+/**
+ * Without the Rust engine, @swc/core compiles every module, so when its native
+ * addon will not load there is nothing left to fall back to. SWC's own message
+ * for that is just "Failed to load native binding", which names neither the
+ * package at fault nor a remedy, so wrap it once here.
+ */
+function loadSwc(): any {
+    try {
+        return _require('@swc/core');
+    } catch (err: any) {
+        const detail = err?.message ? String(err.message).split('\n')[0] : 'unknown error';
+        throw new Error(
+            [
+                `@swc/core could not load its native binding, so no module can be compiled (${detail}).`,
+                '  - Reinstall it:  npm rebuild @swc/core  (or remove node_modules and reinstall)',
+                '  - On Windows, @swc/core 1.16.x can reject its own cache directory over',
+                '    directory permissions; pinning "@swc/core": "~1.15.24" is a known-good',
+                '    workaround until that is fixed upstream.',
+                '  - Or build the Rust engine, which takes @swc/core off the hot path:',
+                '    npm run build:native',
+            ].join(String.fromCharCode(10))
+        );
+    }
+}
+
+function jsTransformJs(
+    code: string,
+    filename: string,
+    minify: boolean,
+    jsxImportSource?: string,
+    moduleType?: 'commonjs' | 'es6',
+): string {
+    const swc = loadSwc();
     const ext = path.extname(filename).toLowerCase();
     const isTs = ext === '.ts' || ext === '.tsx' || ext === '.mts' || ext === '.cts';
     const isJsx = ext === '.tsx' || ext === '.jsx';
@@ -116,9 +147,20 @@ function jsTransformJs(code: string, filename: string, minify: boolean): string 
                 jsx: !isTs && isJsx,
                 decorators: true,
             },
+            // SWC defaults to the classic runtime, which emits
+            // `React.createElement` without importing React. Automatic is what
+            // React >= 17, Preact and every modern toolchain expect.
+            transform: isJsx
+                ? { react: { runtime: 'automatic', importSource: jsxImportSource } }
+                : undefined,
             target: 'es2020',
             minify: minify ? { compress: true, mangle: true } : undefined,
         },
+        // The production bundler wraps every module in a CommonJS factory
+        // (module, exports, require), so ESM syntax has to be lowered here.
+        // Leaving `import` in place emitted bundles that died with
+        // "'import' and 'export' may only appear at the top level".
+        module: moduleType ? { type: moduleType, strictMode: false } : undefined,
         minify,
         sourceMaps: false,
     });
@@ -141,7 +183,7 @@ function jsTransformCss(code: string, filename: string, minify: boolean): string
 }
 
 function jsMinifySync(code: string): string {
-    const swc = _require('@swc/core');
+    const swc = loadSwc();
     const result = swc.minifySync(code, {
         compress: true,
         mangle: true,
@@ -170,7 +212,15 @@ class JSNativeWorker {
         }
         if (loader === 'css') return { code: jsTransformCss(content, filepath, minify) };
         if (loader === 'mjs' || loader === 'cjs') loader = 'js';
-        return { code: jsTransformJs(content, filepath, minify) };
+        return {
+            code: jsTransformJs(
+                content,
+                filepath,
+                minify,
+                (configOrCode as any)?.jsxImportSource,
+                (configOrCode as any)?.module,
+            ),
+        };
     }
 
     async batchTransform(items: any[]): Promise<{ code: string }[]> {

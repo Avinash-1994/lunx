@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 /**
- * Enforce lean main package size (≤1.6 MB unpacked JS).
+ * Enforce lean main package size (≤1.8 MB unpacked JS).
  * Native binary must NOT be in the main pack — it ships as @lunx/native-*.
+ *
+ * The cap was 1.6 MB, which was only met by pruning dist/ai, dist/marketplace,
+ * dist/visual and dist/test from the tarball while the CLI still imported
+ * them — so `lunx build`, `lunx test` and `require('lunx-dev')` threw
+ * ERR_MODULE_NOT_FOUND once published. Shipping the modules costs ~0.15 MB.
+ * For reference: vite unpacks to ~3.4 MB, webpack to ~3 MB.
  */
 import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MAX_JS_BYTES = 1.6 * 1024 * 1024;
+const MAX_JS_BYTES = 1.8 * 1024 * 1024;
 
 const dry = execSync('npm pack --ignore-scripts --dry-run --json', {
   cwd: root,
@@ -53,4 +59,4 @@ if (nativeCopies.length > 0) {
   process.exit(1);
 }
 
-console.log('✅ Pack size OK (JS ≤ 1.6 MB, native optional)');
+console.log('✅ Pack size OK (JS ≤ 1.8 MB, native optional)');
