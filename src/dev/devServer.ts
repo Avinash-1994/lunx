@@ -1825,6 +1825,12 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           },
         });
 
+        if (/[?&]inline\b/.test(url)) {
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+          res.end(`export default ${JSON.stringify(compiled.code)};`);
+          return;
+        }
+
         if (url.includes('?import')) {
           const id = '/' + path.relative(cfg.root, filePath).split(path.sep).join('/');
           // One <style> per file, replaced in place on every hot update.

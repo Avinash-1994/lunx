@@ -116,17 +116,15 @@ export async function startDevServer(cfg: BuildConfig) {
 
             // Metrics Layout
             console.log(`   \x1b[32m▶\x1b[0m  \x1b[1mCore\x1b[0m    \x1b[32mReady\x1b[0m in \x1b[33m${duration}ms\x1b[0m`);
-            console.log(`   \x1b[34m▶\x1b[0m  \x1b[1mNative\x1b[0m  \x1b[90mRust 1.75\x1b[0m`);
-            
-            // Check cache status
-            let cacheStatus = 'Cold';
+            // Report the engine actually loaded, not a fixed string: a bug
+            // report from the JS fallback must not look like one from native.
+            let engine = 'JS (SWC + LightningCSS)';
             try {
-                const fsModule = await import('fs');
-                const pathModule = await import('path');
-                const dbPath = cfg.cacheDir ?? pathModule.join(cfg.root || process.cwd(), '.lunx/cache/cache.db');
-                if (fsModule.existsSync(dbPath)) cacheStatus = 'Warm';
-            } catch (e) {}
-            console.log(`   \x1b[35m▶\x1b[0m  \x1b[1mCache\x1b[0m   \x1b[90mSQLite WAL (${cacheStatus})\x1b[0m`);
+                const native = await import('../native/index.js');
+                if ((native as any).engineUsed === 'native') engine = 'Rust native';
+            } catch { /* JS fallback */ }
+            console.log(`   \x1b[34m▶\x1b[0m  \x1b[1mEngine\x1b[0m  \x1b[90m${engine}\x1b[0m`);
+            console.log(`   \x1b[35m▶\x1b[0m  \x1b[1mBundler\x1b[0m \x1b[90mRolldown (production builds)\x1b[0m`);
 
             console.log(`\x1b[90m   ─────────────────────────────────────\x1b[0m`);
 

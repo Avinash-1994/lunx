@@ -118,6 +118,7 @@ const CASES = {
     'glob-eager': 'en,fr',
     'glob-raw': 'raw-ok',
     'raw-import': 'asset-url-ok',
+    'css-inline': 'inline-ok',
 };
 
 const MAIN = `import { hello, answer } from 'cjs-only';
@@ -136,6 +137,7 @@ import chainPkg from 'cjs-chain';
 import data from './data.json';
 import wasmUrl from './add.wasm?url';
 import noteRaw from './note.txt?raw';
+import inlineCss from './inline.css?inline';
 
 const out = document.getElementById('out')!;
 const report = (name: string, value: unknown) => {
@@ -192,6 +194,7 @@ await attempt('glob-raw', async () => {
   return (await Object.values(mods)[0]!() as string).trim();
 });
 await attempt('raw-import', () => noteRaw.trim());
+await attempt('css-inline', () => (inlineCss.includes('inline-ok') && !document.querySelector('style[data-lunx-css*="inline.css"]') ? 'inline-ok' : 'bad: ' + inlineCss.slice(0, 40)));
 document.body.dataset.done = '1';
 `;
 
@@ -203,6 +206,7 @@ const APP_FILES = {
     'src/tla.ts': `const value = await Promise.resolve('tla-ok');\nexport const tla = value;\n`,
     'src/worker.ts': `self.onmessage = () => { (self as any).postMessage('worker-ok'); };\n`,
     'src/note.txt': 'asset-url-ok\n',
+    'src/inline.css': `.x::after { content: 'inline-ok'; }\n`,
     'src/glob/a.ts': `export const name = 'a';\n`,
     'src/glob/b.ts': `export const name = 'b';\n`,
     'src/glob/c.txt': 'raw-ok\n',

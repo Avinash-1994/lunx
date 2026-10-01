@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-01T11:02:07.724Z",
+  "generatedAt": "2026-10-01T11:35:28.823Z",
   "results": {
     "dev": {
       "rows": [
@@ -140,10 +140,16 @@
           "expected": "asset-url-ok",
           "actual": "asset-url-ok",
           "pass": true
+        },
+        {
+          "name": "css-inline",
+          "expected": "inline-ok",
+          "actual": "inline-ok",
+          "pass": true
         }
       ],
-      "passed": 23,
-      "total": 23
+      "passed": 24,
+      "total": 24
     },
     "build": {
       "rows": [
@@ -284,10 +290,16 @@
           "expected": "asset-url-ok",
           "actual": "asset-url-ok",
           "pass": true
+        },
+        {
+          "name": "css-inline",
+          "expected": "inline-ok",
+          "actual": "inline-ok",
+          "pass": true
         }
       ],
-      "passed": 23,
-      "total": 23
+      "passed": 24,
+      "total": 24
     }
   }
 }

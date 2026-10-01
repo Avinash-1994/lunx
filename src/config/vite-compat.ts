@@ -46,7 +46,15 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
     const notes: string[] = [];
     let vite: any;
     try {
-        vite = await loadConfigModule(path.join(root, file), root);
+        // Fast path: framework plugins are replaced by lunx anyway, so stub
+        // them (and vite's helpers) instead of importing Babel, Vite and the
+        // plugin -- ~100ms per command. Any surprise falls back to the real
+        // modules.
+        try {
+            vite = await loadConfigModule(path.join(root, file), root, true);
+        } catch {
+            vite = await loadConfigModule(path.join(root, file), root, false);
+        }
         if (typeof vite === 'function') {
             vite = await vite({ command, mode: command === 'build' ? 'production' : 'development', isSsrBuild: false, isPreview: false });
         }
@@ -142,7 +150,22 @@ function staticRead(source: string): { config: Record<string, any>; plugins: any
 }
 
 /** Bundle the config with its own imports left external, then import it. */
-async function loadConfigModule(file: string, root: string): Promise<any> {
+/** Stand-ins for packages whose only role in a config is to be replaced by lunx. */
+const STUBS: Record<string, string> = {
+    vite: `export const defineConfig = (c) => c;
+export const mergeConfig = (a, b) => { const out = { ...a }; for (const [k, v] of Object.entries(b ?? {})) out[k] = v && typeof v === 'object' && !Array.isArray(v) && a?.[k] && typeof a[k] === 'object' ? mergeConfig(a[k], v) : Array.isArray(v) && Array.isArray(a?.[k]) ? [...a[k], ...v] : v; return out; };
+export const loadEnv = (mode, dir, prefixes = 'VITE_') => { const p = [].concat(prefixes); return Object.fromEntries(Object.entries(process.env).filter(([k]) => p.some((x) => k.startsWith(x)))); };
+export const searchForWorkspaceRoot = (dir) => dir;`,
+    '@vitejs/plugin-react': `export default () => ({ name: 'vite:react-babel' });`,
+    '@vitejs/plugin-react-swc': `export default () => ({ name: 'vite:react-swc' });`,
+    '@vitejs/plugin-vue': `export default () => ({ name: 'vite:vue' });`,
+    '@vitejs/plugin-vue-jsx': `export default () => ({ name: 'vite:vue-jsx' });`,
+    '@sveltejs/vite-plugin-svelte': `export const svelte = () => ({ name: 'vite-plugin-svelte' }); export const vitePreprocess = () => ({});`,
+    'vite-plugin-solid': `export default () => ({ name: 'solid' });`,
+    '@preact/preset-vite': `export default () => ({ name: 'preact:config' });`,
+};
+
+async function loadConfigModule(file: string, root: string, stubFrameworks: boolean): Promise<any> {
     const esbuild = await import('esbuild');
     const dir = path.dirname(file);
     const result = await esbuild.build({
@@ -153,6 +176,16 @@ async function loadConfigModule(file: string, root: string): Promise<any> {
         format: 'esm',
         packages: 'external',
         logLevel: 'silent',
+        plugins: stubFrameworks
+            ? [{
+                  name: 'lunx:config-stubs',
+                  setup(build) {
+                      const filter = new RegExp(`^(${Object.keys(STUBS).map((k) => k.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|')})$`);
+                      build.onResolve({ filter }, (args) => ({ path: args.path, namespace: 'lunx-stub' }));
+                      build.onLoad({ filter: /.*/, namespace: 'lunx-stub' }, (args) => ({ contents: STUBS[args.path]!, loader: 'js' }));
+                  },
+              }]
+            : [],
         define: {
             'import.meta.url': JSON.stringify(pathToFileURL(file).href),
             'import.meta.dirname': JSON.stringify(dir),

@@ -5,6 +5,7 @@
  */
 
 import path from 'path';
+import { looksLikeJsx } from './jsx-detect.js';
 import fs from 'fs/promises';
 import os from 'os';
 import type { Framework } from '../core/framework-detector.js';
@@ -818,7 +819,4 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
     }
 }
 
-/** Cheap check for JSX in a `.js` file: a closing tag or a self-closing element. */
-export function looksLikeJsx(code: string): boolean {
-    return /<\/[A-Za-z][\w.:-]*\s*>|<[A-Za-z][\w.:-]*(\s[^<>]*)?\/>|<>|<\/>/.test(code);
-}
+export { looksLikeJsx };

@@ -14,20 +14,25 @@ export async function build(rawConfig: BuildConfig) {
     if (fs.existsSync(pkgPath)) {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 
-      // Pre-load common meta-framework adapters so they register themselves
-      const adaptersToTry = [
-        'solidstart', 'sveltekit', 'astro', 'qwikcity', 'remix', 
-        'nextjs', 'nuxt', 'tanstack-start', 'waku', 'analog', 'react-router', 'vitepress', 'tauri', 'electron',
-        'gatsby', 'redwoodjs', 'stencil', 'marko', 'docusaurus'
-      ];
-      
-      // These 19 imports only register adapters; awaiting them one at a time
-      // cost ~0.4 s of every build's fixed overhead.
+      // Import only the adapters whose framework is installed: loading all
+      // of them cost ~50ms on every build of every project.
+      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      const has = (...names: string[]) => names.some((n) => n.endsWith('/') ? Object.keys(deps).some((d) => d.startsWith(n)) : n in deps);
+      const ADAPTER_PACKAGES: Record<string, string[]> = {
+        solidstart: ['@solidjs/start'], sveltekit: ['@sveltejs/kit'], astro: ['astro'],
+        qwikcity: ['@builder.io/qwik-city', '@qwik.dev/router'], remix: ['@remix-run/'], nextjs: ['next'],
+        nuxt: ['nuxt'], 'tanstack-start': ['@tanstack/start', '@tanstack/react-start', '@tanstack/solid-start'],
+        waku: ['waku'], analog: ['@analogjs/'], 'react-router': ['@react-router/dev'], vitepress: ['vitepress'],
+        tauri: ['@tauri-apps/api', '@tauri-apps/cli'], electron: ['electron'], gatsby: ['gatsby'],
+        redwoodjs: ['@redwoodjs/'], stencil: ['@stencil/core'], marko: ['marko', '@marko/'], docusaurus: ['@docusaurus/'],
+      };
+      const adaptersToTry = Object.keys(ADAPTER_PACKAGES).filter((name) => has(...ADAPTER_PACKAGES[name]!));
+
       await Promise.all([
         ...adaptersToTry.map((name) =>
           import(`../meta-frameworks/${name}/index.js`).catch(() => {})
         ),
-        import('../framework-adapters/angular/index.js').catch(() => {}),
+        ...(has('@angular/core') ? [import('../framework-adapters/angular/index.js').catch(() => {})] : []),
         import('../framework-adapters/spa/index.js').catch(() => {}),
       ]);
 
@@ -82,6 +87,9 @@ export async function build(rawConfig: BuildConfig) {
   console.log('📂 Output:', config.outDir);
 
   // Phase 3.1 — Supply Chain Security Checks
+  // The lockfile/CVE gate queries the OSV API, so it runs alongside bundling
+  // rather than in front of it; a failure still fails the build below.
+  const securityGate: Promise<void> = (async () => {
   if (config.mode === 'production') {
     // Allow opting out via env var (CI/regression) or per-project config key
     const skipSecurity =
@@ -158,6 +166,8 @@ export async function build(rawConfig: BuildConfig) {
     }
     }
   }
+  })();
+  securityGate.catch(() => {}); // observed below; avoid an unhandled rejection meanwhile
 
   // Rolldown (Rust) is the default production bundler. The legacy engine
   // still owns module federation, SSR/node targets, and `build.bundler: 'legacy'`.
@@ -186,6 +196,8 @@ export async function build(rawConfig: BuildConfig) {
         throw new Error(errorMsg);
       }
     }
+
+    await securityGate;
 
     if (config.mode === 'production') {
       const security = await import('@lunx/security');

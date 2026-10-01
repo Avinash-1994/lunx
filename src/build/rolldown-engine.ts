@@ -17,6 +17,7 @@ import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import type { BuildConfig } from '../config/index.js';
 import { transformGlobImports } from './glob-import.js';
+import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 
 const gzip = promisify(zlib.gzip);
@@ -155,8 +156,11 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
     };
     css.emitAsset = emitAsset;
 
-    const { UniversalTransformer, looksLikeJsx } = await import('../core/universal-transformer.js');
-    const transformer = new UniversalTransformer(root, { cache: false });
+    // Loaded on first use: only Vue/Svelte/Solid/Angular/… sources need it,
+    // and importing it costs ~50ms that a React or vanilla build never uses.
+    let transformerPromise: Promise<any> | null = null;
+    const getTransformer = () =>
+        (transformerPromise ??= import('../core/universal-transformer.js').then((m) => new m.UniversalTransformer(root, { cache: false })));
     const compileJsx = framework === 'solid' || framework === 'preact' || framework === 'qwik' || framework === 'mithril';
 
     const plugins: any[] = [
@@ -164,37 +168,50 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
         ...(config.plugins ?? []).filter((p: any) => p && typeof p === 'object' && (p.resolveId || p.load || p.transform || p.renderChunk || p.generateBundle)),
         {
             name: 'lunx:framework',
-            async transform(code: string, id: string) {
+            // Hook filters keep Rolldown from calling into JS for modules a
+            // plugin would ignore anyway (one Rust<->JS round trip per module).
+            transform: {
+              filter: { id: { include: compileJsx || framework === 'angular' ? /\.(vue|svelte|[mc]?[jt]sx?)(\?.*)?$/ : /\.(vue|svelte)(\?.*)?$/, exclude: /node_modules/ } },
+              async handler(code: string, id: string) {
                 const file = cleanId(id);
                 const isSfc = /\.(vue|svelte)$/.test(file);
                 const isFrameworkJsx = compileJsx && !file.includes('node_modules') && (/\.[jt]sx$/.test(file) || (/\.m?js$/.test(file) && looksLikeJsx(code)));
                 const isAngular = framework === 'angular' && /\.ts$/.test(file) && !file.includes('node_modules');
                 if (!isSfc && !isFrameworkJsx && !isAngular) return null;
                 const fw = file.endsWith('.vue') ? 'vue' : file.endsWith('.svelte') ? 'svelte' : framework;
-                const out = await transformer.transform({ filePath: file, code, framework: fw as any, root, isDev: false });
+                const out = await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false });
                 return { code: out.code, map: null, moduleType: 'js' };
+              },
             },
         },
         {
             name: 'lunx:glob-import',
-            transform(code: string, id: string) {
+            transform: {
+              filter: { id: { exclude: /node_modules/ }, code: 'import.meta.glob' },
+              handler(code: string, id: string) {
                 if (id.includes('node_modules') || !code.includes('import.meta.glob')) return null;
                 const out = transformGlobImports(code, cleanId(id), root);
                 return out === null ? null : { code: out, map: null };
+              },
             },
         },
         {
             // Create React App allowed JSX in `.js`; parse app sources that need it as JSX.
             name: 'lunx:jsx-in-js',
-            async transform(code: string, id: string) {
+            transform: {
+              filter: { id: { include: /\.m?js(\?.*)?$/, exclude: /node_modules/ } },
+              async handler(code: string, id: string) {
                 if (!/\.m?js$/.test(cleanId(id)) || id.includes('node_modules') || !looksLikeJsx(code)) return null;
                 if (compileJsx) return null; // the framework compiler above already handled it
                 return { code, moduleType: 'jsx' };
+              },
             },
         },
         {
             name: 'lunx:css',
-            async load(id: string) {
+            load: {
+              filter: { id: /\.(css|pcss|postcss|scss|sass|less|styl|stylus)(\?.*)?$/ },
+              async handler(this: any, id: string) {
                 const file = cleanId(id);
                 if (!CSS_EXT.test(file)) return null;
                 const query = id.slice(file.length);
@@ -205,11 +222,14 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
                 css.add(file, result.code);
                 const exports = result.exports ? `export default ${JSON.stringify(result.exports)};` : 'export {};';
                 return { code: exports, moduleType: 'js', moduleSideEffects: true };
+              },
             },
         },
         {
             name: 'lunx:assets',
-            async load(id: string) {
+            load: {
+              filter: { id: /(\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)|[?&](url|raw)\b.*)$/i },
+              async handler(this: any, id: string) {
                 const file = cleanId(id);
                 const query = id.slice(file.length);
                 const wantsUrl = /[?&]url\b/.test(query);
@@ -222,6 +242,7 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
                     ? `data:${mimeOf(file)};base64,${data.toString('base64')}`
                     : emitAsset(this, file, data);
                 return { code: `export default ${JSON.stringify(url)};`, moduleType: 'js' };
+              },
             },
         },
         {
@@ -241,7 +262,9 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
             // `new URL('./file', import.meta.url)`: emit the file (or, for a
             // worker script, a separate bundle) and point the URL at it.
             name: 'lunx:new-url',
-            async transform(this: any, code: string, id: string) {
+            transform: {
+              filter: { id: { exclude: /node_modules/ }, code: 'import.meta.url' },
+              async handler(this: any, code: string, id: string) {
                 if (!code.includes('import.meta.url') || id.includes('node_modules')) return null;
                 const re = /new\s+URL\(\s*(['"])(\.{1,2}\/[^'"]+)\1\s*,\s*import\.meta\.url\s*\)/g;
                 let changed = false;
@@ -263,6 +286,7 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
                     changed = true;
                 }
                 return changed ? { code: out + code.slice(last), map: null } : null;
+              },
             },
             renderChunk(this: any, code: string, chunk: any) {
                 if (!code.includes('__LUNX_FILE_URL_')) return null;
