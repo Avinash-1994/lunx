@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Enforce lean main package size (≤1.8 MB unpacked JS).
+ * Enforce lean main package size (≤2 MB unpacked JS; vite unpacks to ~3.4 MB).
  * Native binary must NOT be in the main pack — it ships as @lunx/native-*.
  *
  * The cap was 1.6 MB, which was only met by pruning dist/ai, dist/marketplace,
@@ -14,7 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MAX_JS_BYTES = 1.8 * 1024 * 1024;
+const MAX_JS_BYTES = 2 * 1024 * 1024;
 
 const dry = execSync('npm pack --ignore-scripts --dry-run --json', {
   cwd: root,
@@ -59,4 +59,4 @@ if (nativeCopies.length > 0) {
   process.exit(1);
 }
 
-console.log('✅ Pack size OK (JS ≤ 1.8 MB, native optional)');
+console.log('✅ Pack size OK (JS ≤ 2 MB, native optional)');

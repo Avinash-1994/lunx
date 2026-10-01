@@ -26,10 +26,12 @@ export async function initProject(cwd: string) {
     log.info(`Detected framework: ${framework} ${isTs ? '(TypeScript)' : ''}`);
 
     // Detect entry point
+    // index.html first: it is the real entry of a web app (it names the
+    // scripts, styles and mount point); a script entry loses all of that.
     const candidates = [
+        'index.html',
         'src/main.tsx', 'src/main.ts', 'src/main.jsx', 'src/main.js',
         'src/index.tsx', 'src/index.ts', 'src/index.jsx', 'src/index.js',
-        'index.html'
     ];
 
     let entry = 'src/main.tsx';

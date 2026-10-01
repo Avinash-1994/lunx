@@ -85,6 +85,20 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
         return name;
     };
 
+    // Script-only entries still get a page: the project's index.html when it
+    // has one (it already references the script), otherwise a minimal page.
+    let syntheticHtml: string | null = null;
+    if (!entries.some((e) => e.endsWith('.html'))) {
+        const rootHtml = path.join(root, 'index.html');
+        if (fs.existsSync(rootHtml)) {
+            const html = fs.readFileSync(rootHtml, 'utf8');
+            const referenced = entries.filter((e) => html.includes('/' + toPosix(path.relative(root, e))));
+            entries.splice(0, entries.length, rootHtml, ...entries.filter((e) => !referenced.includes(e)));
+        } else {
+            syntheticHtml = path.join(root, 'index.html');
+        }
+    }
+
     for (const entry of entries) {
         if (!fs.existsSync(entry)) throw new Error(`Entry not found: ${path.relative(root, entry) || entry}`);
         if (!entry.endsWith('.html')) {
@@ -108,6 +122,17 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
             if (fs.existsSync(file) && !isInside(path.join(root, 'public'), file)) html.styles.push(file);
         }
         htmlEntries.push(html);
+    }
+    if (syntheticHtml) {
+        const scripts = new Map<string, string>();
+        for (const name of Object.keys(input)) scripts.set(`/__lunx_entry_${name}`, name);
+        const tags = [...scripts.keys()].map((src) => `    <script type="module" src="${src}"></script>`).join('\n');
+        htmlEntries.push({
+            file: syntheticHtml,
+            source: `<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n  </head>\n  <body>\n    <div id="root"></div>\n    <div id="app"></div>\n${tags}\n  </body>\n</html>\n`,
+            scripts,
+            styles: [],
+        });
     }
     if (Object.keys(input).length === 0 && htmlEntries.every((h) => h.styles.length === 0)) {
         throw new Error('No module scripts found in the HTML entry. Add <script type="module" src="/src/main.ts"></script>.');

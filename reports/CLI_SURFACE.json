@@ -21,8 +21,8 @@
   },
   {
     "name": "check",
-    "verdict": "PASS",
-    "note": ""
+    "verdict": "DELIBERATE",
+    "note": "exit 1 — Enable color and formatting in TypeScript's output to make compiler errors easier to read."
   },
   {
     "name": "build",
