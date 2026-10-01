@@ -191,6 +191,56 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
             },
         },
         {
+            // Babel/TypeScript-compiled CommonJS sets `__esModule`, and its
+            // default import means `exports.default` — that is how webpack,
+            // Babel and the lunx dev server read it. Rolldown switches to
+            // Node's rule (default = module.exports) whenever the app's
+            // package.json says "type": "module", which most apps do, so the
+            // same import gave a different value in dev and in production.
+            name: 'lunx:cjs-interop',
+            renderChunk(code: string) {
+                if (!code.includes('__toESM(')) return null;
+                return { code: code.replace(/__toESM\((require_[\w$]+\(\)), 1\)/g, '__toESM($1)'), map: null };
+            },
+        },
+        {
+            // `new URL('./file', import.meta.url)`: emit the file (or, for a
+            // worker script, a separate bundle) and point the URL at it.
+            name: 'lunx:new-url',
+            async transform(this: any, code: string, id: string) {
+                if (!code.includes('import.meta.url') || id.includes('node_modules')) return null;
+                const re = /new\s+URL\(\s*(['"])(\.{1,2}\/[^'"]+)\1\s*,\s*import\.meta\.url\s*\)/g;
+                let changed = false;
+                let out = '';
+                let last = 0;
+                for (const m of code.matchAll(re)) {
+                    const file = path.resolve(path.dirname(cleanId(id)), m[2]!);
+                    if (!fs.existsSync(file)) continue;
+                    let ref: string;
+                    if (/\.(m?[jt]sx?)$/.test(file)) {
+                        ref = this.emitFile({ type: 'chunk', id: file, name: path.basename(file).replace(/\.[^.]+$/, '') });
+                    } else {
+                        const data = await fsp.readFile(file);
+                        const ext = path.extname(file);
+                        ref = this.emitFile({ type: 'asset', name: path.basename(file), fileName: `assets/${path.basename(file, ext)}.${hash8(data)}${ext}`, source: data });
+                    }
+                    out += code.slice(last, m.index) + `new URL(__LUNX_FILE_URL_${ref}__, import.meta.url)`;
+                    last = m.index! + m[0].length;
+                    changed = true;
+                }
+                return changed ? { code: out + code.slice(last), map: null } : null;
+            },
+            renderChunk(this: any, code: string, chunk: any) {
+                if (!code.includes('__LUNX_FILE_URL_')) return null;
+                const depth = chunk.fileName.split('/').length - 1;
+                const prefix = depth === 0 ? './' : '../'.repeat(depth);
+                return {
+                    code: code.replace(/__LUNX_FILE_URL_([\w$-]+)__/g, (_m: string, ref: string) => JSON.stringify(prefix + this.getFileName(ref))),
+                    map: null,
+                };
+            },
+        },
+        {
             name: 'lunx:css-emit',
             generateBundle(this: any, _opts: unknown, bundle: Record<string, any>) {
                 // Extracted CSS modules are empty JS, so they vanish from

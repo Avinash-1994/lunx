@@ -77,7 +77,8 @@
     "build:workspaces": "npm --prefix packages/lunx-adapter-core run build && npm --prefix packages/lunx-security run build",
     "bench:vs-vite": "tsx scripts/bench-vs-vite.mjs",
     "bench:arena": "tsx scripts/bench-arena.mjs",
-    "test:cli-surface": "tsx scripts/verify-cli-surface.mjs"
+    "test:cli-surface": "tsx scripts/verify-cli-surface.mjs",
+    "test:conformance": "tsx scripts/library-conformance.mjs"
   },
   "keywords": [
     "build-tool",

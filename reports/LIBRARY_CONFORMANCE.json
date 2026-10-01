@@ -1,0 +1,245 @@
+{
+  "generatedAt": "2026-10-01T11:00:17.385Z",
+  "results": {
+    "dev": {
+      "rows": [
+        {
+          "name": "cjs-named",
+          "expected": "cjs-named",
+          "actual": "cjs-named",
+          "pass": true
+        },
+        {
+          "name": "cjs-number",
+          "expected": "42",
+          "actual": "42",
+          "pass": true
+        },
+        {
+          "name": "cjs-default-fn",
+          "expected": "cjs-default-fn",
+          "actual": "cjs-default-fn",
+          "pass": true
+        },
+        {
+          "name": "cjs-esmodule",
+          "expected": "cjs-esmodule-default/cjs-esmodule-named",
+          "actual": "cjs-esmodule-default/cjs-esmodule-named",
+          "pass": true
+        },
+        {
+          "name": "cjs-env",
+          "expected": "env-ok",
+          "actual": "env-ok",
+          "pass": true
+        },
+        {
+          "name": "esm-only",
+          "expected": "esm-only/esm-default",
+          "actual": "esm-only/esm-default",
+          "pass": true
+        },
+        {
+          "name": "dual",
+          "expected": "dual-esm",
+          "actual": "dual-esm",
+          "pass": true
+        },
+        {
+          "name": "conditions",
+          "expected": "browser-condition",
+          "actual": "browser-condition",
+          "pass": true
+        },
+        {
+          "name": "patterns",
+          "expected": "patterns-root/pattern-subpath",
+          "actual": "patterns-root/pattern-subpath",
+          "pass": true
+        },
+        {
+          "name": "hash-imports",
+          "expected": "hash-imports-browser",
+          "actual": "hash-imports-browser",
+          "pass": true
+        },
+        {
+          "name": "legacy-browser-field",
+          "expected": "legacy-browser",
+          "actual": "legacy-browser",
+          "pass": true
+        },
+        {
+          "name": "module-field",
+          "expected": "module-field",
+          "actual": "module-field",
+          "pass": true
+        },
+        {
+          "name": "cjs-chain",
+          "expected": "cjs-chain",
+          "actual": "cjs-chain",
+          "pass": true
+        },
+        {
+          "name": "json",
+          "expected": "json-ok",
+          "actual": "json-ok",
+          "pass": true
+        },
+        {
+          "name": "dynamic-import",
+          "expected": "lazy-ok",
+          "actual": "lazy-ok",
+          "pass": true
+        },
+        {
+          "name": "top-level-await",
+          "expected": "tla-ok",
+          "actual": "tla-ok",
+          "pass": true
+        },
+        {
+          "name": "worker",
+          "expected": "worker-ok",
+          "actual": "worker-ok",
+          "pass": true
+        },
+        {
+          "name": "wasm",
+          "expected": "5",
+          "actual": "5",
+          "pass": true
+        },
+        {
+          "name": "asset-url",
+          "expected": "asset-url-ok",
+          "actual": "asset-url-ok",
+          "pass": true
+        }
+      ],
+      "passed": 19,
+      "total": 19
+    },
+    "build": {
+      "rows": [
+        {
+          "name": "cjs-named",
+          "expected": "cjs-named",
+          "actual": "cjs-named",
+          "pass": true
+        },
+        {
+          "name": "cjs-number",
+          "expected": "42",
+          "actual": "42",
+          "pass": true
+        },
+        {
+          "name": "cjs-default-fn",
+          "expected": "cjs-default-fn",
+          "actual": "cjs-default-fn",
+          "pass": true
+        },
+        {
+          "name": "cjs-esmodule",
+          "expected": "cjs-esmodule-default/cjs-esmodule-named",
+          "actual": "cjs-esmodule-default/cjs-esmodule-named",
+          "pass": true
+        },
+        {
+          "name": "cjs-env",
+          "expected": "env-ok",
+          "actual": "env-ok",
+          "pass": true
+        },
+        {
+          "name": "esm-only",
+          "expected": "esm-only/esm-default",
+          "actual": "esm-only/esm-default",
+          "pass": true
+        },
+        {
+          "name": "dual",
+          "expected": "dual-esm",
+          "actual": "dual-esm",
+          "pass": true
+        },
+        {
+          "name": "conditions",
+          "expected": "browser-condition",
+          "actual": "browser-condition",
+          "pass": true
+        },
+        {
+          "name": "patterns",
+          "expected": "patterns-root/pattern-subpath",
+          "actual": "patterns-root/pattern-subpath",
+          "pass": true
+        },
+        {
+          "name": "hash-imports",
+          "expected": "hash-imports-browser",
+          "actual": "hash-imports-browser",
+          "pass": true
+        },
+        {
+          "name": "legacy-browser-field",
+          "expected": "legacy-browser",
+          "actual": "legacy-browser",
+          "pass": true
+        },
+        {
+          "name": "module-field",
+          "expected": "module-field",
+          "actual": "module-field",
+          "pass": true
+        },
+        {
+          "name": "cjs-chain",
+          "expected": "cjs-chain",
+          "actual": "cjs-chain",
+          "pass": true
+        },
+        {
+          "name": "json",
+          "expected": "json-ok",
+          "actual": "json-ok",
+          "pass": true
+        },
+        {
+          "name": "dynamic-import",
+          "expected": "lazy-ok",
+          "actual": "lazy-ok",
+          "pass": true
+        },
+        {
+          "name": "top-level-await",
+          "expected": "tla-ok",
+          "actual": "tla-ok",
+          "pass": true
+        },
+        {
+          "name": "worker",
+          "expected": "worker-ok",
+          "actual": "worker-ok",
+          "pass": true
+        },
+        {
+          "name": "wasm",
+          "expected": "5",
+          "actual": "5",
+          "pass": true
+        },
+        {
+          "name": "asset-url",
+          "expected": "asset-url-ok",
+          "actual": "asset-url-ok",
+          "pass": true
+        }
+      ],
+      "passed": 19,
+      "total": 19
+    }
+  }
+}

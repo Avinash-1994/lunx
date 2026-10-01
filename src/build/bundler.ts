@@ -272,8 +272,12 @@ export async function build(rawConfig: BuildConfig) {
         const cspResult = security.generateCSP(buildOutDir);
         const secHeaders = security.generateSecurityHeaders(buildOutDir, cspResult.header);
         
-        fs.writeFileSync(path.join(buildOutDir, '_headers'), secHeaders.configs.netlify, 'utf8');
-        fs.writeFileSync(path.join(buildOutDir, '.htaccess'), secHeaders.configs.apache, 'utf8');
+        // Netlify and Apache enforce these files on deploy, so a generic CSP
+        // in them would break apps that call other origins. Opt-in.
+        if ((config as any).security?.headers === true) {
+          fs.writeFileSync(path.join(buildOutDir, '_headers'), secHeaders.configs.netlify, 'utf8');
+          fs.writeFileSync(path.join(buildOutDir, '.htaccess'), secHeaders.configs.apache, 'utf8');
+        }
 
         // Inject SRI and CSP into HTML
         const injectHtml = (dir: string) => {
@@ -284,7 +288,10 @@ export async function build(rawConfig: BuildConfig) {
             else if (path.extname(p).toLowerCase() === '.html') {
               let html = fs.readFileSync(p, 'utf8');
               html = security.injectSRIIntoHTML(html, sriManifest);
-              if (!html.includes('Content-Security-Policy')) {
+              // Opt-in: a generated policy cannot know the app's API origins,
+              // CDNs or wasm use, and a meta CSP that is wrong breaks the page.
+              // The same policy is always written to lunx-csp.txt / _headers.
+              if ((config as any).security?.cspMeta === true && !html.includes('Content-Security-Policy')) {
                 html = html.replace(/<head[^>]*>/i, `$&\n    ${cspResult.metaTag}`);
               }
               fs.writeFileSync(p, html, 'utf8');

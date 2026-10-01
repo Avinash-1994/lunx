@@ -8,6 +8,13 @@ import native from '../native/index.js';
 
 const require = createRequire(import.meta.url);
 
+const RESERVED_WORDS = new Set([
+    'arguments', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
+    'else', 'enum', 'eval', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'implements', 'import', 'in',
+    'instanceof', 'interface', 'let', 'new', 'null', 'package', 'private', 'protected', 'public', 'return', 'static',
+    'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
+]);
+
 // Unified native loader — never hard-require lunx_native.node from cwd alone.
 let _native: { prebundle: Function; prebundlePut: Function } | null | undefined;
 function isRustNative(): boolean {
@@ -281,6 +288,25 @@ export class DependencyPreBundler {
                     }
                 }
 
+                // Legacy `browser` field: { "./node.js": "./browser.js" } or a string
+                // replacing `main`. Packages use it to swap out Node-only code.
+                if (resolvedPath) {
+                    try {
+                        const pkgName = dep.startsWith('@') ? dep.split('/').slice(0, 2).join('/') : dep.split('/')[0];
+                        const pkgDir = path.join(root, 'node_modules', pkgName);
+                        const manifest = JSON.parse(await fs.readFile(path.join(pkgDir, 'package.json'), 'utf-8'));
+                        const browser = manifest.browser;
+                        const rel = './' + path.relative(pkgDir, resolvedPath).split(path.sep).join('/');
+                        let mapped: string | undefined;
+                        if (typeof browser === 'string' && dep === pkgName && !manifest.exports) mapped = browser;
+                        else if (browser && typeof browser === 'object') {
+                            const hit = browser[rel] ?? browser[rel.replace(/\.js$/, '')] ?? browser[rel.slice(2)];
+                            if (typeof hit === 'string') mapped = hit;
+                        }
+                        if (mapped && await fileExists(path.join(pkgDir, mapped))) resolvedPath = path.join(pkgDir, mapped);
+                    } catch { /* no manifest: keep the resolved file */ }
+                }
+
                 if (resolvedPath) {
                     // ... verify existence ...
                     const normalizedName = dep.replace(/[/@]/g, '_');
@@ -349,13 +375,30 @@ export class DependencyPreBundler {
 
                                                             if (!pkg) continue;
 
-                                                            // Get all named exports
-                                                            const exportNames = Object.getOwnPropertyNames(pkg)
+                                                            // Named exports: the module's own enumerable keys.
+                                                            // Not getOwnPropertyNames -- on a function export
+                                                            // that yields length/name/arguments/caller, and
+                                                            // `export const arguments` is a syntax error.
+                                                            const exportNames = (typeof pkg === 'object' || typeof pkg === 'function' ? Object.keys(pkg) : [])
                                                                 .filter(key =>
                                                                     /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(key) &&
+                                                                    !RESERVED_WORDS.has(key) &&
                                                                     key !== 'default' &&
                                                                     key !== '__esModule'
                                                                 );
+
+                                                            // Babel/TypeScript-compiled CommonJS marks itself
+                                                            // with __esModule; its default import is exports.default.
+                                                            if (pkg && pkg.__esModule && /export default (\w+)\(\);/.test(content)) {
+                                                                content = content.replace(
+                                                                    /export default (\w+)\(\);/,
+                                                                    (_m: string, fn: string) => `const __pkg = ${fn}();\nexport default (__pkg && __pkg.__esModule ? __pkg.default : __pkg);`
+                                                                );
+                                                                const namedExports = exportNames.map(name => `export const ${name} = __pkg.${name};`).join('\n');
+                                                                content = content.replace(/\/\/# sourceMappingURL=/, `${namedExports}\n//# sourceMappingURL=`);
+                                                                await fs.writeFile(fullPath, content);
+                                                                break;
+                                                            }
 
                                                             // Add re-exports if needed
                                                             if (exportNames.length > 0 && !content.includes('export const')) {
