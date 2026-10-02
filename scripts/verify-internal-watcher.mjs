@@ -7,8 +7,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { watch } from '../src/internal/watcher.ts';
-import { globToRegExp } from '../src/internal/watcher.ts';
+import { watch } from '../src/lib/watcher.ts';
+import { globToRegExp } from '../src/lib/watcher.ts';
 
 const results = [];
 function check(name, ok, detail = '') {

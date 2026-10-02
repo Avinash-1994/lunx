@@ -5,8 +5,8 @@
 import assert from 'node:assert';
 import jsyaml from 'js-yaml';
 import dotenv from 'dotenv';
-import * as ours from '../src/internal/yaml.ts';
-import * as ourEnv from '../src/internal/dotenv.ts';
+import * as ours from '../src/lib/yaml.ts';
+import * as ourEnv from '../src/lib/dotenv.ts';
 
 const results = [];
 function check(name, ok, detail = '') {

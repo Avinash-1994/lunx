@@ -3,7 +3,7 @@
  * `ws` client. Run with: node --import tsx scripts/verify-internal-ws.mjs
  */
 import http from 'node:http';
-import { WebSocketServer } from '../src/internal/ws.ts';
+import { WebSocketServer } from '../src/lib/ws.ts';
 import WsClient from 'ws';
 
 const results = [];

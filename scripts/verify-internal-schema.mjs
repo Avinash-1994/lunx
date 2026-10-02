@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert';
 import { z as zod } from 'zod';
-import { z } from '../src/internal/schema.ts';
+import { z } from '../src/lib/schema.ts';
 
 const results = [];
 function check(name, ok, detail = '') {

@@ -9,9 +9,9 @@ import https from 'node:https';
 import tls from 'node:tls';
 import { X509Certificate } from 'node:crypto';
 import WsClient from 'ws';
-import { generate, generateForHosts } from '../src/internal/self-signed.ts';
-import { createProxyServer } from '../src/internal/proxy.ts';
-import { WebSocketServer } from '../src/internal/ws.ts';
+import { generate, generateForHosts } from '../src/lib/self-signed.ts';
+import { createProxyServer } from '../src/lib/proxy.ts';
+import { WebSocketServer } from '../src/lib/ws.ts';
 
 const results = [];
 function check(name, ok, detail = '') {
