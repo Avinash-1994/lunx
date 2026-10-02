@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createResolver, type ModuleResolver } from '../../engines/toolkit.js';
+import { globToRegExp } from '../../lib/watcher.js';
 import { arraify, bareImportRE, cleanUrl, FS_PREFIX, fsPathFromId, isBuiltin, isDataUrl, isExternalUrl } from '../utils.js';
 
 export const BROWSER_EXTERNAL_ID = '__vite-browser-external';
@@ -33,6 +34,8 @@ export function getPackageName(spec: string): string {
 function matches(list: unknown, spec: string, pkg: string): boolean {
     for (const pattern of arraify(list as any)) {
         if (typeof pattern === 'string' && (pattern === pkg || pattern === spec)) return true;
+        // Vite matches string patterns as globs: "@tanstack/start**".
+        if (typeof pattern === 'string' && /[*?{]/.test(pattern) && (globToRegExp(pattern).test(pkg) || globToRegExp(pattern).test(spec))) return true;
         if (pattern instanceof RegExp) {
             pattern.lastIndex = 0;
             if (pattern.test(spec)) return true;
@@ -167,7 +170,7 @@ function safeRealpath(file: string, config: any): string {
 }
 
 /** A bare-specifier resolver with an environment's conditions (for the dependency optimizer). */
-export function createEnvResolver(config: any, envName: string): (spec: string) => string | null {
+export function createEnvResolver(config: any, envName: string): (spec: string, fromDir?: string) => string | null {
     const r = config.environments[envName]?.resolve ?? config.resolve;
     const resolver = createResolver({
         conditionNames: [...r.conditions, 'import', 'default'],
@@ -176,5 +179,5 @@ export function createEnvResolver(config: any, envName: string): (spec: string) 
         aliasFields: envName === 'client' ? [['browser']] : undefined,
         symlinks: !r.preserveSymlinks,
     });
-    return (spec) => resolver.resolve(config.root, spec);
+    return (spec, fromDir = config.root) => resolver.resolve(fromDir, spec);
 }

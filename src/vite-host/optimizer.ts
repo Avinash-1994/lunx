@@ -12,13 +12,15 @@ import fs from 'node:fs';
 import { builtinModules, createRequire } from 'node:module';
 import path from 'node:path';
 import { getBundler, parse } from '../engines/index.js';
-import { arraify, normalizePath } from './utils.js';
+import { arraify, mergeConfig, normalizePath } from './utils.js';
 import { getPackageName } from './plugins/resolve.js';
 
 const require = createRequire(import.meta.url);
 const RESERVED = new Set(['default', '__esModule', 'arguments', 'eval', 'await', 'yield', 'let', 'static', 'enum', 'implements', 'interface', 'package', 'private', 'protected', 'public', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'delete', 'do', 'else', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with']);
 const SCAN_SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.svelte-kit', '.react-router', '.nuxt', '.output', '.vite', 'coverage']);
 const SOURCE_RE = /\.(m?[jt]sx?|vue|svelte|astro)$/;
+/** vite.config.ts, tailwind.config.js…: Node-side code, not browser dependencies. */
+const CONFIG_RE = /\.config\.[cm]?[jt]s$|^(app|svelte|astro|nuxt|vite)\.config\./;
 
 function isEsm(file: string, source: string): boolean {
     if (/\.mjs$/.test(file)) return true;
@@ -41,6 +43,13 @@ function cjsExportNames(file: string, source: string): string[] {
     return [...new Set(keys)].filter((k) => /^[A-Za-z_$][\w$]*$/.test(k) && !RESERVED.has(k));
 }
 
+/** The package directory containing a resolved file. */
+function packageDir(file: string): string {
+    let dir = path.dirname(file);
+    while (!fs.existsSync(path.join(dir, 'package.json')) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+    return dir;
+}
+
 export function flattenId(spec: string): string {
     return spec.replace(/[/:]/g, '_').replace(/\./g, '__').replace(/(\s*>\s*)/g, '___');
 }
@@ -55,7 +64,11 @@ export class DepsOptimizer {
     readonly depsDir: string;
     readonly depsUrl: string;
 
-    constructor(private config: any, private resolve: (spec: string) => string | null, private onReload: () => void) {
+    /** Top-level optimizeDeps merged with the client environment's (Vite 6). */
+    private readonly options: Record<string, any>;
+
+    constructor(private config: any, private resolve: (spec: string, fromDir?: string) => string | null, private onReload: () => void) {
+        this.options = mergeConfig(config.optimizeDeps ?? {}, config.environments?.client?.optimizeDeps ?? {});
         this.depsDir = path.join(config.cacheDir, 'deps');
         const rel = path.relative(config.root, this.depsDir);
         this.depsUrl = rel.startsWith('..') ? `/@fs/${normalizePath(this.depsDir).replace(/^\//, '')}` : '/' + normalizePath(rel);
@@ -63,12 +76,12 @@ export class DepsOptimizer {
 
     private exclude(spec: string): boolean {
         const pkg = getPackageName(spec);
-        return arraify(this.config.optimizeDeps?.exclude ?? []).some((e: string) => e === pkg || e === spec || spec.startsWith(e + '/'));
+        return arraify(this.options.exclude ?? []).some((e: string) => e === pkg || e === spec || spec.startsWith(e + '/'));
     }
 
     /** Should this bare import be served pre-bundled? */
     shouldOptimize(spec: string, resolved: string): boolean {
-        if (this.config.optimizeDeps?.noDiscovery && !this.deps.has(spec)) return false;
+        if (this.options.noDiscovery && !this.deps.has(spec)) return false;
         if (!/[\\/]node_modules[\\/]/.test(resolved) || !/\.(m|c)?jsx?$/.test(resolved)) return false;
         return !this.exclude(spec);
     }
@@ -85,14 +98,23 @@ export class DepsOptimizer {
     }
 
     private async init(): Promise<void> {
-        for (const spec of arraify(this.config.optimizeDeps?.include ?? [])) this.add(spec);
+        for (const spec of arraify(this.options.include ?? [])) this.add(spec);
         for (const spec of this.scan()) this.add(spec);
         if (this.deps.size) await this.build();
     }
 
-    private add(spec: string): boolean {
+    private add(entry: string): boolean {
+        // Vite's nested include: "a > b" is `b` as `a` resolves it.
+        const chain = entry.split('>').map((p) => p.trim()).filter(Boolean);
+        const spec = chain.pop()!;
+        let fromDir: string | undefined;
+        for (const parent of chain) {
+            const parentFile = this.resolve(parent, fromDir);
+            if (!parentFile) return false;
+            fromDir = packageDir(parentFile);
+        }
         if (this.deps.has(spec) || builtinModules.includes(spec) || spec.startsWith('node:')) return false;
-        const resolved = this.resolve(spec);
+        const resolved = this.resolve(spec, fromDir);
         if (!resolved || !this.shouldOptimize(spec, resolved)) return false;
         this.deps.set(spec, resolved);
         return true;
@@ -114,7 +136,7 @@ export class DepsOptimizer {
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) {
                     if (!SCAN_SKIP.has(entry.name)) walk(full, depth + 1);
-                } else if (SOURCE_RE.test(entry.name)) {
+                } else if (SOURCE_RE.test(entry.name) && !CONFIG_RE.test(entry.name)) {
                     const code = fs.readFileSync(full, 'utf-8');
                     for (const m of code.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"./][^'"]*)['"]/g)) {
                         const spec = m[1]!;
@@ -217,7 +239,10 @@ export class DepsOptimizer {
                     load(id: string) {
                         if (virtual.has(id)) return virtual.get(id)!;
                         if (!id.startsWith(BUILTIN)) return null;
-                        return { code: 'module.exports = new Proxy({}, { get(_, k) { if (typeof k === "symbol" || k === "__esModule" || k === "then") return undefined; throw new Error("Node built-in module used in browser code (" + String(k) + ")"); } });', moduleType: 'js' };
+                        // As Vite's optimizer: warn on use, never throw at import (dependencies often import
+                        // server-only built-ins they never call in the browser).
+                        const name = JSON.stringify(id.slice(BUILTIN.length));
+                        return { code: `module.exports = Object.create(new Proxy({}, { get(_, k) { if (typeof k !== "symbol" && k !== "__esModule" && k !== "__proto__" && k !== "constructor" && k !== "then") console.warn("Module " + ${name} + " has been externalized for browser compatibility. Cannot access " + ${name} + "." + String(k) + " in client code."); } }));`, moduleType: 'js' };
                     },
                 }],
             },

@@ -224,7 +224,14 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
         build,
         keepProcessEnv: false,
     };
-    const userEnvironments: Record<string, any> = config.environments ?? {};
+    const userEnvironments: Record<string, any> = { client: {}, ssr: {}, ...config.environments };
+    // Vite 6 `configEnvironment`: plugins add per-environment options (resolve.noExternal, conditions…).
+    for (const name of Object.keys(userEnvironments)) {
+        for (const plugin of sortByHook(userPlugins, 'configEnvironment')) {
+            const result = await getHookHandler(plugin.configEnvironment)!.call({}, name, userEnvironments[name], { ...configEnv, isSsrTargetWebworker: false });
+            if (result) userEnvironments[name] = mergeConfig(userEnvironments[name], result);
+        }
+    }
     const environments: Record<string, any> = {};
     const envNames = new Set(['client', 'ssr', ...Object.keys(userEnvironments)]);
     for (const name of envNames) {
@@ -240,8 +247,9 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
                           ...resolve,
                           conditions: serverConditions,
                           mainFields: userResolve.mainFields ?? DEFAULT_SERVER_MAIN_FIELDS,
-                          noExternal: ssr.noExternal,
-                          external: ssr.external,
+                          // Vite 6: top-level resolve.(no)External applies to server environments too.
+                          noExternal: ssr.noExternal === true || userResolve.noExternal === true ? true : [...arraify(ssr.noExternal ?? []), ...arraify(userResolve.noExternal ?? [])],
+                          external: ssr.external === true || userResolve.external === true ? true : [...arraify(ssr.external ?? []), ...arraify(userResolve.external ?? [])],
                       },
                 build: { ...build, ssr: !isClient },
             },

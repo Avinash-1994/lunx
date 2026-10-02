@@ -34,15 +34,16 @@ export class BuildState {
     readonly moduleAssets = new Map<string, Set<string>>();
     readonly styles = new Map<string, string>();
     readonly chunkMeta = new Map<string, ViteMetadata>();
+    globalCss = '';
 
-    constructor(public config: any, public ssr: boolean, public assetFileNames: any) {}
+    constructor(public config: any, public ssr: boolean, public assetFileNames: any, public build: any = config.build) {}
 
     /** The file name Rollup's `assetFileNames` pattern gives this source. */
     assetFileName(name: string, source: Buffer | string, originalFileName?: string): string {
         const hash = crypto.createHash('sha256').update(source).digest('base64url').replace(/[-_]/g, '').slice(0, 8);
         const pattern = typeof this.assetFileNames === 'function'
             ? this.assetFileNames({ type: 'asset', name, names: [name], originalFileName, originalFileNames: originalFileName ? [originalFileName] : [], source })
-            : this.assetFileNames ?? `${this.config.build.assetsDir}/[name]-[hash][extname]`;
+            : this.assetFileNames ?? `${this.build.assetsDir}/[name]-[hash][extname]`;
         const ext = path.extname(name);
         return pattern
             .replace(/\[name\]/g, path.basename(name, ext))
@@ -89,9 +90,9 @@ export class BuildState {
     }
 }
 
-export function cssBuildPlugins(state: BuildState): any[] {
-    const { config } = state;
-    let globalCss = '';
+export type StateLookup = (ctx: any) => BuildState;
+
+export function cssBuildPlugins(getState: StateLookup): any[] {
     return [
         {
             name: 'vite:css',
@@ -99,6 +100,8 @@ export function cssBuildPlugins(state: BuildState): any[] {
                 filter: { id: /\.(css|less|sass|scss|styl|stylus|pcss|postcss|sss)(?:$|\?)/ },
                 async handler(this: any, code: string, id: string) {
                     if (!isCSSRequest(id) || SKIP_RE.test(id)) return null;
+                    const state = getState(this);
+                    const { config } = state;
                     const file = cleanUrl(id);
                     const compiled = await compileCss({
                         root: config.root,
@@ -115,7 +118,7 @@ export function cssBuildPlugins(state: BuildState): any[] {
                             if (!target || !fs.existsSync(target)) return url;
                             if (config.publicDir && target.startsWith(config.publicDir + path.sep)) return url;
                             const source = fs.readFileSync(target);
-                            if (source.length < (config.build.assetsInlineLimit ?? 4096) && !target.endsWith('.svg')) {
+                            if (source.length < (state.build.assetsInlineLimit ?? 4096) && !target.endsWith('.svg')) {
                                 return `data:${MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream'};base64,${source.toString('base64')}`;
                             }
                             const ref = state.addAsset(path.basename(target), source, normalizePath(path.relative(config.root, target)));
@@ -140,6 +143,7 @@ export function cssBuildPlugins(state: BuildState): any[] {
         {
             name: 'vite:css-post',
             async renderChunk(this: any, code: string, chunk: any) {
+                const state = getState(this);
                 const meta = state.metaFor(chunk);
                 let css = '';
                 for (const id of chunk.moduleIds) {
@@ -148,14 +152,15 @@ export function cssBuildPlugins(state: BuildState): any[] {
                     for (const ref of state.moduleAssets.get(id) ?? []) meta.importedAssets.add(state.assets.get(ref)!.fileName);
                 }
                 if (css) {
-                    if (config.build.cssCodeSplit !== false) {
+                    const config = state.config;
+                    if (state.build.cssCodeSplit !== false) {
                         const fileName = state.assetFileName(`${chunk.name}.css`, css);
                         let out = state.replacePlaceholders(css, fileName, false);
-                        if (config.build.cssMinify !== false && config.build.minify !== false) out = await minifyCss(out, fileName);
+                        if (state.build.cssMinify !== false && state.build.minify !== false) out = await minifyCss(out, fileName);
                         this.emitFile({ type: 'asset', fileName, source: out });
                         meta.importedCss.add(fileName);
                     } else {
-                        globalCss += css;
+                        state.globalCss += css;
                     }
                 }
                 const fileName = chunk.fileName ?? chunk.name;
@@ -164,10 +169,13 @@ export function cssBuildPlugins(state: BuildState): any[] {
                 return next === code ? null : { code: next, map: null };
             },
             async generateBundle(this: any, _options: any, bundle: Record<string, any>) {
+                const state = getState(this);
+                const { config } = state;
+                const globalCss = state.globalCss;
                 if (globalCss) {
-                    const fileName = state.assetFileName(`${config.build.cssFileName || 'style'}.css`, globalCss);
+                    const fileName = state.assetFileName(`${state.build.cssFileName || 'style'}.css`, globalCss);
                     let out = state.replacePlaceholders(globalCss, fileName, false);
-                    if (config.build.cssMinify !== false && config.build.minify !== false) out = await minifyCss(out, fileName);
+                    if (state.build.cssMinify !== false && state.build.minify !== false) out = await minifyCss(out, fileName);
                     this.emitFile({ type: 'asset', fileName, source: out });
                     for (const chunk of Object.values(bundle)) if (chunk.type === 'chunk' && chunk.isEntry) state.metaFor(chunk).importedCss.add(fileName);
                 }
@@ -197,12 +205,13 @@ async function minifyCss(css: string, fileName: string): Promise<string> {
     }
 }
 
-export function assetBuildPlugin(state: BuildState): any {
-    const { config } = state;
+export function assetBuildPlugin(getState: StateLookup): any {
     return {
         name: 'vite:asset',
         load(this: any, id: string) {
             if (id.startsWith('\0')) return null;
+            const state = getState(this);
+            const { config } = state;
             const file = cleanUrl(id);
             if (!path.isAbsolute(file) || !fs.existsSync(file)) return null;
             if (/[?&]raw\b/.test(id)) return { code: `export default ${JSON.stringify(fs.readFileSync(file, 'utf-8'))};`, moduleType: 'js' };
@@ -212,7 +221,7 @@ export function assetBuildPlugin(state: BuildState): any {
                 return { code: `export default ${JSON.stringify(config.base.replace(/\/?$/, '/') + normalizePath(path.relative(config.publicDir, file)))};`, moduleType: 'js' };
             }
             const source = fs.readFileSync(file);
-            const limit = typeof config.build.assetsInlineLimit === 'function' ? config.build.assetsInlineLimit(file, source) : source.length < (config.build.assetsInlineLimit ?? 4096);
+            const limit = typeof state.build.assetsInlineLimit === 'function' ? state.build.assetsInlineLimit(file, source) : source.length < (state.build.assetsInlineLimit ?? 4096);
             if ((/[?&]inline\b/.test(id) || (limit && !explicitUrl)) && !/[?&]no-inline\b/.test(id)) {
                 const mime = MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
                 return { code: `export default ${JSON.stringify(`data:${mime};base64,${source.toString('base64')}`)};`, moduleType: 'js' };
@@ -227,17 +236,18 @@ export function assetBuildPlugin(state: BuildState): any {
 }
 
 /** Vite's build manifest (`build.manifest`). */
-export function manifestPlugin(state: BuildState): any {
-    const { config } = state;
+export function manifestPlugin(getState: StateLookup): any {
     return {
         name: 'vite:manifest',
         generateBundle: {
             order: 'post',
             handler(this: any, _options: any, bundle: Record<string, any>) {
-                if (state.ssr && !config.build.ssrEmitAssets) {
+                const state = getState(this);
+                const { config } = state;
+                if (state.ssr && !state.build.ssrEmitAssets) {
                     for (const [fileName, item] of Object.entries(bundle)) if (item.type === 'asset') delete bundle[fileName];
                 }
-                if (!config.build.manifest) return;
+                if (!state.build.manifest) return;
                 const keyFor = (chunk: any): string =>
                     chunk.facadeModuleId ? normalizePath(path.relative(config.root, chunk.facadeModuleId)).replace(/\0/g, '') : `_${path.basename(chunk.fileName)}`;
                 const manifest: Record<string, any> = {};
@@ -260,7 +270,7 @@ export function manifestPlugin(state: BuildState): any {
                 for (const asset of state.assets.values()) {
                     if (asset.originalFileName && !manifest[asset.originalFileName]) manifest[asset.originalFileName] = { file: asset.fileName, src: asset.originalFileName };
                 }
-                const fileName = typeof config.build.manifest === 'string' ? config.build.manifest : '.vite/manifest.json';
+                const fileName = typeof state.build.manifest === 'string' ? state.build.manifest : '.vite/manifest.json';
                 this.emitFile({ type: 'asset', fileName, source: JSON.stringify(manifest, null, 2) });
             },
         },

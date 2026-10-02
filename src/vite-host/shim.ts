@@ -104,7 +104,7 @@ export function send(req: any, res: any, content: string | Buffer, type: string,
 }
 
 export function isRunnableDevEnvironment(env: any): boolean {
-    return !!env && typeof env.ssrLoadModule === 'function';
+    return !!env && typeof env.ssrLoadModule === 'function' && !env.isClient;
 }
 
 export function isFetchableDevEnvironment(): boolean {
@@ -156,8 +156,9 @@ export async function preview(): Promise<never> {
     throw new Error('[lunx] vite.preview() under lunx is not implemented yet');
 }
 
-export async function createBuilder(): Promise<never> {
-    throw new Error('[lunx] vite.createBuilder() under lunx is not implemented yet');
+export async function createBuilder(inlineConfig: any = {}): Promise<any> {
+    const { createBuilder: create } = await import('./build.js');
+    return create(inlineConfig);
 }
 
 export async function optimizeDeps(): Promise<void> {}

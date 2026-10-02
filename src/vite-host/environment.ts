@@ -80,6 +80,19 @@ export class DevEnvironment {
         await this.pluginContainer.close();
     }
 
+    /** Vite 6 RunnableDevEnvironment: `environment.runner.import(url)` on the server side. */
+    get runner(): any {
+        if (this.isClient) return undefined;
+        return (this._runner ??= {
+            import: (url: string) => this.ssrLoadModule(url),
+            clearCache: () => this.moduleGraph.invalidateAll(),
+            close: async () => {},
+            isClosed: () => false,
+            evaluatedModules: { clear: () => this.moduleGraph.invalidateAll() },
+        });
+    }
+    private _runner: any;
+
     /** Re-run HMR for a module as if its file had changed (Vite 6 `environment.reloadModule`). */
     async reloadModule(module: EnvironmentModuleNode): Promise<void> {
         if (!this.isClient || !module?.id || !this.moduleGraph.idToModuleMap.has(module.id)) return;

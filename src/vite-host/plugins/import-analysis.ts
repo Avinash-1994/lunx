@@ -151,7 +151,10 @@ export function importAnalysisPlugin(config: any): any {
                 }
                 if (resolved.external) return null;
                 const optimizer = isClient ? env.depsOptimizer : undefined;
-                if (optimizer && /^[\w@]/.test(spec) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(spec, resolved.id)) {
+                // As Vite: imports inside node_modules never discover new dependencies (an excluded
+                // package's own imports stay raw so framework transforms still run on them).
+                const discoverable = !/[\\/]node_modules[\\/]/.test(file) || optimizer?.deps.has(spec);
+                if (optimizer && discoverable && /^[\w@]/.test(spec) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(spec, resolved.id)) {
                     const url = await optimizer.urlFor(spec, resolved.id);
                     return { url, hmrUrl: url.replace(/\?.*$/, '') };
                 }

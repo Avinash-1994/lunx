@@ -91,35 +91,73 @@ function copyDir(src: string, dest: string): void {
     }
 }
 
-export async function build(inlineConfig: InlineConfig = {}): Promise<any> {
-    const config: any = await resolveConfig(inlineConfig, 'build', 'production');
-    const ssr = !!config.build.ssr;
-    const envName = ssr ? 'ssr' : 'client';
-    const environment: any = {
-        name: envName,
+function makeEnvironment(config: any, name: string): any {
+    return {
+        name,
         mode: 'build',
-        config: environmentConfig(config, envName),
+        config: environmentConfig(config, name),
         logger: config.logger,
         getTopLevelConfig: () => config,
         isBuilt: false,
     };
-    const envConfig = environment.config;
-    const root = config.root;
-    const outDir = path.resolve(root, config.build.outDir);
-    const write = config.build.write !== false;
+}
 
-    const ro = config.build.rollupOptions ?? {};
-    let input = ssr && typeof config.build.ssr === 'string' ? config.build.ssr : ro.input;
+/** `vite build`: one environment (client, or ssr with build.ssr). */
+export async function build(inlineConfig: InlineConfig = {}): Promise<any> {
+    const config: any = await resolveConfig(inlineConfig, 'build', 'production');
+    return buildEnvironment(config, makeEnvironment(config, config.build.ssr ? 'ssr' : 'client'));
+}
+
+/** Vite 6 `createBuilder()`: every environment, orchestrated by `builder.buildApp` when a plugin sets it. */
+export async function createBuilder(inlineConfig: InlineConfig = {}): Promise<any> {
+    const config: any = await resolveConfig(inlineConfig, 'build', 'production');
+    const environments: Record<string, any> = {};
+    for (const name of Object.keys(config.environments)) environments[name] = makeEnvironment(config, name);
+    const builder: any = {
+        config,
+        environments,
+        build: (environment: any) => buildEnvironment(config, environment),
+        async buildApp() {
+            for (const plugin of config.plugins) {
+                const hook = plugin.buildApp;
+                const handler = typeof hook === 'function' ? hook : hook?.handler;
+                if (handler) await handler.call({}, builder);
+            }
+            if (config.builder?.buildApp) return config.builder.buildApp(builder);
+            if (config.builder) {
+                for (const environment of Object.values(environments)) if (!environment.isBuilt) await builder.build(environment);
+                return;
+            }
+            const single = environments[config.build.ssr ? 'ssr' : 'client'];
+            if (!single.isBuilt) await builder.build(single);
+        },
+    };
+    return builder;
+}
+
+/** Build one environment of a resolved config on Rolldown. */
+export async function buildEnvironment(config: any, environment: any): Promise<any> {
+    const envConfig = environment.config;
+    const buildOptions = envConfig.build ?? config.build;
+    const ssr = environment.config.consumer === 'server' || !!buildOptions.ssr;
+    const envName = environment.name;
+    config._lunxBuildStates?.delete(envName);
+    const root = config.root;
+    const outDir = path.resolve(root, buildOptions.outDir);
+    const write = buildOptions.write !== false;
+
+    const ro = buildOptions.rollupOptions ?? buildOptions.rolldownOptions ?? {};
+    let input = ssr && typeof buildOptions.ssr === 'string' ? buildOptions.ssr : ro.input;
     if (!input) {
         if (ssr) throw new Error('rollupOptions.input or build.ssr must be set for an SSR build');
         input = path.join(root, 'index.html');
         throw new Error('[lunx] HTML entry builds through the Vite host are not supported yet; use lunx build without vite plugins.');
     }
 
-    if (write && (config.build.emptyOutDir ?? outDir.startsWith(root + path.sep)) && fs.existsSync(outDir)) {
+    if (write && (buildOptions.emptyOutDir ?? outDir.startsWith(root + path.sep)) && fs.existsSync(outDir)) {
         for (const entry of fs.readdirSync(outDir)) if (entry !== '.git') fs.rmSync(path.join(outDir, entry), { recursive: true, force: true });
     }
-    if (write && !ssr && config.build.copyPublicDir !== false && config.publicDir && fs.existsSync(config.publicDir)) {
+    if (write && !ssr && buildOptions.copyPublicDir !== false && config.publicDir && fs.existsSync(config.publicDir)) {
         copyDir(config.publicDir, outDir);
     }
 
@@ -150,7 +188,7 @@ export async function build(inlineConfig: InlineConfig = {}): Promise<any> {
     };
 
     const outputs = arraify(ro.output ?? {});
-    const assetsDir = config.build.assetsDir;
+    const assetsDir = buildOptions.assetsDir;
     const results: any[] = [];
     for (const userOutput of outputs) {
         const output: Record<string, any> = {};
@@ -162,8 +200,8 @@ export async function build(inlineConfig: InlineConfig = {}): Promise<any> {
             entryFileNames: ssr ? '[name].js' : `${assetsDir}/[name]-[hash].js`,
             chunkFileNames: ssr ? '[name]-[hash].js' : `${assetsDir}/[name]-[hash].js`,
             assetFileNames: `${assetsDir}/[name]-[hash][extname]`,
-            minify: !ssr && config.build.minify !== false,
-            sourcemap: config.build.sourcemap === true ? true : config.build.sourcemap || false,
+            minify: !ssr && buildOptions.minify !== false,
+            sourcemap: buildOptions.sourcemap === true ? true : buildOptions.sourcemap || false,
             ...output,
             ...(inline ? { codeSplitting: false } : {}),
         };

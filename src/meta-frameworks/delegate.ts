@@ -114,6 +114,7 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
     'React Router (framework)': { dev: 'vite', build: ['build'] },
     // `vite:<mode>`: Qwik City renders server-side in dev only in ssr mode.
     'Qwik City': { dev: 'vite:ssr', build: 'vite' },
+    'TanStack Start': { dev: 'vite', build: 'vite' },
 };
 
 /**

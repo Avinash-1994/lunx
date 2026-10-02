@@ -18,10 +18,22 @@ const SPECIAL_QUERY_RE = /[?&](?:worker|sharedworker|raw|url|inline)\b/;
 
 export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post: any[] }): any[] {
     if (config.command === 'build') {
-        const output = [].concat(config.build.rollupOptions?.output ?? {})[0] as any;
-        const state = new BuildState(config, !!config.build.ssr, output?.assetFileNames);
-        config._lunxBuildState = state;
-        const [css, cssPost] = cssBuildPlugins(state);
+        // One BuildState per environment: a builder (createBuilder) builds several with these plugins.
+        const states = new Map<string, BuildState>();
+        config._lunxBuildStates = states;
+        const getState = (ctx: any): BuildState => {
+            const env = ctx?.environment;
+            const name = env?.name ?? (config.build.ssr ? 'ssr' : 'client');
+            let state = states.get(name);
+            if (!state) {
+                const build = env?.config?.build ?? config.build;
+                const output = [].concat(build.rollupOptions?.output ?? {})[0] as any;
+                const ssr = env ? env.config.consumer === 'server' || !!build.ssr : !!config.build.ssr;
+                states.set(name, (state = new BuildState(config, ssr, output?.assetFileNames, build)));
+            }
+            return state;
+        };
+        const [css, cssPost] = cssBuildPlugins(getState);
         return [
             aliasPlugin(config),
             ...user.pre,
@@ -29,12 +41,12 @@ export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post
             css,
             oxcPlugin(config),
             jsonPlugin(config),
-            assetBuildPlugin(state),
+            assetBuildPlugin(getState),
             globImportPlugin(config),
             ...user.normal,
             cssPost,
             ...user.post,
-            manifestPlugin(state),
+            manifestPlugin(getState),
             loadFallbackPlugin(),
         ];
     }

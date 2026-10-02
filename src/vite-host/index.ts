@@ -24,8 +24,9 @@ export async function startViteHostDev(root: string, options: { port?: number; h
 export async function runViteHostBuild(root: string, options: { mode?: string } = {}): Promise<void> {
     installViteRedirect();
     if (process.cwd() !== root) process.chdir(root);
-    const { build } = await import('./build.js');
-    await build({ root, mode: options.mode });
+    // As the Vite CLI: a builder; without a `buildApp` it builds the one environment `vite build` would.
+    const { createBuilder } = await import('./build.js');
+    await (await createBuilder({ root, mode: options.mode })).buildApp();
 }
 
 /**
