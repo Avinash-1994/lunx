@@ -1,5 +1,6 @@
 /**
- * Meta-framework check: real Next.js / Astro / SvelteKit projects run through
+ * Meta-framework check: real Next.js, Nuxt, Astro, SvelteKit, React Router,
+ * VitePress, SolidStart, Docusaurus, Waku, TanStack Start and Qwik City projects run through
  * `lunx dev` and `lunx build` (which delegate to each framework's own CLI).
  * Asserts the dev server serves the page and the production build succeeds.
  *
@@ -89,6 +90,47 @@ const PROJECTS = [
             'src/routes/index.jsx': `export default function Home() {\n  return <h1>${MARKER}</h1>;\n}\n`,
         },
     },
+    {
+        name: 'docusaurus',
+        // Docusaurus' webpack build wants no package.json "type" at all.
+        type: null,
+        // Dev renders client-side; the served shell is the signal.
+        devMarker: '__docusaurus',
+        deps: { '@docusaurus/core': '3.10.2', '@docusaurus/preset-classic': '3.10.2', react: '19.2.3', 'react-dom': '19.2.3' },
+        files: {
+            'docusaurus.config.js': `module.exports = {\n  title: 'meta',\n  url: 'https://example.com',\n  baseUrl: '/',\n  presets: [['classic', { docs: false, blog: false }]],\n};\n`,
+            'babel.config.js': `module.exports = { presets: [require.resolve('@docusaurus/core/lib/babel/preset')] };\n`,
+            'src/pages/index.js': `export default function Home() {\n  return <h1>${MARKER}</h1>;\n}\n`,
+        },
+    },
+    {
+        name: 'waku',
+        deps: { waku: '1.0.0-rc.2', react: '19.3.0', 'react-dom': '19.3.0', 'react-server-dom-webpack': '19.3.0' },
+        files: {
+            'src/pages/index.jsx': `export default async function Home() {\n  return <h1>${MARKER}</h1>;\n}\nexport const getConfig = async () => ({ render: 'static' });\n`,
+        },
+    },
+    {
+        name: 'tanstack-start',
+        deps: { '@tanstack/react-start': '1.168.60', '@tanstack/react-router': '1.170.41', react: '19.2.3', 'react-dom': '19.2.3', vite: '7.1.9', '@vitejs/plugin-react': '5.2.0' },
+        files: {
+            'vite.config.js': `import { tanstackStart } from '@tanstack/react-start/plugin/vite';\nimport react from '@vitejs/plugin-react';\nexport default { plugins: [tanstackStart(), react()] };\n`,
+            'src/router.jsx': `import { createRouter } from '@tanstack/react-router';\nimport { routeTree } from './routeTree.gen';\nexport function getRouter() {\n  return createRouter({ routeTree });\n}\n`,
+            'src/routes/__root.jsx': `import { createRootRoute, HeadContent, Scripts } from '@tanstack/react-router';\nexport const Route = createRootRoute({ shellComponent: ({ children }) => (\n  <html lang="en"><head><HeadContent /></head><body>{children}<Scripts /></body></html>\n) });\n`,
+            'src/routes/index.jsx': `import { createFileRoute } from '@tanstack/react-router';\nexport const Route = createFileRoute('/')({ component: () => <h1>${MARKER}</h1> });\n`,
+        },
+    },
+    {
+        name: 'qwik-city',
+        deps: { '@builder.io/qwik': '1.20.1', '@builder.io/qwik-city': '1.20.1', vite: '7.1.9' },
+        files: {
+            'vite.config.js': `import { qwikVite } from '@builder.io/qwik/optimizer';\nimport { qwikCity } from '@builder.io/qwik-city/vite';\nexport default { plugins: [qwikCity(), qwikVite()] };\n`,
+            'tsconfig.json': JSON.stringify({ compilerOptions: { jsx: 'react-jsx', jsxImportSource: '@builder.io/qwik', module: 'ES2022', moduleResolution: 'bundler', target: 'ES2022' } }),
+            'src/root.tsx': `import { component$ } from '@builder.io/qwik';\nimport { QwikCityProvider, RouterOutlet } from '@builder.io/qwik-city';\nexport default component$(() => (\n  <QwikCityProvider><head><meta charset="utf-8" /></head><body><RouterOutlet /></body></QwikCityProvider>\n));\n`,
+            'src/entry.ssr.tsx': `import { renderToStream } from '@builder.io/qwik/server';\nimport { manifest } from '@qwik-client-manifest';\nimport Root from './root';\nexport default function (opts: any) {\n  return renderToStream(<Root />, { manifest, ...opts, containerAttributes: { lang: 'en' } });\n}\n`,
+            'src/routes/index.tsx': `import { component$ } from '@builder.io/qwik';\nexport default component$(() => <h1>${MARKER}</h1>);\n`,
+        },
+    },
 ];
 
 function freePort() {
@@ -118,14 +160,14 @@ function run(cmd, args, cwd, timeoutMs) {
 async function setup(project) {
     const dir = path.join(os.tmpdir(), `lunx-meta-${project.name}`);
     const stamp = path.join(dir, '.installed');
-    const key = JSON.stringify(project.deps);
+    const key = JSON.stringify(project.type !== undefined ? [project.deps, project.type] : project.deps);
     await fsp.mkdir(dir, { recursive: true });
     for (const [rel, content] of Object.entries(project.files)) {
         await fsp.mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
         await fsp.writeFile(path.join(dir, rel), content);
     }
     if (!fs.existsSync(stamp) || fs.readFileSync(stamp, 'utf8') !== key) {
-        await fsp.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: `meta-${project.name}`, private: true, type: 'module', dependencies: project.deps }, null, 2));
+        await fsp.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: `meta-${project.name}`, private: true, ...(project.type === null ? {} : { type: project.type ?? 'module' }), dependencies: project.deps }, null, 2));
         console.log(`installing ${project.name}...`);
         const install = await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], dir, 600_000);
         if (install.code !== 0) throw new Error(`install failed: ${install.output.slice(-400)}`);

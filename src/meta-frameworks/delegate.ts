@@ -49,7 +49,8 @@ export const META_FRAMEWORKS: MetaFramework[] = [
     { name: 'Stencil', packages: ['@stencil/core'], bin: 'stencil', args: { dev: ['build', '--dev', '--watch', '--serve'], build: ['build'], preview: ['build', '--dev', '--watch', '--serve'] }, port: (p) => ['--port', String(p)] },
     { name: 'Marko Run', packages: ['@marko/run'], bin: 'marko-run', args: { dev: ['dev'], build: ['build'], preview: ['preview'] }, port: (p) => ['--port', String(p)] },
     viteLike('SvelteKit', ['@sveltejs/kit']),
-    viteLike('Qwik City', ['@builder.io/qwik-city', '@qwik.dev/router']),
+    // Qwik City renders server-side in dev only in `--mode ssr` (its starter's dev script).
+    { ...viteLike('Qwik City', ['@builder.io/qwik-city', '@qwik.dev/router']), args: { dev: ['--mode', 'ssr'], build: ['build'], preview: ['preview'] } },
     viteLike('Analog', ['@analogjs/platform']),
 ];
 
