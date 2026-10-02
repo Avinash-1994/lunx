@@ -1,0 +1,20 @@
+{
+  "lunx": {
+    "bootMs": 1310,
+    "entryMs": 53,
+    "buildColdMs": 2988,
+    "buildWarmMs": 2113,
+    "buildExit": 0,
+    "jsBytes": 229909,
+    "brBytes": 68971
+  },
+  "vite": {
+    "bootMs": 707,
+    "entryMs": 98,
+    "buildColdMs": 867,
+    "buildWarmMs": 740,
+    "buildExit": 0,
+    "jsBytes": 220250,
+    "brBytes": 0
+  }
+}

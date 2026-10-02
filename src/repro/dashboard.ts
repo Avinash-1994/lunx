@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { RecordStore } from '../internal/store.js';
 import { createHash } from 'crypto';
 import type { BuildContext } from '../core/engine/types.js';
 import type { RootCauseIssue } from '../visual/root-cause.js';
@@ -30,8 +30,27 @@ export interface ReproAnalysis {
     analysisTime: number;
 }
 
+/** Persisted shape of a repro; mirrors the previous `repros` table columns. */
+interface ReproRow {
+    id: string;
+    title: string;
+    description: string;
+    code: string;
+    error: string | null;
+    stack_trace: string | null;
+    build_config: string | null;
+    analysis: string | null;
+    created_at: number;
+    shareable_link: string;
+    github_issue_url: string | null;
+}
+
 export class ReproDashboard {
-    private db: Database.Database | null = null;
+    /**
+     * Repro rows, stored as JSON rather than SQLite. The column names are kept
+     * snake_case so the row -> ReproCase mapping below is unchanged.
+     */
+    private db: RecordStore<ReproRow> | null = null;
     private dbPath: string;
     private github: GitHubIntegration | null = null;
 
@@ -46,23 +65,7 @@ export class ReproDashboard {
      * Initialize database
      */
     init(): void {
-        this.db = new Database(this.dbPath);
-
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS repros (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                description TEXT,
-                code TEXT NOT NULL,
-                error TEXT,
-                stack_trace TEXT,
-                build_config TEXT,
-                analysis TEXT,
-                created_at INTEGER NOT NULL,
-                shareable_link TEXT,
-                github_issue_url TEXT
-            )
-        `);
+        this.db = new RecordStore<ReproRow>(this.dbPath);
     }
 
     /**
@@ -91,8 +94,8 @@ export class ReproDashboard {
         }
 
         // Update database with issue URL
-        const stmt = this.db!.prepare('UPDATE repros SET github_issue_url = ? WHERE id = ?');
-        stmt.run(result.url, reproId);
+        const existing = this.db!.get(reproId);
+        if (existing) this.db!.put({ ...existing, github_issue_url: result.url });
 
         return result.url;
     }
@@ -107,23 +110,19 @@ export class ReproDashboard {
         const createdAt = Date.now();
         const shareableLink = this.generateShareableLink(id);
 
-        const stmt = this.db!.prepare(`
-            INSERT INTO repros (id, title, description, code, error, stack_trace, build_config, analysis, created_at, shareable_link)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        stmt.run(
+        this.db!.put({
             id,
-            repro.title,
-            repro.description || '',
-            repro.code,
-            repro.error || null,
-            repro.stackTrace || null,
-            repro.buildConfig ? JSON.stringify(repro.buildConfig) : null,
-            repro.analysis ? JSON.stringify(repro.analysis) : null,
-            createdAt,
-            shareableLink
-        );
+            title: repro.title,
+            description: repro.description || '',
+            code: repro.code,
+            error: repro.error || null,
+            stack_trace: repro.stackTrace || null,
+            build_config: repro.buildConfig ? JSON.stringify(repro.buildConfig) : null,
+            analysis: repro.analysis ? JSON.stringify(repro.analysis) : null,
+            created_at: createdAt,
+            shareable_link: shareableLink,
+            github_issue_url: null,
+        });
 
         return id;
     }
@@ -201,8 +200,7 @@ export class ReproDashboard {
     getRepro(id: string): ReproCase | null {
         if (!this.db) this.init();
 
-        const stmt = this.db!.prepare('SELECT * FROM repros WHERE id = ?');
-        const row = stmt.get(id) as any;
+        const row = this.db!.get(id);
 
         if (!row) return null;
 
@@ -211,13 +209,13 @@ export class ReproDashboard {
             title: row.title,
             description: row.description,
             code: row.code,
-            error: row.error,
-            stackTrace: row.stack_trace,
+            error: row.error ?? undefined,
+            stackTrace: row.stack_trace ?? undefined,
             buildConfig: row.build_config ? JSON.parse(row.build_config) : undefined,
             analysis: row.analysis ? JSON.parse(row.analysis) : undefined,
             createdAt: row.created_at,
             shareableLink: row.shareable_link,
-            githubIssueUrl: row.github_issue_url
+            githubIssueUrl: row.github_issue_url ?? undefined
         };
     }
 
@@ -227,21 +225,20 @@ export class ReproDashboard {
     getAllRepros(): ReproCase[] {
         if (!this.db) this.init();
 
-        const stmt = this.db!.prepare('SELECT * FROM repros ORDER BY created_at DESC');
-        const rows = stmt.all() as any[];
+        const rows = this.db!.list({ sortBy: 'created_at', desc: true });
 
         return rows.map(row => ({
             id: row.id,
             title: row.title,
             description: row.description,
             code: row.code,
-            error: row.error,
-            stackTrace: row.stack_trace,
+            error: row.error ?? undefined,
+            stackTrace: row.stack_trace ?? undefined,
             buildConfig: row.build_config ? JSON.parse(row.build_config) : undefined,
             analysis: row.analysis ? JSON.parse(row.analysis) : undefined,
             createdAt: row.created_at,
             shareableLink: row.shareable_link,
-            githubIssueUrl: row.github_issue_url
+            githubIssueUrl: row.github_issue_url ?? undefined
         }));
     }
 
@@ -251,8 +248,8 @@ export class ReproDashboard {
     private updateReproAnalysis(id: string, analysis: ReproAnalysis): void {
         if (!this.db) return;
 
-        const stmt = this.db.prepare('UPDATE repros SET analysis = ? WHERE id = ?');
-        stmt.run(JSON.stringify(analysis), id);
+        const existing = this.db.get(id);
+        if (existing) this.db.put({ ...existing, analysis: JSON.stringify(analysis) });
     }
 
     /**
@@ -328,9 +325,7 @@ export class ReproDashboard {
      * Close database connection
      */
     close(): void {
-        if (this.db) {
-            this.db.close();
-            this.db = null;
-        }
+        // Nothing to close: writes are flushed synchronously on every mutation.
+        this.db = null;
     }
 }

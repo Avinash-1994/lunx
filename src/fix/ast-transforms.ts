@@ -1,5 +1,5 @@
 import * as acorn from 'acorn';
-import * as walk from 'acorn-walk';
+import * as walk from '../internal/ast-walk.js';
 
 /**
  * Auto-Fix Engine

@@ -1,6 +1,8 @@
-import { Page } from 'puppeteer';
+import type { Page } from 'puppeteer';
 import { AuditGroup, AuditResult, AuditContext } from './types.js';
-import axe from 'axe-core';
+// axe-core is injected into the page by file path below and runs in the browser
+// context, so a static import here only risked ERR_MODULE_NOT_FOUND: it is an
+// optional peer, absent from a default install.
 import fs from 'fs';
 import path from 'path';
 

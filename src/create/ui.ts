@@ -1,6 +1,6 @@
 
 import readline from 'readline';
-import kleur from 'kleur';
+import kleur from '../internal/colors.js';
 
 type Key = {
     name: string;

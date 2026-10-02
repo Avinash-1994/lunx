@@ -1,11 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
-import kleur from 'kleur';
+import kleur from '../internal/colors.js';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const yaml = require('js-yaml');
+import yaml from '../internal/yaml.js';
 
-import { z } from 'zod';
+import { z } from '../internal/schema.js';
 import { log } from '../utils/logger.js';
 import { spaPreset, ssrPreset, ssgPreset } from '../presets/index.js';
 
@@ -54,6 +54,13 @@ export const BuildConfigSchema = z.object({
   }).optional(),
   build: z.object({
     minify: z.boolean().optional(),
+    /** Extra whole-bundle SWC minify pass: ~6% smaller JS, ~1.1s slower. Default true. */
+    globalMinify: z.boolean().optional(),
+    /** Emit .gz/.br siblings. `false` to skip, or tune brotli quality (0-11). */
+    compress: z.union([
+      z.boolean(),
+      z.object({ brotliQuality: z.number().optional() }),
+    ]).optional(),
     sourcemap: z.union([
       z.enum(['inline', 'external', 'hidden', 'none']),
       z.boolean()
@@ -127,6 +134,8 @@ export type BuildConfig = {
   };
   build?: {
     minify?: boolean;
+    globalMinify?: boolean;
+    compress?: boolean | { brotliQuality?: number };
     sourcemap?: 'inline' | 'external' | 'hidden' | 'none';
     splitting?: boolean;
     cssModules?: boolean;
@@ -497,8 +506,35 @@ async function loadModuleConfig(tsPath: string, cwd: string): Promise<any> {
         'esbuild', 'zod', 'kleur',
         'svelte-preprocess', 'svelte', 'esbuild-svelte', 'js-yaml',
         'coffeescript', 'pug', 'stylus', 'less', 'postcss', 'sass', 'postcss-load-config', 'sugarss',
-        'react', 'react-dom'
-      ]
+        'react', 'react-dom',
+        // The config imports the tool itself for `defineConfig`. It is not a
+        // dependency of the user's project, so it can never be bundled here;
+        // the plugin below supplies it instead.
+        'lunx', 'lunx-dev'
+      ],
+      plugins: [
+        {
+          name: 'lunx-self-import',
+          setup(build) {
+            // A config written as `import { defineConfig } from 'lunx'` must
+            // work whether the package is installed as `lunx` or `lunx-dev`,
+            // and even when neither is resolvable from the project (linked
+            // checkouts, pnpm, monorepos).
+            build.onResolve({ filter: /^lunx(-dev)?$/ }, () => ({
+              path: 'lunx-self',
+              namespace: 'lunx-self',
+            }));
+            build.onLoad({ filter: /.*/, namespace: 'lunx-self' }, () => ({
+              // defineConfig is an identity helper that exists for types only.
+              contents: [
+                'export const defineConfig = (c) => c;',
+                'export default { defineConfig };',
+              ].join(String.fromCharCode(10)),
+              loader: 'js',
+            }));
+          },
+        },
+      ],
     });
 
     const mod = await import('file://' + outfile);

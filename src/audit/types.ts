@@ -1,4 +1,4 @@
-import { Page } from 'puppeteer';
+import type { Page } from 'puppeteer';
 
 export type FrameworkType = 'react' | 'vue' | 'angular' | 'svelte' | 'solid' | 'vanilla';
 

@@ -57,10 +57,19 @@ export class CoreBuildEngine {
      * but which don't appear in the source and are therefore missing from the graph.
      */
     private async injectSyntheticDeps(graph: DependencyGraph, rootDir: string) {
-        // Known SWC-injected specifiers per file type
+        // The automatic JSX runtime injects an import the source never wrote.
+        // Which one depends on the project: react, preact, solid or qwik.
+        // Hardcoding react meant Preact and Solid builds emitted a require()
+        // for a specifier that was never added to the graph, so the bundle
+        // died with "Module not found: preact/jsx-runtime".
+        const importSource = await detectJsxImportSource(rootDir);
+        const runtimes = [`${importSource}/jsx-runtime`, `${importSource}/jsx-dev-runtime`];
+        // Solid's JSX lowers to solid-js/web calls rather than a jsx() factory.
+        if (importSource === 'solid-js') runtimes.push('solid-js/web');
+
         const JSX_SYNTHETIC: Record<string, string[]> = {
-            '.jsx': ['react/jsx-runtime'],
-            '.tsx': ['react/jsx-runtime'],
+            '.jsx': runtimes,
+            '.tsx': runtimes,
         };
 
         for (const [nodeId, node] of graph.nodes) {
@@ -223,4 +232,24 @@ export class CoreBuildEngine {
             };
         }
     }
+}
+
+
+/**
+ * JSX import source for a project, detected from its dependencies.
+ * Mirrors the resolver the transform layer uses so the graph and the emitted
+ * code agree on which runtime the bundle needs.
+ */
+async function detectJsxImportSource(rootDir: string): Promise<string> {
+    try {
+        const fsp = await import('fs/promises');
+        const raw = JSON.parse(await fsp.readFile(path.join(rootDir, 'package.json'), 'utf-8'));
+        const deps = { ...raw.dependencies, ...raw.devDependencies };
+        if (deps['solid-js']) return 'solid-js';
+        if (deps['preact'] && !deps['react']) return 'preact';
+        if (deps['@builder.io/qwik']) return '@builder.io/qwik';
+    } catch {
+        // No readable package.json; React is the safe default.
+    }
+    return 'react';
 }

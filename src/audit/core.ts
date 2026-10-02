@@ -9,7 +9,8 @@
  * - BundlePhobia integration for bundle analysis
  */
 
-import puppeteer, { Browser, Page } from 'puppeteer';
+import type { Browser, Page } from 'puppeteer';
+import { loadPuppeteer } from './puppeteer.js';
 import path from 'path';
 import { AccessibilityAudit } from './a11y.js';
 import { PerformanceAudit } from './perf.js';
@@ -39,7 +40,7 @@ export class AuditEngine {
         log.info('🚀 Initializing audit worker pool...');
 
         for (let i = 0; i < this.MAX_WORKERS; i++) {
-            const browser = await puppeteer.launch({
+            const browser = await (await loadPuppeteer()).launch({
                 headless: true,
                 args: [
                     '--no-sandbox',
@@ -130,7 +131,7 @@ export class AuditEngine {
 
         log.info(`🔍 Starting enhanced audit for ${targetUrl}...`);
 
-        const browser = parallel ? await this.getWorker() : await puppeteer.launch({
+        const browser = parallel ? await this.getWorker() : await (await loadPuppeteer()).launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });

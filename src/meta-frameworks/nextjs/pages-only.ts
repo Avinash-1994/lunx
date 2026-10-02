@@ -95,42 +95,28 @@ export function injectWebpackOverride(configContent: string, lunxSwcLoaderPath: 
   return patched;
 }
 
-// ─── SQLite transform cache ────────────────────────────────────────────────
+// ─── Transform cache ───────────────────────────────────────────────────────
 
-import { createRequire } from 'module';
-const _require = createRequire(import.meta.url);
+import { CacheStore } from '../../internal/store.js';
 
-let _db: any = null;
+/** One store per cache directory; callers pass the directory on every call. */
+const _caches = new Map<string, CacheStore<string>>();
 
-function getDb(cacheDir: string): any {
-  if (_db) return _db;
-  try {
-    const Database = _require('better-sqlite3');
-    fs.mkdirSync(cacheDir, { recursive: true });
-    _db = new Database(path.join(cacheDir, 'lunx-transform.db'));
-    _db.exec(`CREATE TABLE IF NOT EXISTS transforms (
-      fingerprint TEXT PRIMARY KEY,
-      output      TEXT NOT NULL,
-      ts          INTEGER NOT NULL
-    )`);
-  } catch {
-    _db = null; // graceful degradation if sqlite unavailable
+function getCache(cacheDir: string): CacheStore<string> {
+  let store = _caches.get(cacheDir);
+  if (!store) {
+    store = new CacheStore<string>(path.join(cacheDir, 'transforms'));
+    _caches.set(cacheDir, store);
   }
-  return _db;
+  return store;
 }
 
 export function getCachedTransform(fingerprint: string, cacheDir: string): string | null {
-  const db = getDb(cacheDir);
-  if (!db) return null;
-  const row = db.prepare('SELECT output FROM transforms WHERE fingerprint = ?').get(fingerprint);
-  return row ? row.output : null;
+  return getCache(cacheDir).get(fingerprint);
 }
 
 export function setCachedTransform(fingerprint: string, output: string, cacheDir: string): void {
-  const db = getDb(cacheDir);
-  if (!db) return;
-  db.prepare('INSERT OR REPLACE INTO transforms (fingerprint, output, ts) VALUES (?, ?, ?)')
-    .run(fingerprint, output, Date.now());
+  getCache(cacheDir).set(fingerprint, output);
 }
 
 // ─── LunxSwcTransformer (used by the webpack loader) ─────────────────────

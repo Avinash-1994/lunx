@@ -3,16 +3,42 @@
  * Server-side rendering for React/Next.js/Remix
  */
 
-import * as React from 'react';
-import { renderToString } from 'react-dom/server';
 import { RenderContext } from './server.js';
+
+/**
+ * React is the *user's* dependency, not ours -- a build tool must not pin a UI
+ * framework version. It is resolved from the project at render time, so the
+ * React SSR path costs nothing when the project is Vue, Svelte or Solid.
+ */
+type ReactModule = { createElement: (type: any, props?: any, ...children: any[]) => unknown };
+type ReactDOMServerModule = { renderToString: (element: unknown) => string };
+
+let reactCache: Promise<[ReactModule, ReactDOMServerModule]> | null = null;
+
+async function loadReact(): Promise<[ReactModule, ReactDOMServerModule]> {
+    reactCache ??= (async () => {
+        try {
+            const [react, reactDomServer] = await Promise.all([
+                import('react') as Promise<any>,
+                import('react-dom/server') as Promise<any>,
+            ]);
+            return [(react.default ?? react) as ReactModule, (reactDomServer.default ?? reactDomServer) as ReactDOMServerModule];
+        } catch (cause) {
+            throw new Error(
+                'React SSR requires `react` and `react-dom` in your project. Install them with: npm install react react-dom',
+                { cause: cause as Error },
+            );
+        }
+    })();
+    return reactCache;
+}
 
 export interface ReactSSROptions {
     /** Enable streaming */
     streaming?: boolean;
 
     /** Custom wrapper component */
-    wrapper?: React.ComponentType<any>;
+    wrapper?: unknown;
 }
 
 export class ReactSSRRenderer {
@@ -27,13 +53,8 @@ export class ReactSSRRenderer {
      */
     async render(Component: any, context: RenderContext): Promise<string> {
         try {
-            console.log('DEBUG: ReactSSRRenderer.render', {
-                ReactType: typeof React,
-                ReactIsUndef: React === undefined,
-                ComponentType: typeof Component,
-                ComponentDefault: typeof Component?.default
-            });
             // Create element with props
+            const [React, { renderToString }] = await loadReact();
             const element = React.createElement(Component.default || Component, {
                 ...context.data,
                 params: context.params,

@@ -65,6 +65,15 @@ function printProfileReport(result: any) {
 export default {
   options: (yargs: any) => {
     return yargs
+      .option('root', {
+        alias: 'r',
+        type: 'string',
+        description: 'Project root directory (defaults to the current directory)'
+      })
+      .option('outDir', {
+        type: 'string',
+        description: 'Output directory, relative to the project root'
+      })
       .option('prod', {
         type: 'boolean',
         description: 'Force production mode',
@@ -95,14 +104,18 @@ export default {
       process.env.LUNX_FAST_PATH = '1';
     }
 
-    const telemetry = new Telemetry(process.cwd());
+    const root = args.root ? path.resolve(process.cwd(), args.root) : process.cwd();
+
+    const telemetry = new Telemetry(root);
     await telemetry.init();
     telemetry.start();
 
     try {
       const { loadConfig } = await import('../../config/index.js');
-      const config = await loadConfig(process.cwd());
+      const config = await loadConfig(root);
+      config.root = root;
       config.mode = args.prod !== false ? 'production' : config.mode || 'development';
+      if (args.outDir) (config as any).outDir = args.outDir;
 
       if (args['compat-rollup']) {
         (config as any).compatRollup = true;
@@ -121,7 +134,7 @@ export default {
 
       // Env loading
       const { loadEnv, warnSensitiveEnv } = await import('../../env.js');
-      const env = loadEnv(config.mode as 'development' | 'production' | 'test', process.cwd());
+      const env = loadEnv(config.mode as 'development' | 'production' | 'test', root);
       warnSensitiveEnv(env);
       (config as any).__envDefines = { ...env.define, ...env.metaEnv };
 
@@ -130,7 +143,7 @@ export default {
       const result = await runBuild(config);
       const elapsed = Math.round(performance.now() - t0);
 
-      const outDir = path.resolve(process.cwd(), (config as any).outDir || 'dist');
+      const outDir = path.resolve(root, (config as any).outDir || 'dist');
       await printBuildSummary(outDir, elapsed);
 
       if (args.profile) {
@@ -145,8 +158,7 @@ export default {
       // NEW-04: --watch mode
       if (args.watch) {
         console.log('\n  Watching for changes... (Ctrl+C to stop)\n');
-        const chokidar = await import('chokidar');
-        const root = config.root ?? process.cwd();
+        const chokidar = await import('../../internal/watcher.js');
         const srcDir = path.join(root, 'src');
         const watcher = chokidar.watch(srcDir, { ignoreInitial: true, persistent: true });
 

@@ -80,7 +80,7 @@ export class DevWatcher extends EventEmitter {
 
     private async startChokidar(ignored: string[]) {
         try {
-            const { default: chokidar } = await import('chokidar');
+            const { default: chokidar } = await import('../internal/watcher.js');
             this.chokidarWatcher = chokidar.watch(this.rootDir, {
                 ignored,
                 ignoreInitial: true

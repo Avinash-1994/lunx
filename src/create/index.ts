@@ -1,8 +1,8 @@
 
 import readline from 'readline';
-import { z } from 'zod';
+import { z } from '../internal/schema.js';
 import { log } from '../utils/logger.js';
-import kleur from 'kleur';
+import kleur from '../internal/colors.js';
 import { templateManager } from '../templates/manager.js';
 
 // Types

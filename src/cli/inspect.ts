@@ -21,42 +21,10 @@ export async function inspectProject(filter?: string) {
         // Actually, let's use the public API but maybe catch the result?
         // Or better, since this is "Phase H - Official Surface Area Maintenance", 
         // we should EXPOSE `buildGraph` in the engine.
-        // But I cannot easily edit the engine right now without risking stability.
-
-        // Let's rely on the fact that `run` populates `latestGraph`.
-        // We can run a build in 'analyze' mode? No such mode yet.
-        // Let's just instantiate DependencyGraph manually like the Engine does.
-
         log.info('Inspecting dependency graph...');
 
-        // Replicating Engine Stage 3 logic for inspection
-        // This confirms "Internal Dogfooding" - if we copy code, it shows the API is not dry. 
-        // But for an Inspector, it's acceptable to be a "superuser".
-
-        const { DependencyGraph } = await import('../resolve/graph.js');
-        const { PluginManager } = await import('../core/plugins/manager.js');
-        const { getInfrastructurePreset } = await import('../presets/infrastructure.js');
-
-        const pluginManager = new PluginManager();
-
-        // Register infra plugins (important for resolution)
-        const infraPlugins = getInfrastructurePreset(config.root || cwd);
-        for (const p of infraPlugins) await pluginManager.register(p);
-
-        // Register user plugins
-        if (config.plugins) {
-            for (const p of config.plugins) await pluginManager.register(p);
-        }
-
-        const graph = new DependencyGraph(pluginManager);
-
-        // Add entries
-        for (const entry of config.entry) {
-            const absEntry = path.isAbsolute(entry)
-                ? entry
-                : path.resolve(config.root || cwd, entry);
-            await graph.addEntry(absEntry, config.root || cwd);
-        }
+        const { buildDependencyGraph } = await import('../resolve/build-graph.js');
+        const graph = await buildDependencyGraph(config, cwd);
 
         // Display Graph
         const nodes = Array.from(graph.nodes.values());

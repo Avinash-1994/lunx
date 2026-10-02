@@ -103,7 +103,11 @@ export class Transformer {
                         mode: ctx.mode,
                         format: 'cjs'
                     }, ctx);
-                    return { id: m.id, code: transformed.code };
+                    // Framework compilers (Vue SFC, Svelte, Astro) emit ESM
+                    // regardless of the requested format. The bundler wraps
+                    // every module in a CommonJS factory, so leaving `import`
+                    // in place produced bundles that failed to parse.
+                    return { id: m.id, code: lowerToCommonJs(transformed.code, m.path) };
                 }));
                 results.push(...pluginResults);
             })());
@@ -114,7 +118,14 @@ export class Transformer {
             pipelinePromises.push((async () => {
                 const batches: Record<string, any[]> = {};
                 const isProd = ctx.mode === 'production' || ctx.mode === 'build';
-                const minifyEnabled = isProd;
+                // Per-module minification is unsafe here: each module is
+                // minified on its own, before the bundler wraps it in a
+                // CommonJS factory, so SWC mangles what look like free
+                // top-level bindings -- including `Object`, `exports` and
+                // `require` -- and the wrapped result collides with the
+                // factory's own parameters. The whole bundle is minified once
+                // in optimize.ts, which is both correct and smaller.
+                const minifyEnabled = false;
 
                 nativeBatch.forEach(m => {
                     const ext = m.path.split('.').pop() || 'js';
@@ -127,11 +138,21 @@ export class Transformer {
                 });
 
                 for (const [loader, batch] of Object.entries(batches)) {
+                    // JSX must compile against the project's own runtime.
+                    // Without this a Preact or Solid build silently pulled in
+                    // react/jsx-runtime (when React happened to be installed),
+                    // producing elements the framework's renderer ignores.
+                    const jsxImportSource = await resolveJsxImportSource(ctx);
+
                     const config = batch.map(m => ({
                         path: m.path,
                         content: m.content,
                         loader: loader,
-                        minify: minifyEnabled
+                        minify: minifyEnabled,
+                        jsxImportSource,
+                        // Modules are emitted into a CommonJS factory by the
+                        // bundler, so they must be lowered out of ESM here.
+                        module: 'commonjs' as const
                     }));
 
                     try {
@@ -291,5 +312,72 @@ export class Transformer {
         } catch {
             // postcss not installed — skip silently
         }
+    }
+}
+
+
+/**
+ * The JSX import source for the project being built: the configured framework's
+ * preset, else detected from the project's dependencies, else React.
+ */
+async function resolveJsxImportSource(ctx: BuildContext): Promise<string | undefined> {
+    const configured = (ctx.config as any)?.jsx?.importSource ?? (ctx.config as any)?.jsxImportSource;
+    if (typeof configured === 'string') return configured;
+
+    const framework = (ctx.config as any)?.framework ?? (ctx.config as any)?.adapter;
+    if (typeof framework === 'string') {
+        try {
+            const { getFrameworkPreset } = await import('../../presets/frameworks.js');
+            const preset = getFrameworkPreset(framework as any);
+            if (preset?.jsx?.importSource) return preset.jsx.importSource;
+        } catch {
+            // Unknown framework name; fall through to dependency detection.
+        }
+    }
+
+    // Detect from the project's dependencies so a zero-config Preact or Solid
+    // app still compiles JSX against the right runtime.
+    try {
+        const fsp = await import('fs/promises');
+        const pathMod = await import('path');
+        const raw = await fsp.readFile(pathMod.join(ctx.rootDir, 'package.json'), 'utf-8');
+        const deps = { ...JSON.parse(raw).dependencies, ...JSON.parse(raw).devDependencies };
+        if (deps['solid-js']) return 'solid-js';
+        if (deps['preact'] && !deps['react']) return 'preact';
+        if (deps['@builder.io/qwik']) return '@builder.io/qwik';
+    } catch {
+        // No package.json, or unreadable: leave it to SWC's default.
+    }
+    return undefined;
+}
+
+
+/** True when the code still has top-level ESM syntax the CJS wrapper cannot hold. */
+function hasEsmSyntax(code: string): boolean {
+    return /^\s*(import\s|export\s|export\{|import\{)/m.test(code);
+}
+
+/**
+ * Lowers ESM to CommonJS with SWC. Returns the input unchanged when it is
+ * already CJS or when SWC cannot parse it, so a compiler we do not recognise
+ * can never break the build outright.
+ */
+function lowerToCommonJs(code: string, filePath: string): string {
+    if (!hasEsmSyntax(code)) return code;
+    try {
+        const swc = require('@swc/core');
+        const result = swc.transformSync(code, {
+            filename: filePath,
+            jsc: {
+                parser: { syntax: 'ecmascript', jsx: false },
+                target: 'es2020',
+            },
+            module: { type: 'commonjs', strictMode: false },
+            minify: false,
+            sourceMaps: false,
+        });
+        return result.code;
+    } catch {
+        return code;
     }
 }

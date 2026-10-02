@@ -25,7 +25,11 @@ export async function startDevServer(cfg: BuildConfig) {
 
     // 1. Find available port FIRST (before creating server)
     let port = cfg.server?.port || cfg.port || 5173;
-    const host = cfg.server?.host || '0.0.0.0';
+    // `0.0.0.0` is IPv4-only, but browsers resolve `localhost` to ::1 first, so
+    // binding it leaves WebSocket (HMR) connections hanging on IPv6. `::` binds
+    // dual-stack and serves both families.
+    const configuredHost = cfg.server?.host;
+    const host = !configuredHost || configuredHost === '0.0.0.0' ? '::' : configuredHost;
 
     // Check port availability
     const isPortAvailable = (p: number): Promise<boolean> => {
@@ -70,21 +74,14 @@ export async function startDevServer(cfg: BuildConfig) {
             })();
         }
 
-        const expectsHtml = req.headers.accept?.includes('text/html') || pathname === '/' || pathname === '/index.html';
-        if (!expectsHtml) {
-            await initPromise;
-            if ((server as any).__lunx_handler) {
-                return (server as any).__lunx_handler(req, res);
-            }
-        }
-
-        // Service Shell (Phase S3 Mastery)
-        if (pathname === '/' || pathname === '/index.html') {
-            const indexPath = path.join(root, 'index.html');
-            if (fs.existsSync(indexPath)) {
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                return res.end(fs.readFileSync(indexPath));
-            }
+        // Every request, HTML included, waits for the real pipeline.
+        // Serving index.html straight off disk used to skip the dev server's
+        // HTML transforms -- the HMR client and the React Refresh preamble
+        // among them -- so the very first page load of a cold start died with
+        // "$RefreshReg$ is not defined" and never recovered.
+        await initPromise;
+        if ((server as any).__lunx_handler) {
+            return (server as any).__lunx_handler(req, res);
         }
 
         // Immediate Splash Fallback

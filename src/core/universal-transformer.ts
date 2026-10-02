@@ -190,9 +190,15 @@ export class UniversalTransformer {
             const swcModule = await import('@swc/core');
             const swc = (swcModule as any).default || swcModule;
 
-            // Detect React version to use appropriate transform
+            // The automatic runtime is the default: it is what React >= 17,
+            // Preact, Solid and every modern toolchain expect, and it needs no
+            // `import React` in user code. Classic is used only when we can
+            // positively identify React 16 or older, because emitting
+            // `React.createElement` without injecting the import produces a
+            // page that dies with "React is not defined".
             const reactVersion = await this.getPackageVersion('react');
-            const useAutomatic = (reactVersion && parseInt(reactVersion) >= 17) || !!jsxOptions?.importSource;
+            const majorReact = reactVersion ? parseInt(reactVersion, 10) : NaN;
+            const useAutomatic = !!jsxOptions?.importSource || !Number.isFinite(majorReact) || majorReact >= 17;
 
             const output = await swc.transform(code, {
                 filename: filePath,
@@ -923,21 +929,51 @@ if (import.meta.hot) {
         return { code };
     }
 
+    /**
+     * Resolves a dependency's version the way Node resolves the package:
+     * walking up every parent `node_modules`, then falling back to
+     * `require.resolve`. Looking only at `<root>/node_modules` missed hoisted,
+     * pnpm and workspace layouts, which silently changed how JSX was compiled.
+     */
     private async getPackageVersion(packageName: string): Promise<string | null> {
         if (this.packageVersionCache.has(packageName)) {
             return this.packageVersionCache.get(packageName)!;
         }
 
-        try {
-            const pkgPath = path.join(this.root, 'node_modules', packageName, 'package.json');
-            const content = await fs.readFile(pkgPath, 'utf-8');
-            const pkg = JSON.parse(content);
-            const version = pkg.version;
-            this.packageVersionCache.set(packageName, version);
-            return version;
-        } catch {
-            this.packageVersionCache.set(packageName, null);
-            return null;
+        const read = async (pkgPath: string): Promise<string | null> => {
+            try {
+                const pkg = JSON.parse(await fs.readFile(pkgPath, 'utf-8'));
+                return typeof pkg.version === 'string' ? pkg.version : null;
+            } catch {
+                return null;
+            }
+        };
+
+        let dir = this.root;
+        while (true) {
+            const version = await read(path.join(dir, 'node_modules', packageName, 'package.json'));
+            if (version) {
+                this.packageVersionCache.set(packageName, version);
+                return version;
+            }
+            const parent = path.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
         }
+
+        try {
+            const { createRequire } = await import('module');
+            const require = createRequire(path.join(this.root, 'package.json'));
+            const version = await read(require.resolve(`${packageName}/package.json`));
+            if (version) {
+                this.packageVersionCache.set(packageName, version);
+                return version;
+            }
+        } catch {
+            // Package genuinely absent, or it hides its package.json behind exports.
+        }
+
+        this.packageVersionCache.set(packageName, null);
+        return null;
     }
 }

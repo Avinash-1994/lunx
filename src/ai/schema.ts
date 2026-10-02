@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from '../internal/schema.js';
 
 export const ProjectProfileSchema = z.object({
     framework: z.string().optional(),

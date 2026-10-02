@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import * as acorn from 'acorn';
-import { simple } from 'acorn-walk';
+import { simple } from '../internal/ast-walk.js';
 
 /**
  * Coverage Audit Tool
