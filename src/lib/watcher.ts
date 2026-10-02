@@ -231,6 +231,8 @@ export class FSWatcher extends EventEmitter {
             w.on('error', (err) => this.emit('error', err));
             this.watchers.set(dir, w);
         } catch (err) {
+            // The directory went away between readdir and watch (a build emptying its output): not an error.
+            if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
             this.emit('error', err as Error);
         }
     }

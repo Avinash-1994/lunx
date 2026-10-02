@@ -12,6 +12,7 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { watch } from '../lib/watcher.js';
 import { WebSocketServer } from '../lib/ws.js';
 import { getHookHandler, resolveConfig, sortByHook, type InlineConfig, type ResolvedConfig } from './config.js';
@@ -37,6 +38,7 @@ import {
 } from './utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 const MIME: Record<string, string> = {
     '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -133,6 +135,16 @@ function createWsHotChannel(config: ResolvedConfig): HotChannel & { attach(serve
     } as any;
 }
 
+function noopWatcher(): any {
+    const { EventEmitter } = require('node:events') as typeof import('node:events');
+    const w: any = new EventEmitter();
+    w.add = async () => {};
+    w.unwatch = () => {};
+    w.close = async () => {};
+    w.getWatched = () => ({});
+    return w;
+}
+
 function clientRuntime(config: ResolvedConfig): string {
     const file = path.join(__dirname, 'client', 'client.js');
     const code = fs.readFileSync(file, 'utf-8');
@@ -165,7 +177,8 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
     const ws = createWsHotChannel(config);
     ws.attach(httpServer ?? (typeof config.server.hmr === 'object' ? (config.server.hmr as any).server : null));
 
-    const watcher = watch(config.root, {
+    // `server.watch: null` (child compilers such as React Router's) turns file watching off, as in Vite.
+    const watcher: any = config.inlineConfig?.server?.watch === null || (config as any).server.watch === null ? noopWatcher() : watch(config.root, {
         ignoreInitial: true,
         ignored: [
             '**/node_modules/**',
@@ -176,6 +189,7 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
         ],
     });
 
+    watcher.on('error', (err: Error) => config.logger.warn(`file watcher: ${err.message}`));
     const environments: Record<string, DevEnvironment> = {};
     for (const name of Object.keys(config.environments)) {
         environments[name] = new DevEnvironment(name, config, name === 'client' ? ws : noopHotChannel());
