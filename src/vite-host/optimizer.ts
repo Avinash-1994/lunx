@@ -37,19 +37,19 @@ function isEsm(file: string, source: string): boolean {
  * Evaluate a CommonJS module with `require` resolved under the environment's
  * conditions (Node's own require ignores them: React's react-server build).
  */
-function evaluateCjs(file: string, resolveRequire: (spec: string, dir: string) => string | null, cache = new Map<string, { exports: any }>()): any {
-    const cached = cache.get(file);
-    if (cached) return cached.exports;
+function evaluateCjs(file: string, resolveRequire: (spec: string, dir: string) => string | null, loaded = new Map<string, { exports: any }>()): any {
+    const done = loaded.get(file);
+    if (done) return done.exports;
     if (file.endsWith('.json')) return JSON.parse(fs.readFileSync(file, 'utf-8'));
     if (file.endsWith('.node') || file.endsWith('.mjs')) return require(file);
     const module = { exports: {} as any };
-    cache.set(file, module);
+    loaded.set(file, module);
     const dir = path.dirname(file);
     const req: any = (spec: string) => {
         if (builtinModules.includes(spec.replace(/^node:/, '')) || spec.startsWith('node:')) return require(spec);
         const target = resolveRequire(spec, dir);
         if (!target) throw new Error(`Cannot find module '${spec}'`);
-        return evaluateCjs(target, resolveRequire, cache);
+        return evaluateCjs(target, resolveRequire, loaded);
     };
     req.resolve = (spec: string) => resolveRequire(spec, dir) ?? spec;
     new Function('exports', 'require', 'module', '__filename', '__dirname', fs.readFileSync(file, 'utf-8'))(module.exports, req, module, file, dir);
