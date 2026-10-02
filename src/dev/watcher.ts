@@ -36,7 +36,10 @@ export class DevWatcher extends EventEmitter {
 
     private start() {
         const ignoredPatterns = [
-            '**/node_modules/**', '**/.git/**', '**/dist/**', '**/.lunx/**', '**/.lunx_cache/**'
+            '**/node_modules/**', '**/.git/**', '**/dist/**', '**/.lunx/**', '**/.lunx_cache/**',
+            // Logs, editor swap files and tool output: never part of the app,
+            // and a dev server writing its log into the root reloaded forever.
+            '**/coverage/**', '**/*.log', '**/*.swp', '**/*.tsbuildinfo', '**/.DS_Store',
         ];
 
         if (NativeWatcher) {
