@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-01T12:16:33.860Z",
+  "generatedAt": "2026-10-02T04:26:52.000Z",
   "results": [
     {
       "framework": "vanilla-ts",
@@ -10,9 +10,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 414,
-      "paintMs": 336,
-      "buildMs": 479,
+      "bootMs": 161,
+      "paintMs": 231,
+      "buildMs": 366,
       "notes": []
     },
     {
@@ -24,9 +24,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 430,
-      "paintMs": 586,
-      "buildMs": 658,
+      "bootMs": 178,
+      "paintMs": 1044,
+      "buildMs": 541,
       "notes": []
     },
     {
@@ -38,9 +38,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 477,
-      "paintMs": 315,
-      "buildMs": 584,
+      "bootMs": 245,
+      "paintMs": 268,
+      "buildMs": 277,
       "notes": []
     },
     {
@@ -52,9 +52,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 417,
-      "paintMs": 633,
-      "buildMs": 957,
+      "bootMs": 169,
+      "paintMs": 489,
+      "buildMs": 633,
       "notes": []
     },
     {
@@ -66,9 +66,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 416,
-      "paintMs": 657,
-      "buildMs": 771,
+      "bootMs": 169,
+      "paintMs": 645,
+      "buildMs": 428,
       "notes": []
     },
     {
@@ -80,9 +80,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 481,
-      "paintMs": 745,
-      "buildMs": 908,
+      "bootMs": 241,
+      "paintMs": 655,
+      "buildMs": 515,
       "notes": []
     },
     {
@@ -94,9 +94,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 412,
-      "paintMs": 1307,
-      "buildMs": 578,
+      "bootMs": 143,
+      "paintMs": 756,
+      "buildMs": 290,
       "notes": []
     },
     {
@@ -108,9 +108,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 423,
-      "paintMs": 325,
-      "buildMs": 572,
+      "bootMs": 190,
+      "paintMs": 221,
+      "buildMs": 285,
       "notes": []
     },
     {
@@ -122,9 +122,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 396,
-      "paintMs": 371,
-      "buildMs": 549,
+      "bootMs": 157,
+      "paintMs": 298,
+      "buildMs": 292,
       "notes": []
     },
     {
@@ -136,9 +136,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 405,
-      "paintMs": 406,
-      "buildMs": 625,
+      "bootMs": 200,
+      "paintMs": 306,
+      "buildMs": 303,
       "notes": []
     },
     {
@@ -150,9 +150,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 407,
-      "paintMs": 576,
-      "buildMs": 710,
+      "bootMs": 156,
+      "paintMs": 1054,
+      "buildMs": 346,
       "notes": []
     },
     {
@@ -164,9 +164,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 383,
-      "paintMs": 781,
-      "buildMs": 881,
+      "bootMs": 165,
+      "paintMs": 767,
+      "buildMs": 615,
       "notes": []
     },
     {
@@ -178,9 +178,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 406,
-      "paintMs": 612,
-      "buildMs": 679,
+      "bootMs": 141,
+      "paintMs": 777,
+      "buildMs": 350,
       "notes": []
     },
     {
@@ -192,9 +192,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 430,
-      "paintMs": 699,
-      "buildMs": 734,
+      "bootMs": 168,
+      "paintMs": 804,
+      "buildMs": 388,
       "notes": []
     },
     {
@@ -206,9 +206,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 391,
-      "paintMs": 648,
-      "buildMs": 850,
+      "bootMs": 152,
+      "paintMs": 461,
+      "buildMs": 456,
       "notes": []
     },
     {
@@ -220,9 +220,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 459,
-      "paintMs": 720,
-      "buildMs": 941,
+      "bootMs": 146,
+      "paintMs": 409,
+      "buildMs": 543,
       "notes": []
     },
     {
@@ -234,9 +234,23 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 456,
-      "paintMs": 2090,
-      "buildMs": 2128,
+      "bootMs": 284,
+      "paintMs": 1745,
+      "buildMs": 1563,
+      "notes": []
+    },
+    {
+      "framework": "angular-files",
+      "dev": "pass",
+      "css": "pass",
+      "consoleClean": "pass",
+      "interactive": "pass",
+      "hmr": "pass",
+      "build": "pass",
+      "preview": "pass",
+      "bootMs": 231,
+      "paintMs": 1241,
+      "buildMs": 1183,
       "notes": []
     },
     {
@@ -248,9 +262,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 495,
-      "paintMs": 550,
-      "buildMs": 815,
+      "bootMs": 205,
+      "paintMs": 409,
+      "buildMs": 611,
       "notes": [
         "known issue: client-side render(): event handlers not attached"
       ]

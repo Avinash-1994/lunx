@@ -69,6 +69,26 @@ const PROJECTS = [
             'app/routes/home.jsx': `export default function Home() {\n  return <h1>${MARKER}</h1>;\n}\n`,
         },
     },
+    {
+        name: 'vitepress',
+        // Dev pages render client-side; the served shell is the signal.
+        devMarker: 'id="app"',
+        deps: { vitepress: '1.6.4', vue: '3.5.26' },
+        files: {
+            'index.md': `# ${MARKER}\n\nHello from VitePress.\n`,
+        },
+    },
+    {
+        name: 'solidstart',
+        deps: { '@solidjs/start': '1.2.0', '@solidjs/router': '0.15.3', 'solid-js': '1.9.15', vinxi: '0.5.8' },
+        files: {
+            'app.config.js': `import { defineConfig } from '@solidjs/start/config';\nexport default defineConfig({});\n`,
+            'src/app.jsx': `import { Router } from '@solidjs/router';\nimport { FileRoutes } from '@solidjs/start/router';\nimport { Suspense } from 'solid-js';\nexport default function App() {\n  return <Router root={(props) => <Suspense>{props.children}</Suspense>}><FileRoutes /></Router>;\n}\n`,
+            'src/entry-client.jsx': `import { mount, StartClient } from '@solidjs/start/client';\nmount(() => <StartClient />, document.getElementById('app'));\n`,
+            'src/entry-server.jsx': `import { createHandler, StartServer } from '@solidjs/start/server';\nexport default createHandler(() => (\n  <StartServer document={({ assets, children, scripts }) => (\n    <html lang="en"><head>{assets}</head><body><div id="app">{children}</div>{scripts}</body></html>\n  )} />\n));\n`,
+            'src/routes/index.jsx': `export default function Home() {\n  return <h1>${MARKER}</h1>;\n}\n`,
+        },
+    },
 ];
 
 function freePort() {
@@ -114,7 +134,7 @@ async function setup(project) {
     return dir;
 }
 
-async function devCheck(dir) {
+async function devCheck(dir, marker = MARKER) {
     const port = await freePort();
     const child = spawn(process.execPath, [...LOADER, CLI, 'dev', '--root', dir, '--port', String(port)], { cwd: REPO, env: { ...process.env, NO_COLOR: '1', NEXT_TELEMETRY_DISABLED: '1', ASTRO_TELEMETRY_DISABLED: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
@@ -126,7 +146,7 @@ async function devCheck(dir) {
             try {
                 const res = await fetch(`http://localhost:${port}/`);
                 const html = await res.text();
-                if (html.includes(MARKER)) return { pass: true, ms: Date.now() - started, delegated: /\[lunx\] .* project →/.test(output) };
+                if (html.includes(marker)) return { pass: true, ms: Date.now() - started, delegated: /\[lunx\] .* project →/.test(output) };
             } catch { /* not up yet */ }
             await new Promise((r) => setTimeout(r, 250));
         }
@@ -143,7 +163,7 @@ for (const project of PROJECTS.filter((p) => !only || only.includes(p.name))) {
     const row = { name: project.name, dev: 'skip', build: 'skip', notes: [] };
     try {
         const dir = await setup(project);
-        const dev = await devCheck(dir);
+        const dev = await devCheck(dir, project.devMarker);
         row.dev = dev.pass ? 'pass' : 'fail';
         if (dev.pass && !dev.delegated) row.notes.push('served, but not via delegation');
         if (!dev.pass) row.notes.push(dev.note);
