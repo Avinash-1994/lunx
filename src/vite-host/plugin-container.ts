@@ -91,6 +91,7 @@ export class PluginContainer {
     private context(plugin: any, extra: Record<string, any> = {}): any {
         // Hook functions get `ctx` as `this`; keep a handle on the container.
         const { resolveId, moduleMeta, watchFiles } = { resolveId: this.resolveId.bind(this), moduleMeta: this.moduleMeta, watchFiles: this.watchFiles };
+        const self = { load: this.load.bind(this), transform: this.transform.bind(this) };
         const env = this.environment;
         const ctx: any = {
             environment: env,
@@ -105,8 +106,12 @@ export class PluginContainer {
                 if (options?.skipSelf !== false) skip.add(plugin);
                 return resolveId(id, importer, { ...options, skip });
             },
+            // As in Vite: run load + transform directly. Going through transformRequest
+            // deadlocks when a plugin loads a module whose own request is in flight (Qwik segments).
             async load(options: { id: string }) {
-                await env.transformRequest?.(options.id).catch(() => null);
+                await env.moduleGraph?.ensureEntryFromUrl(options.id).catch(() => null);
+                const loaded = await self.load(options.id).catch(() => null);
+                if (loaded?.code != null) await self.transform(loaded.code, options.id).catch(() => null);
                 return ctx.getModuleInfo(options.id);
             },
             getModuleInfo(id: string) {

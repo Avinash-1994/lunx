@@ -109,9 +109,11 @@ export async function delegate(meta: MetaFramework, command: Command, root: stri
  * (src/vite-host): 'vite' means lunx acts as the Vite CLI; an argument list
  * means the framework's own CLI runs in-process with `vite` pointing at lunx.
  */
-const NATIVE: Record<string, Partial<Record<Command, 'vite' | string[]>>> = {
+const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` | string[]>>> = {
     SvelteKit: { dev: 'vite', build: 'vite' },
     'React Router (framework)': { dev: 'vite', build: ['build'] },
+    // `vite:<mode>`: Qwik City renders server-side in dev only in ssr mode.
+    'Qwik City': { dev: 'vite:ssr', build: 'vite' },
 };
 
 /**
@@ -150,7 +152,7 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
                 process.exitCode = 1;
             }
         } else {
-            await host.startViteHostDev(root, { port });
+            await host.startViteHostDev(root, { port, mode: native.startsWith('vite:') ? native.slice(5) : undefined });
         }
         return true;
     }
