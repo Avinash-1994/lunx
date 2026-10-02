@@ -105,7 +105,7 @@ export async function delegate(meta: MetaFramework, command: Command, root: stri
 }
 
 /** Framework commands lunx runs itself through its Vite-compatible host (src/vite-host). */
-const NATIVE: Record<string, Command[]> = { SvelteKit: ['dev'] };
+const NATIVE: Record<string, Command[]> = { SvelteKit: ['dev', 'build'] };
 
 /**
  * CLI entry: run `command` through the project's meta-framework when there is
@@ -118,13 +118,25 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
     if (!meta) return false;
     // Framework plugins read their config from the working directory and cache it, so be there before loading anything.
     if (process.cwd() !== root) process.chdir(root);
+    const native = NATIVE[meta.name]?.includes(command) && process.env.LUNX_VITE_HOST !== '0';
+    // Before anything imports a framework plugin, so its `import 'vite'` binds to lunx's host.
+    if (native) (await import('../vite-host/loader.js')).installViteRedirect();
     const { loadConfig } = await import('../config/index.js');
     const optOut = await loadConfig(root).then((c: any) => c?.delegate === false).catch(() => false);
     if (optOut) return false;
-    if (NATIVE[meta.name]?.includes(command) && process.env.LUNX_VITE_HOST !== '0') {
+    if (native) {
         console.log(`[lunx] ${meta.name} project → lunx vite host (Vite plugins on lunx + Rolldown; LUNX_VITE_HOST=0 to use ${meta.bin})`);
-        const { startViteHostDev } = await import('../vite-host/index.js');
-        await startViteHostDev(root, { port });
+        const host = await import('../vite-host/index.js');
+        if (command === 'build') {
+            try {
+                await host.runViteHostBuild(root);
+            } catch (err: any) {
+                console.error(`[lunx] build failed: ${err?.stack ?? err}`);
+                process.exitCode = 1;
+            }
+        } else {
+            await host.startViteHostDev(root, { port });
+        }
         return true;
     }
     if (!findBin(root, meta.bin)) {

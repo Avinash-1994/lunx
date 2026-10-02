@@ -80,7 +80,7 @@ async function loadConfigFile(root: string, configFile: string | false | undefin
     const file = configFile ? path.resolve(root, configFile) : findViteConfig(root) ? path.join(root, findViteConfig(root)!) : undefined;
     if (!file) return { config: {} };
     const { importBundled } = await import('../lib/load-module.js');
-    let config = await importBundled(file, { root });
+    let config = await importBundled(file, { root, fresh: true });
     if (typeof config === 'function') config = await config(env);
     return { file, config: config ?? {} };
 }

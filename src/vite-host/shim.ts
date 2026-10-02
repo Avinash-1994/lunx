@@ -147,8 +147,9 @@ export function isFileLoadingAllowed(config: any, file: string): boolean {
     return isFileServingAllowed(config, file);
 }
 
-export async function build(): Promise<never> {
-    throw new Error('[lunx] vite.build() under lunx is not implemented yet');
+export async function build(inlineConfig: any = {}): Promise<any> {
+    const { build: run } = await import('./build.js');
+    return run(inlineConfig);
 }
 
 export async function preview(): Promise<never> {

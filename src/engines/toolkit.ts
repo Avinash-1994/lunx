@@ -77,3 +77,5 @@ export async function oxcTransform(filename: string, code: string, options: Reco
     const result = await experimental.transform(filename, code, options);
     return { code: result.code, map: result.map ?? null, errors: result.errors ?? [], warnings: result.warnings ?? [] };
 }
+
+export { rollupCompatibleBuild } from './rolldown.js';

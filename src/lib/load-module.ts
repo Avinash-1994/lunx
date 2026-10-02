@@ -14,6 +14,8 @@ export interface LoadModuleOptions {
     root: string;
     /** Replace these packages with the given source instead of importing them. */
     stubs?: Record<string, string>;
+    /** Evaluate a new instance even if this exact config was imported before (Vite loads its config fresh per build). */
+    fresh?: boolean;
 }
 
 export async function importBundled(file: string, opts: LoadModuleOptions): Promise<any> {
@@ -53,7 +55,7 @@ export async function importBundled(file: string, opts: LoadModuleOptions): Prom
     const tmp = path.join(tmpDir, `${path.basename(file)}.${crypto.createHash('sha1').update(code).digest('hex').slice(0, 8)}.mjs`);
     await fs.writeFile(tmp, code);
     try {
-        const mod = await import(pathToFileURL(tmp).href);
+        const mod = await import(pathToFileURL(tmp).href + (opts.fresh ? `?t=${Date.now()}${Math.random().toString(36).slice(2, 6)}` : ''));
         return mod.default ?? mod;
     } finally {
         await fs.rm(tmp, { force: true });

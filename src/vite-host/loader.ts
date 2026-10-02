@@ -7,6 +7,9 @@ import module from 'node:module';
 
 let installed = false;
 
+/** The `vite` package's main entry, however it was reached. */
+const VITE_ENTRY_RE = /\/node_modules\/vite\/dist\/node\/index\.js$/;
+
 export function installViteRedirect(): void {
     if (installed) return;
     installed = true;
@@ -16,7 +19,10 @@ export function installViteRedirect(): void {
         registerHooks({
             resolve(specifier: string, context: any, nextResolve: any) {
                 if (specifier === 'vite') return { url: shimUrl, shortCircuit: true, format: 'module' };
-                return nextResolve(specifier, context);
+                const result = nextResolve(specifier, context);
+                // Frameworks that import Vite by path (SvelteKit's import_peer) land here.
+                if (result?.url && VITE_ENTRY_RE.test(result.url)) return { url: shimUrl, shortCircuit: true, format: 'module' };
+                return result;
             },
         });
         return;
@@ -24,7 +30,9 @@ export function installViteRedirect(): void {
     // Node < 22.15: off-thread hooks (ESM imports only).
     const hooks = `export async function resolve(specifier, context, next) {
         if (specifier === 'vite') return { url: ${JSON.stringify(shimUrl)}, shortCircuit: true };
-        return next(specifier, context);
+        const result = await next(specifier, context);
+        if (result && /\\/node_modules\\/vite\\/dist\\/node\\/index\\.js$/.test(result.url)) return { url: ${JSON.stringify(shimUrl)}, shortCircuit: true };
+        return result;
     }`;
     module.register(`data:text/javascript,${encodeURIComponent(hooks)}`);
 }

@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { compile } from '../../engines/index.js';
 import { assetPlugin } from './asset.js';
+import { assetBuildPlugin, BuildState, cssBuildPlugins, manifestPlugin } from './build.js';
+import { transformGlobImports } from '../../build/glob-import.js';
 import { cssPlugin, cssPostPlugin } from './css.js';
 import { importAnalysisPlugin } from './import-analysis.js';
 import { resolvePlugin } from './resolve.js';
@@ -15,6 +17,26 @@ import { cleanUrl } from '../utils.js';
 const SPECIAL_QUERY_RE = /[?&](?:worker|sharedworker|raw|url|inline)\b/;
 
 export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post: any[] }): any[] {
+    if (config.command === 'build') {
+        const output = [].concat(config.build.rollupOptions?.output ?? {})[0] as any;
+        const state = new BuildState(config, !!config.build.ssr, output?.assetFileNames);
+        config._lunxBuildState = state;
+        const [css, cssPost] = cssBuildPlugins(state);
+        return [
+            aliasPlugin(config),
+            ...user.pre,
+            resolvePlugin(config),
+            css,
+            oxcPlugin(config),
+            jsonPlugin(config),
+            assetBuildPlugin(state),
+            globImportPlugin(config),
+            ...user.normal,
+            cssPost,
+            ...user.post,
+            manifestPlugin(state),
+        ];
+    }
     return [
         aliasPlugin(config),
         ...user.pre,
@@ -115,7 +137,23 @@ function oxcPlugin(config: any): any {
                     decoratorMetadata: !!ts.emitDecoratorMetadata,
                     sourcemap: false,
                 });
-                return { code: result.code, map: null };
+                return { code: result.code, map: null, moduleType: 'js' };
+            },
+        },
+    };
+}
+
+/** `import.meta.glob` in builds (dev handles it in import analysis). */
+function globImportPlugin(config: any): any {
+    return {
+        name: 'vite:import-glob',
+        transform: {
+            filter: { code: 'import.meta.glob' },
+            handler(code: string, id: string) {
+                const file = cleanUrl(id);
+                if (!path.isAbsolute(file)) return null;
+                const out = transformGlobImports(code, file, config.root);
+                return out == null ? null : { code: out, map: null };
             },
         },
     };
@@ -137,7 +175,7 @@ function jsonPlugin(config: any): any {
                     const keys = Object.keys(data).filter((k) => IDENT_RE.test(k) && !RESERVED.has(k));
                     if (keys.length) lines.push(`export const { ${keys.join(', ')} } = __json__;`);
                 }
-                return { code: lines.join('\n'), map: null };
+                return { code: lines.join('\n'), map: null, moduleType: 'js' };
             },
         },
     };
