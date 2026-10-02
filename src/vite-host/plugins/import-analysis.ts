@@ -79,7 +79,7 @@ export function importAnalysisPlugin(config: any): any {
             if (isClient && source.includes('process.env.NODE_ENV')) {
                 source = source.replace(/\bprocess\.env\.NODE_ENV\b(?!\s*=[^=])/g, JSON.stringify(process.env.NODE_ENV || (config.isProduction ? 'production' : 'development')));
             }
-            if (source.includes('import.meta.glob') && path.isAbsolute(file)) {
+            if (source.includes('import.meta.glob') && path.isAbsolute(file) && !/[\\/]node_modules[\\/]/.test(file)) {
                 source = transformGlobImports(source, file, config.root) ?? source;
             }
             if (!/\bimport\b|\bexport\b/.test(source)) return source === original ? null : { code: source, map: null };

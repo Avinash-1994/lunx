@@ -124,7 +124,11 @@ function oxcPlugin(config: any): any {
             filter: { id: /\.(m?ts|[jt]sx)(?:$|\?)/ },
             handler(this: any, code: string, id: string) {
                 const file = cleanUrl(id);
-                if (!/\.(m?ts|[jt]sx|cts)$/.test(file) || SPECIAL_QUERY_RE.test(id)) return null;
+                if (SPECIAL_QUERY_RE.test(id)) return null;
+                // The language is the file's, or the virtual module's (`page.astro?…&lang.ts`), as in Vite.
+                const ext = /\.(m?ts|[jt]sx|cts)$/.exec(file)?.[1] ?? /\.(m?ts|[jt]sx)$/.exec(id)?.[1];
+                if (!ext) return null;
+                const lang = ext === 'tsx' ? 'tsx' : ext === 'jsx' ? 'jsx' : 'ts';
                 const ts = readTsconfig(config.root);
                 const oxcJsx = config.oxc?.jsx;
                 const esb = config.esbuild || {};
@@ -145,6 +149,7 @@ function oxcPlugin(config: any): any {
                     };
                 }
                 const result = compile(file, code, {
+                    lang,
                     jsx,
                     legacyDecorators: !!ts.experimentalDecorators,
                     decoratorMetadata: !!ts.emitDecoratorMetadata,
@@ -177,7 +182,8 @@ function globImportPlugin(config: any): any {
             filter: { code: 'import.meta.glob' },
             handler(code: string, id: string) {
                 const file = cleanUrl(id);
-                if (!path.isAbsolute(file)) return null;
+                // Dependencies ship expanded globs; their mentions of import.meta.glob are text.
+                if (!path.isAbsolute(file) || /[\\/]node_modules[\\/]/.test(file)) return null;
                 const out = transformGlobImports(code, file, config.root);
                 return out == null ? null : { code: out, map: null };
             },

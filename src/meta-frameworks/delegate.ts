@@ -115,6 +115,7 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
     // `vite:<mode>`: Qwik City renders server-side in dev only in ssr mode.
     'Qwik City': { dev: 'vite:ssr', build: 'vite' },
     'TanStack Start': { dev: 'vite', build: 'vite' },
+    Astro: { dev: ['dev'], build: ['build'] },
 };
 
 /**
@@ -144,7 +145,7 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
                 process.exitCode = 1;
                 return true;
             }
-            await host.runFrameworkCli(root, bin, native);
+            await host.runFrameworkCli(root, bin, [...native, ...(command !== 'build' && port && meta.port ? meta.port(port) : [])]);
         } else if (command === 'build') {
             try {
                 await host.runViteHostBuild(root);

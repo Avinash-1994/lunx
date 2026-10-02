@@ -142,7 +142,9 @@ export function cssBuildPlugins(getState: StateLookup): any[] {
         },
         {
             name: 'vite:css-post',
-            async renderChunk(this: any, code: string, chunk: any) {
+            // `order: 'pre'`: frameworks read chunk.viteMetadata in their own renderChunk/generateBundle
+            // (Astro's CSS links), and Rolldown's generateBundle chunks are new objects.
+            renderChunk: { order: 'pre', async handler(this: any, code: string, chunk: any) {
                 const state = getState(this);
                 const meta = state.metaFor(chunk);
                 let css = '';
@@ -157,7 +159,8 @@ export function cssBuildPlugins(getState: StateLookup): any[] {
                         const fileName = state.assetFileName(`${chunk.name}.css`, css);
                         let out = state.replacePlaceholders(css, fileName, false);
                         if (state.build.cssMinify !== false && state.build.minify !== false) out = await minifyCss(out, fileName);
-                        this.emitFile({ type: 'asset', fileName, source: out });
+                        // `name` too: frameworks find stylesheets by it (Astro checks name.endsWith('.css')).
+                        this.emitFile({ type: 'asset', name: `${chunk.name}.css`, fileName, source: out });
                         meta.importedCss.add(fileName);
                     } else {
                         state.globalCss += css;
@@ -167,8 +170,8 @@ export function cssBuildPlugins(getState: StateLookup): any[] {
                 const next = state.replacePlaceholders(code, fileName, true);
                 chunk.viteMetadata = meta;
                 return next === code ? null : { code: next, map: null };
-            },
-            async generateBundle(this: any, _options: any, bundle: Record<string, any>) {
+            } },
+            generateBundle: { order: 'pre', async handler(this: any, _options: any, bundle: Record<string, any>) {
                 const state = getState(this);
                 const { config } = state;
                 const globalCss = state.globalCss;
@@ -176,14 +179,14 @@ export function cssBuildPlugins(getState: StateLookup): any[] {
                     const fileName = state.assetFileName(`${state.build.cssFileName || 'style'}.css`, globalCss);
                     let out = state.replacePlaceholders(globalCss, fileName, false);
                     if (state.build.cssMinify !== false && state.build.minify !== false) out = await minifyCss(out, fileName);
-                    this.emitFile({ type: 'asset', fileName, source: out });
+                    this.emitFile({ type: 'asset', name: `${state.build.cssFileName || 'style'}.css`, fileName, source: out });
                     for (const chunk of Object.values(bundle)) if (chunk.type === 'chunk' && chunk.isEntry) state.metaFor(chunk).importedCss.add(fileName);
                 }
-                for (const asset of state.assets.values()) this.emitFile({ type: 'asset', fileName: asset.fileName, source: asset.source, originalFileName: asset.originalFileName });
+                for (const asset of state.assets.values()) this.emitFile({ type: 'asset', name: path.basename(asset.originalFileName ?? asset.fileName), fileName: asset.fileName, source: asset.source, originalFileName: asset.originalFileName });
                 for (const chunk of Object.values(bundle)) {
                     if (chunk.type === 'chunk') attachMeta(chunk, state.metaFor(chunk));
                 }
-            },
+            } },
         },
     ];
 }

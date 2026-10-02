@@ -45,7 +45,16 @@ function contextWithEnvironment(ctx: any, environment: any): any {
     });
 }
 
-function wrapPlugin(plugin: any, environment: any): any {
+/**
+ * Rolldown hands each plugin fresh chunk objects, so Vite's `chunk.viteMetadata`
+ * (importedCss / importedAssets) is attached to the chunks every hook receives.
+ */
+function decorateArgs(hook: string, args: any[], decorate: (chunk: any) => void): void {
+    if (hook === 'renderChunk' || hook === 'augmentChunkHash') decorate(hook === 'renderChunk' ? args[1] : args[0]);
+    else if (hook === 'generateBundle' || hook === 'writeBundle') for (const item of Object.values(args[1] ?? {})) decorate(item);
+}
+
+function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => void = () => {}): any {
     const out: any = { name: plugin.name };
     for (const key of Object.keys(plugin)) {
         if (!ROLLUP_HOOKS.has(key)) continue;
@@ -56,6 +65,7 @@ function wrapPlugin(plugin: any, environment: any): any {
             continue;
         }
         const wrapped = function (this: any, ...args: any[]) {
+            decorateArgs(key, args, decorate);
             const result = handler.apply(contextWithEnvironment(this, environment), args);
             if (key !== 'load' && key !== 'transform') return result;
             const id = key === 'load' ? args[0] : args[1];
@@ -168,7 +178,16 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
     define['import.meta.env'] = JSON.stringify(env);
     if (!ssr) define['process.env.NODE_ENV'] ??= JSON.stringify(config.isProduction ? 'production' : 'development');
 
-    const plugins = applyToEnvironment(config.plugins, environment).map((p: any) => wrapPlugin(p, environment));
+    const decorate = (chunk: any) => {
+        const state = config._lunxBuildStates?.get(envName);
+        if (!state || !chunk || !Array.isArray(chunk.moduleIds)) return;
+        try {
+            Object.defineProperty(chunk, 'viteMetadata', { value: state.metaFor(chunk), configurable: true, writable: true, enumerable: false });
+        } catch {
+            /* frozen */
+        }
+    };
+    const plugins = applyToEnvironment(config.plugins, environment).map((p: any) => wrapPlugin(p, environment, decorate));
     const userInput: Record<string, any> = {};
     for (const [k, v] of Object.entries(ro)) if (INPUT_KEYS.has(k) && k !== 'input') userInput[k] = v;
     const resolve = envConfig.resolve ?? config.resolve;
@@ -208,6 +227,7 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
         if (outputOptions.format === 'esm' || outputOptions.format === 'module') outputOptions.format = 'es';
         const started = Date.now();
         const result = await rollupCompatibleBuild(inputOptions, outputOptions, write);
+        for (const item of result.output) decorate(item);
         config.logger.info(`[lunx] ${envName} build: ${result.output.length} files in ${Date.now() - started}ms → ${path.relative(process.cwd(), outDir) || '.'}`);
         results.push(result);
     }
