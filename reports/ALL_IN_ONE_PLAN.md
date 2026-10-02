@@ -1,5 +1,25 @@
 # Plan: one tool for all web development
 
+## Status (this branch)
+
+| item | state |
+|---|---|
+| 1.1 CLI works from a packed install | ✅ 19/21, 0 crashes |
+| 1.2 matrix failures (svelte/solid preview, vanilla HMR, React hot-apply) | ✅ fixed — real React Fast Refresh, Vue/Svelte HMR, reload elsewhere |
+| 1.3 framework matrix 7 → more | ✅ 17 stacks, 102/102 |
+| 1.4 library conformance | ✅ 48/48 |
+| 2.1 Rust engine built and verified | ✅ builds with cargo; dev verified on native and JS engines |
+| 2.2 dev boot scaling with node_modules | ✅ 2042 → 291 ms (pre-bundle only imported deps, background; no Linux recursive watch) |
+| 2.3 build speed | ✅ 2988 → 462 ms via Rolldown; parity with Vite 8 |
+| 2.4 bundle size parity | ✅ 219,626 B (Vite 220,248 B) |
+| 3.1 zero-config on a Vite project | ✅ reads vite.config.*; CRA via migrate |
+| 3.2 one-command migration | ✅ `lunx migrate` for Vite and CRA |
+| 3.3 `lunx doctor` | open |
+| 3.4 errors that name the remedy | partial |
+
+Next: Qwik / Marko / Stencil / Inferno in the matrix; SSR and meta-framework
+coverage; `lunx doctor`; Angular AOT for production (JIT works today).
+
 ## The purpose, stated plainly
 
 A developer installs `lunx` and installs nothing else: dev server, bundler,

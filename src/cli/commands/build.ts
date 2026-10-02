@@ -106,6 +106,18 @@ export default {
 
     const root = args.root ? path.resolve(process.cwd(), args.root) : process.cwd();
 
+    // Meta-frameworks run their own toolchain (see meta-frameworks/delegate.ts).
+    const { detectMetaFramework, delegate } = await import('../../meta-frameworks/delegate.js');
+    const meta = detectMetaFramework(root);
+    if (meta) {
+      const { loadConfig: loadForDelegate } = await import('../../config/index.js');
+      const optOut = await loadForDelegate(root).then((c: any) => c?.delegate === false).catch(() => false);
+      if (!optOut) {
+        process.exitCode = await delegate(meta, 'build', root, { port: undefined });
+        return;
+      }
+    }
+
     const telemetry = new Telemetry(root);
     await telemetry.init();
     telemetry.start();
@@ -158,7 +170,7 @@ export default {
       // NEW-04: --watch mode
       if (args.watch) {
         console.log('\n  Watching for changes... (Ctrl+C to stop)\n');
-        const chokidar = await import('../../internal/watcher.js');
+        const chokidar = await import('../../lib/watcher.js');
         const srcDir = path.join(root, 'src');
         const watcher = chokidar.watch(srcDir, { ignoreInitial: true, persistent: true });
 

@@ -10,6 +10,7 @@ import fs from 'fs';
 import os from 'os';
 import { BuildConfig } from '../config/index.js';
 import { createRequire } from 'module';
+import { displayHost, isPortFree, resolveBindHost } from '../utils/host.js';
 
 const require = createRequire(import.meta.url);
 const pkgVersion = require('../../package.json').version;
@@ -25,26 +26,12 @@ export async function startDevServer(cfg: BuildConfig) {
 
     // 1. Find available port FIRST (before creating server)
     let port = cfg.server?.port || cfg.port || 5173;
-    // `0.0.0.0` is IPv4-only, but browsers resolve `localhost` to ::1 first, so
-    // binding it leaves WebSocket (HMR) connections hanging on IPv6. `::` binds
-    // dual-stack and serves both families.
-    const configuredHost = cfg.server?.host;
-    const host = !configuredHost || configuredHost === '0.0.0.0' ? '::' : configuredHost;
-
-    // Check port availability
-    const isPortAvailable = (p: number): Promise<boolean> => {
-        return new Promise((resolve) => {
-            const testServer = http.createServer();
-            testServer.once('error', () => resolve(false));
-            testServer.listen(p, host, () => {
-                testServer.close(() => resolve(true));
-            });
-        });
-    };
+    // Dual-stack `::` where the host supports IPv6, `0.0.0.0` where it does not.
+    const host = await resolveBindHost(cfg.server?.host);
 
     // Find available port
     if (!cfg.server?.strictPort) {
-        while (!(await isPortAvailable(port))) {
+        while (!(await isPortFree(port, host))) {
             console.log(`\x1b[33m⚠\x1b[0m  Port ${port} is in use, trying ${port + 1}...`);
             port++;
             if (port > (cfg.server?.port || cfg.port || 5173) + 100) {
@@ -58,8 +45,19 @@ export async function startDevServer(cfg: BuildConfig) {
     cfg.server.port = port;
     cfg.port = port;
 
+    // Resolved by the full dev server as soon as its request handler exists.
+    let markHandlerReady!: () => void;
+    const handlerReady = new Promise<void>((resolve) => (markHandlerReady = resolve));
+    const startInit = () => {
+        initPromise ??= (async () => {
+            const { startDevServer: initFull } = await import('./devServer.js');
+            features = await initFull(cfg, server);
+        })();
+        return initPromise;
+    };
+
     // 2. Create hyper-responsive HTTP server
-    const server = http.createServer(async (req, res) => {
+    const server: http.Server = http.createServer(async (req, res) => {
         if (features && (server as any).__lunx_handler) {
             return (server as any).__lunx_handler(req, res);
         }
@@ -67,19 +65,15 @@ export async function startDevServer(cfg: BuildConfig) {
         const url = req.url || '/';
         const [pathname] = url.split('?');
 
-        if (!initPromise) {
-            initPromise = (async () => {
-                const { startDevServer: initFull } = await import('./devServer.js');
-                features = await initFull(cfg, server);
-            })();
-        }
+        startInit();
 
         // Every request, HTML included, waits for the real pipeline.
         // Serving index.html straight off disk used to skip the dev server's
         // HTML transforms -- the HMR client and the React Refresh preamble
         // among them -- so the very first page load of a cold start died with
-        // "$RefreshReg$ is not defined" and never recovered.
-        await initPromise;
+        // "$RefreshReg$ is not defined" and never recovered. Waiting only for
+        // the request handler (not watchers etc.) keeps that and saves ~250ms.
+        await Promise.race([initPromise, handlerReady]);
         if ((server as any).__lunx_handler) {
             return (server as any).__lunx_handler(req, res);
         }
@@ -93,6 +87,9 @@ export async function startDevServer(cfg: BuildConfig) {
     await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
         server.listen(port, host, async () => {
+            // Start the full pipeline first; the banner below can wait.
+            (server as any).__lunx_onHandler = markHandlerReady;
+            startInit().catch(() => {});
             const duration = (performance.now() - startTime).toFixed(2);
 
             // Get network IP
@@ -119,22 +116,20 @@ export async function startDevServer(cfg: BuildConfig) {
 
             // Metrics Layout
             console.log(`   \x1b[32m▶\x1b[0m  \x1b[1mCore\x1b[0m    \x1b[32mReady\x1b[0m in \x1b[33m${duration}ms\x1b[0m`);
-            console.log(`   \x1b[34m▶\x1b[0m  \x1b[1mNative\x1b[0m  \x1b[90mRust 1.75\x1b[0m`);
-            
-            // Check cache status
-            let cacheStatus = 'Cold';
+            // Report the engine actually loaded, not a fixed string: a bug
+            // report from the JS fallback must not look like one from native.
+            let engine = 'JS (SWC + LightningCSS)';
             try {
-                const fsModule = await import('fs');
-                const pathModule = await import('path');
-                const dbPath = cfg.cacheDir ?? pathModule.join(cfg.root || process.cwd(), '.lunx/cache/cache.db');
-                if (fsModule.existsSync(dbPath)) cacheStatus = 'Warm';
-            } catch (e) {}
-            console.log(`   \x1b[35m▶\x1b[0m  \x1b[1mCache\x1b[0m   \x1b[90mSQLite WAL (${cacheStatus})\x1b[0m`);
+                const native = await import('../native/index.js');
+                if ((native as any).engineUsed === 'native') engine = 'Rust native';
+            } catch { /* JS fallback */ }
+            console.log(`   \x1b[34m▶\x1b[0m  \x1b[1mEngine\x1b[0m  \x1b[90m${engine}\x1b[0m`);
+            console.log(`   \x1b[35m▶\x1b[0m  \x1b[1mBundler\x1b[0m \x1b[90mRolldown (production builds)\x1b[0m`);
 
             console.log(`\x1b[90m   ─────────────────────────────────────\x1b[0m`);
 
             // Links - show localhost for local access, actual network IP for network access
-            const localHost = host === '0.0.0.0' ? 'localhost' : host;
+            const localHost = displayHost(host);
             console.log(`   \x1b[1mLocal\x1b[0m    \x1b[36mhttp://${localHost}:${port}/\x1b[0m`);
             if (networkIP) {
                 console.log(`   \x1b[1mNetwork\x1b[0m  \x1b[36mhttp://${networkIP}:${port}/\x1b[0m`);
@@ -179,13 +174,6 @@ export async function startDevServer(cfg: BuildConfig) {
                 detectedAdapter = found?.name ?? 'none';
             } catch { detectedAdapter = null; }
 
-            // 4. Start full server initialization immediately (before any requests)
-            if (!initPromise) {
-                initPromise = (async () => {
-                    const { startDevServer: initFull } = await import('./devServer.js');
-                    features = await initFull(cfg, server);
-                })();
-            }
 
             resolve();
         });

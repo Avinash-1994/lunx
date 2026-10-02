@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { Plugin } from 'esbuild';
+import type { LegacyPlugin as Plugin } from '../../types/legacy-plugin.js';
 
 export interface BootstrapConfig {
     version?: string;

@@ -1,12 +1,19 @@
 import path from 'path';
 import fs from 'fs/promises';
-import { build } from 'esbuild';
+import { parse as parseModule } from '../engines/index.js';
 import { createHash } from 'crypto';
-import { createRequire } from 'module';
+import { builtinModules, createRequire } from 'module';
 import { log } from '../utils/logger.js';
 import native from '../native/index.js';
 
 const require = createRequire(import.meta.url);
+
+const RESERVED_WORDS = new Set([
+    'arguments', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
+    'else', 'enum', 'eval', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'implements', 'import', 'in',
+    'instanceof', 'interface', 'let', 'new', 'null', 'package', 'private', 'protected', 'public', 'return', 'static',
+    'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
+]);
 
 // Unified native loader — never hard-require lunx_native.node from cwd alone.
 let _native: { prebundle: Function; prebundlePut: Function } | null | undefined;
@@ -35,7 +42,7 @@ function getNative() {
  *
  * Phase 1.10: Cache root is driven by `cacheDir` from lunx.config
  * (default: `.lunx/cache`). SHA-256 fingerprints are stored in a native
- * SQLite DB via the prebundle N-API; the esbuild pass runs only on misses.
+ * SQLite DB via the prebundle N-API; the Rolldown pass runs only on misses.
  */
 export class DependencyPreBundler {
     /** Resolved absolute path to the pre-bundle output directory */
@@ -54,7 +61,7 @@ export class DependencyPreBundler {
     /**
      * Pre-bundle dependencies using full graph approach
      * This bundles ALL dependencies together with their transitive deps
-     * Uses esbuild's splitting to create shared chunks
+     * Shared code is split into common chunks
      */
     async preBundleDependencies(deps: string[]): Promise<Map<string, string>> {
         const bundledDeps = new Map<string, string>();
@@ -85,7 +92,7 @@ export class DependencyPreBundler {
                 const results: Array<{ moduleId: string; key: string; bundle: string; hit: boolean }> =
                     native.prebundle(JSON.stringify(moduleMetas), nativeCfg);
 
-                // All hits → serve from native SQLite cache, skip esbuild entirely
+                // All hits → serve from native SQLite cache, skip bundling entirely
                 const allHit = results.every(r => r.hit);
                 if (allHit && results.length === deps.length) {
                     log.info('[lunx:prebundle] Warm start — serving all deps from native cache');
@@ -281,6 +288,26 @@ export class DependencyPreBundler {
                     }
                 }
 
+                // Legacy `browser` field: { "./node.js": "./browser.js" } or a string
+                // replacing `main`. Packages use it to swap out Node-only code.
+                if (resolvedPath) {
+                    try {
+                        const pkgName = dep.startsWith('@') ? dep.split('/').slice(0, 2).join('/') : dep.split('/')[0];
+                        // realpath both: node_modules may be a symlink (pnpm, workspaces).
+                        const pkgDir = await fs.realpath(path.join(root, 'node_modules', pkgName));
+                        const manifest = JSON.parse(await fs.readFile(path.join(pkgDir, 'package.json'), 'utf-8'));
+                        const browser = manifest.browser;
+                        const rel = './' + path.relative(pkgDir, await fs.realpath(resolvedPath)).split(path.sep).join('/');
+                        let mapped: string | undefined;
+                        if (typeof browser === 'string' && dep === pkgName && !manifest.exports) mapped = browser;
+                        else if (browser && typeof browser === 'object') {
+                            const hit = browser[rel] ?? browser[rel.replace(/\.js$/, '')] ?? browser[rel.slice(2)];
+                            if (typeof hit === 'string') mapped = hit;
+                        }
+                        if (mapped && await fileExists(path.join(pkgDir, mapped))) resolvedPath = path.join(pkgDir, mapped);
+                    } catch { /* no manifest: keep the resolved file */ }
+                }
+
                 if (resolvedPath) {
                     // ... verify existence ...
                     const normalizedName = dep.replace(/[/@]/g, '_');
@@ -296,142 +323,79 @@ export class DependencyPreBundler {
                 return bundledDeps;
             }
 
-            // Production-ready: Full graph bundling WITH splitting + CJS export fix
-            const result = await build({
-                entryPoints,
-                bundle: true,
-                format: 'esm',
-                platform: 'browser',
-                target: 'es2020',
-                outdir: cacheDir,
-                splitting: true,  // PRODUCTION: Shared chunks for efficiency
-                chunkNames: 'chunks/[name]-[hash]',
-                entryNames: '[name]',
-                minify: false,
-                sourcemap: true,
-                treeShaking: true,
-                define: {
-                    'process.env.NODE_ENV': '"development"',
-                    'global': 'globalThis'
-                },
-                plugins: [
-                    // Plugin to fix CJS → ESM named exports
-                    {
-                        name: 'cjs-esm-interop',
-                        setup(build) {
-                            // Post-process: Add named exports to entry point files
-                            build.onEnd(async (result) => {
-                                if (result.metafile) {
-                                    for (const [outputPath, outputInfo] of Object.entries(result.metafile.outputs)) {
-                                        // Only process entry points (not chunks)
-                                        if (outputInfo.entryPoint) {
-                                            const fullPath = path.resolve(outputPath);
-                                            let content = await fs.readFile(fullPath, 'utf-8');
-
-                                            // Check if it's a thin wrapper (only imports from chunks)
-                                            if (content.includes('from "./chunks/') && !content.includes('export {')) {
-                                                // Find which original package this is
-                                                const basename = path.basename(outputPath, '.js');
-                                                for (const dep of deps) {
-                                                    const normalizedName = dep.replace(/[/@]/g, '_');
-                                                    if (basename === normalizedName) {
-                                                        try {
-                                                            // Load the original CJS module to get exports
-                                                            let pkg;
-                                                            try {
-                                                                const pkgPath = require.resolve(dep, { paths: [root] });
-                                                                pkg = require(pkgPath);
-                                                            } catch (e) {
-                                                                // If require fails (e.g. ESM package), try to find common names or skip
-                                                                log.debug(`[PreBundler] Skipped CJS re-export for ${dep} (ESM or missing)`);
-                                                                continue;
-                                                            }
-
-                                                            if (!pkg) continue;
-
-                                                            // Get all named exports
-                                                            const exportNames = Object.getOwnPropertyNames(pkg)
-                                                                .filter(key =>
-                                                                    /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(key) &&
-                                                                    key !== 'default' &&
-                                                                    key !== '__esModule'
-                                                                );
-
-                                                            // Add re-exports if needed
-                                                            if (exportNames.length > 0 && !content.includes('export const')) {
-                                                                const defaultExportMatch = content.match(/export default (\w+)(?:\(\))?;?/);
-                                                                if (defaultExportMatch) {
-                                                                    const varName = defaultExportMatch[1];
-                                                                    const isFunctionCall = content.includes(`export default ${varName}()`);
-
-                                                                    let exportBase = varName;
-
-                                                                    if (isFunctionCall) {
-                                                                        // Replace "export default foo();" with "const __pkg = foo(); export default __pkg;"
-                                                                        content = content.replace(
-                                                                            `export default ${varName}();`,
-                                                                            `const __pkg = ${varName}();\nexport default __pkg;`
-                                                                        );
-                                                                        exportBase = '__pkg';
-                                                                    }
-
-                                                                    const namedExports = exportNames.map(name =>
-                                                                        `export const ${name} = ${exportBase}.${name};`
-                                                                    ).join('\n');
-
-                                                                    content = content.replace(
-                                                                        /\/\/# sourceMappingURL=/,
-                                                                        `${namedExports}\n//# sourceMappingURL=`
-                                                                    );
-
-                                                                    await fs.writeFile(fullPath, content);
-                                                                    log.debug(`[PreBundler] Added ${exportNames.length} named exports to ${dep}`);
-                                                                }
-                                                            }
-                                                        } catch (e: any) {
-                                                            log.warn(`[PreBundler] Could not add exports for ${dep}: ${e.message}`);
-                                                        }
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    }
-                ],
-                logLevel: 'warning',
-                metafile: true,
-            });
-
-            // Build dependency map from output files
-            const depMap: Record<string, string> = {};
-
-            if (result.metafile) {
-                const outputs = result.metafile.outputs;
-
-                // Map entry points to their output files
-                for (const [outputPath, outputInfo] of Object.entries(outputs)) {
-                    if (outputInfo.entryPoint) {
-                        // Match output file to original dependency by exact normalized name
-                        const outputBasename = path.basename(outputPath, '.js');
-
-                        for (const dep of deps) {
-                            const normalizedName = dep.replace(/[/@]/g, '_');
-                            // Exact match - prevent "react" matching "react-router-dom"
-                            if (outputBasename === normalizedName) {
-                                const relativePath = path.relative(cacheDir, outputPath);
-                                const urlPath = `/@lunx-deps/${relativePath}`;
-                                bundledDeps.set(dep, urlPath);
-                                depMap[dep] = urlPath;
-                                log.debug(`✓ Pre-bundled: ${dep} → ${urlPath}`);
-                                break;
-                            }
-                        }
-                    }
+            // One bundle for every dependency: shared code lands in common
+            // chunks, so React (say) exists once however many entries import it.
+            const { getBundler } = await import('../engines/index.js');
+            const VIRTUAL = '\0lunx-dep:';
+            const BUILTIN = '\0lunx-builtin:';
+            const builtins = new Set(builtinModules);
+            const input: Record<string, string> = {};
+            const virtualCode = new Map<string, string>();
+            // Entries are bare specifiers resolved by the bundler itself, so an
+            // entry and the imports inside other packages resolve with the
+            // same conditions. Resolving entries separately put solid-js's
+            // browser build next to its dev build: two copies, dead signals.
+            const specByName = new Map<string, string>();
+            for (const dep of deps) specByName.set(dep.replace(/[/@]/g, '_'), dep);
+            for (const [name, file] of Object.entries(entryPoints)) {
+                const spec = specByName.get(name) ?? file;
+                const source = await fs.readFile(file, 'utf-8').catch(() => '');
+                if (isEsmSource(file, source)) {
+                    input[name] = spec;
+                    continue;
                 }
+                // CommonJS: ESM needs static export names, so read them from
+                // the module and re-export through Rolldown's interop (whose
+                // default honours __esModule, like the production build).
+                const names = commonJsExportNames(file, source);
+                const id = VIRTUAL + name;
+                virtualCode.set(id, [
+                    `import * as __m from ${JSON.stringify(spec)};`,
+                    'export default __m.default;',
+                    ...names.map((n) => `export const ${n} = __m.${n};`),
+                ].join('\n'));
+                input[name] = id;
+            }
+
+            await getBundler().bundle({
+                input,
+                cwd: root,
+                platform: 'browser',
+                quiet: true,
+                define: { 'process.env.NODE_ENV': '"development"', global: 'globalThis' },
+                conditions: ['browser', 'import', 'module', 'development', 'default'],
+                plugins: [{
+                    name: 'lunx:prebundle',
+                    resolveId(id: string) {
+                        if (virtualCode.has(id)) return id;
+                        const bare = id.replace(/^node:/, '');
+                        if (builtins.has(bare) || builtins.has(bare.split('/')[0]!)) return BUILTIN + bare;
+                        return null;
+                    },
+                    load(id: string) {
+                        if (virtualCode.has(id)) return virtualCode.get(id)!;
+                        if (!id.startsWith(BUILTIN)) return null;
+                        // A Node built-in reached from browser code (usually a
+                        // server-only branch): a stub that throws only if used.
+                        const name = id.slice(BUILTIN.length);
+                        return { code: `const stub = new Proxy({}, { get(_, key) { if (typeof key === 'symbol' || key === '__esModule' || key === 'then') return undefined; throw new Error('Module "${name}" is a Node built-in, not available in the browser (accessed .' + String(key) + ')'); } });\nmodule.exports = stub;\n`, moduleType: 'js' };
+                    },
+                }],
+            }, {
+                dir: cacheDir,
+                format: 'es',
+                entryFileNames: '[name].js',
+                chunkFileNames: 'chunks/[name]-[hash].js',
+                sourcemap: true,
+            }, true);
+
+            const depMap: Record<string, string> = {};
+            for (const dep of deps) {
+                const normalizedName = dep.replace(/[/@]/g, '_');
+                if (!input[normalizedName]) continue;
+                const urlPath = `/@lunx-deps/${normalizedName}.js`;
+                bundledDeps.set(dep, urlPath);
+                depMap[dep] = urlPath;
             }
 
             // Save metadata
@@ -498,4 +462,31 @@ export class DependencyPreBundler {
 
         return Array.from(deps);
     }
+}
+
+/** True when a file is an ES module (by extension, or import/export syntax). */
+function isEsmSource(file: string, source: string): boolean {
+    if (/\.mjs$/.test(file)) return true;
+    if (/\.cjs$/.test(file)) return false;
+    try {
+        const program = parseModule(file, source, 'js');
+        return program.body.some((n: any) => /^(Import|Export)/.test(n.type));
+    } catch {
+        return false;
+    }
+}
+
+/** Static export names of a CommonJS module, for re-exporting as ESM. */
+function commonJsExportNames(file: string, source: string): string[] {
+    let keys: string[] = [];
+    try {
+        const mod = require(file);
+        if (mod && (typeof mod === 'object' || typeof mod === 'function')) keys = Object.keys(mod);
+    } catch {
+        // Browser-only code may not load in Node: read the assignments instead.
+        for (const m of source.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|Object\.defineProperty\(\s*(?:module\.)?exports\s*,\s*['"]([A-Za-z_$][\w$]*)['"]/g)) {
+            keys.push((m[1] ?? m[2])!);
+        }
+    }
+    return [...new Set(keys)].filter((k) => /^[A-Za-z_$][\w$]*$/.test(k) && !RESERVED_WORDS.has(k) && k !== 'default' && k !== '__esModule');
 }

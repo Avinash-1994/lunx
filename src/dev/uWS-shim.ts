@@ -6,8 +6,8 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { Socket } from 'net';
 import { EventEmitter } from 'events';
-import { WebSocketServer } from '../internal/ws.js';
-import { tryLoadUWS } from '../internal/uws.js';
+import { WebSocketServer } from '../lib/ws.js';
+import { tryLoadUWS } from '../lib/uws.js';
 
 // uWebSockets.js is optional and not declared as a dependency (it is a git-only
 // package). When the user has installed it we take the fast path; otherwise the

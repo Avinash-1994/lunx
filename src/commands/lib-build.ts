@@ -11,7 +11,6 @@
 
 import path from 'path'
 import fs from 'fs'
-import { build } from 'esbuild'
 import type { BuildConfig } from '../config/index.js'
 
 export interface LunxLibConfig {
@@ -75,30 +74,24 @@ export async function buildLib(config: BuildConfig, lib: LunxLibConfig): Promise
   for (const format of formats) {
     const outFile = path.join(outDir, resolveFileName(lib, format))
 
-    const esbuildFormat =
-      format === 'es' ? 'esm' :
-      format === 'cjs' ? 'cjs' :
-      format === 'umd' ? 'iife' :  // esbuild uses iife for umd-like
-      format === 'iife' ? 'iife' :
-      'esm'
-
-    await build({
-      entryPoints: [path.resolve(process.cwd(), lib.entry)],
-      outfile: outFile,
-      bundle: true,
-      format: esbuildFormat,
-      globalName: format === 'umd' || format === 'iife' ? lib.name : undefined,
+    // Real UMD (not an iife stand-in) and the same tree shaking as app
+    // builds; externals match exact names and subpaths.
+    const { getBundler } = await import('../engines/index.js')
+    const isExternal = (id: string) => uniqueExternals.some((e) => id === e || id.startsWith(e + '/')) || id.startsWith('node:')
+    await getBundler().bundle({
+      input: path.resolve(process.cwd(), lib.entry),
       platform: format === 'cjs' ? 'node' : 'browser',
-      target: (config.build?.targets?.[0] as string) ?? 'es2020',
+      quiet: true,
+      external: isExternal,
+      define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    }, {
+      file: outFile,
+      format: format as 'es' | 'cjs' | 'iife' | 'umd',
+      name: format === 'umd' || format === 'iife' ? lib.name : undefined,
       minify: config.build?.minify ?? true,
       sourcemap: (config.build?.sourcemap === 'external' || config.build?.sourcemap === 'inline') ? true : false,
-      external: uniqueExternals,
-      // Tree shaking
-      treeShaking: true,
-      define: {
-        'process.env.NODE_ENV': JSON.stringify('production'),
-      },
-    })
+      inlineDynamicImports: true,
+    }, true)
 
     const size = fs.statSync(outFile).size
     outputs.push({ file: outFile, format, size })

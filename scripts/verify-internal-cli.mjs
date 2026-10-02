@@ -4,7 +4,7 @@
  * Run with: npx tsx scripts/verify-internal-cli.mjs
  */
 import yargsFactory from 'yargs';
-import ours from '../src/internal/cli-args.ts';
+import ours from '../src/lib/cli-args.ts';
 
 const results = [];
 function check(name, ok, detail = '') {

@@ -1,70 +1,70 @@
 {
   "lunx": {
     "kind": "module server",
-    "devBootMs": 2042,
-    "devAppCodeMs": 2048,
-    "buildColdMs": 2842,
-    "buildWarmMs": 1611,
-    "jsBytes": 229909,
-    "cssBytes": 30
+    "devBootMs": 291,
+    "devAppCodeMs": 302,
+    "buildColdMs": 462,
+    "buildWarmMs": 457,
+    "jsBytes": 219626,
+    "cssBytes": 29
   },
   "vite": {
     "kind": "module server",
-    "devBootMs": 471,
-    "devAppCodeMs": 649,
-    "buildColdMs": 616,
-    "buildWarmMs": 549,
+    "devBootMs": 381,
+    "devAppCodeMs": 485,
+    "buildColdMs": 792,
+    "buildWarmMs": 431,
     "jsBytes": 220248,
     "cssBytes": 30
   },
   "rspack": {
     "kind": "bundler",
-    "devBootMs": 515,
-    "devAppCodeMs": 645,
-    "buildColdMs": 596,
-    "buildWarmMs": 548,
+    "devBootMs": 339,
+    "devAppCodeMs": 373,
+    "buildColdMs": 304,
+    "buildWarmMs": 324,
     "jsBytes": 219460,
     "cssBytes": 29
   },
   "webpack": {
     "kind": "bundler",
-    "devBootMs": 2212,
-    "devAppCodeMs": 2319,
-    "buildColdMs": 4204,
-    "buildWarmMs": 4522,
+    "devBootMs": 1368,
+    "devAppCodeMs": 1461,
+    "buildColdMs": 3392,
+    "buildWarmMs": 3571,
     "jsBytes": 224696,
     "cssBytes": 0
   },
   "parcel": {
     "kind": "bundler",
-    "devBootMs": 3030,
-    "devAppCodeMs": 3036,
-    "buildColdMs": 3862,
-    "buildWarmMs": 2181,
-    "jsBytes": 221932,
-    "cssBytes": 77
+    "devBootMs": 1315,
+    "devAppCodeMs": 1324,
+    "buildColdMs": 1420,
+    "buildWarmMs": 1546,
+    "jsBytes": 221951,
+    "cssBytes": 96
   },
   "esbuild": {
     "kind": "bundler",
     "devBootMs": null,
-    "buildColdMs": 380,
-    "buildWarmMs": 390,
+    "buildColdMs": 65,
+    "buildWarmMs": 60,
     "jsBytes": 222973,
     "cssBytes": 30
   },
   "bun": {
     "kind": "bundler",
     "devBootMs": null,
-    "buildColdMs": 296,
-    "buildWarmMs": 279,
+    "buildColdMs": 39,
+    "buildWarmMs": 37,
     "jsBytes": 211811,
     "cssBytes": 30
   },
   "rolldown": {
     "kind": "bundler (JS only)",
     "devBootMs": null,
-    "buildColdMs": 435,
-    "buildWarmMs": 402,
+    "buildColdMs": 404,
+    "buildWarmMs": 269,
     "jsBytes": 221449,
     "cssBytes": 0
   }

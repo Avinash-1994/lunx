@@ -1,5 +1,5 @@
-import { initTRPC, TRPCError } from '../src/internal/rpc.ts';
-import { z } from '../src/internal/schema.ts';
+import { initTRPC, TRPCError } from '../src/lib/rpc.ts';
+import { z } from '../src/lib/schema.ts';
 
 const results = [];
 const check = (n, ok, d = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? '  ' + d : ''}`); };

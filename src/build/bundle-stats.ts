@@ -1,7 +1,7 @@
 
 import { BuildArtifact } from '../core/engine/types.js';
 import { log } from '../utils/logger.js';
-import kleur from '../internal/colors.js';
+import kleur from '../lib/colors.js';
 
 export function printBundleStats(artifacts: BuildArtifact[]) {
     console.log(kleur.bold().cyan('\n📦 Production Bundle Statistics'));

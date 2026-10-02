@@ -1,6 +1,7 @@
 import http from 'http'
 import fs from 'fs'
 import path from 'path'
+import { anyHost, resolveBindHost } from '../utils/host.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -183,8 +184,8 @@ export async function preview(options: PreviewOptions = {}): Promise<void> {
 
   // `localhost` resolves to ::1 first on Windows and modern Linux, so binding
   // it literally leaves 127.0.0.1 refused — the same split that made the dev
-  // server's HMR socket hang. `::` with dual-stack serves both.
-  const bindHost = host === 'localhost' || host === '0.0.0.0' ? '::' : host
+  // server's HMR socket hang. Bind dual-stack (or IPv4 where IPv6 is off).
+  const bindHost = host === 'localhost' ? await anyHost() : await resolveBindHost(host)
 
   await new Promise<void>((resolve, reject) => {
     server.listen(port, bindHost, () => resolve())

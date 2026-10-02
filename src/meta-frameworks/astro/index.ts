@@ -98,7 +98,7 @@ export class AstroAdapter implements LunxAdapter {
         console.log(`[Lunx:Astro] ⚡ Astro dev server running internally on :${internalPort}`);
 
         // Create http-proxy agent to forward requests
-        const httpProxy = await import('../../internal/proxy.js');
+        const httpProxy = await import('../../lib/proxy.js');
         proxyAgent = httpProxy.default.createProxyServer({
           target: `http://127.0.0.1:${internalPort}`,
           ws: true,

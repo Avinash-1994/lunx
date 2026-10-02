@@ -1,8 +1,9 @@
 # ⚡ Lunx
 
-> **A Rust-native JavaScript build tool for SPAs and Module Federation.**  
-> Main npm package stays **≤1.6MB**. Rust speed ships via optional `@lunx/native-*` (same pattern as esbuild / `@swc/core`).  
-> USP: **Federation + security CLI + Rust transforms** — not a Next/Nuxt replacement.
+> **One tool for web apps: dev server, production bundler, test runner, type check, security — for any framework.**
+> Production builds run on [Rolldown](https://rolldown.rs) (Rust); dev runs on SWC + LightningCSS with an optional Rust engine (`@lunx/native-*`).
+> Verified on 17 stacks in a real browser (React, Preact, Vue, Svelte, Solid, Lit, Angular, Alpine, Mithril, jQuery, three.js, Tailwind, styled-components, React Router, Vue Router, Sass, vanilla TS) — `npm run test:browser-matrix`.
+> Runs existing Vite and Create React App projects unchanged — see [Migrating](#-migrating-to-lunx).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org)
@@ -433,30 +434,46 @@ Reproduce locally via `cd benchmarks/public && node run-all.mjs` after `npm run 
 
 ## 🔄 Migrating to Lunx
 
-### Migrating from Vite
+### From Vite — zero changes
 
-1. Rename `vite.config.js` / `vite.config.ts` to `lunx.config.ts`.
-2. Replace `import { defineConfig } from 'vite'` with `import { defineConfig } from 'lunx'`.
-3. In `package.json`, update scripts:
-   ```diff
-   - "dev": "vite",
-   - "build": "vite build"
-   + "dev": "lunx dev",
-   + "build": "lunx build"
-   ```
+Run lunx in the project as it is:
 
-### Migrating from Webpack
+```bash
+npx lunx dev      # reads vite.config.* when there is no lunx.config
+npx lunx build
+```
 
-1. Remove `webpack.config.js`, `babel.config.js`, `ts-loader`, `css-loader`, `style-loader`.
-2. Create `lunx.config.ts`:
-   ```typescript
-   import { defineConfig } from 'lunx';
+Lunx evaluates your `vite.config.*` and maps `base`, `define`, `resolve.alias`,
+`server.*`, `build.outDir`, `build.sourcemap` and `build.rollupOptions.input`.
+Framework plugins (`@vitejs/plugin-react`, `plugin-vue`, `vite-plugin-svelte`,
+`vite-plugin-solid`, `@preact/preset-vite`, Analog) are replaced by lunx's
+built-in compilers; other plugins are Rollup-compatible and run in the build.
+`import.meta.env.VITE_*`, `import.meta.glob`, `?raw` / `?url` / `?inline`,
+`new URL('./x', import.meta.url)`, workers, wasm and PostCSS/Tailwind work as
+they do in Vite.
 
-   export default defineConfig({
-     // Lunx auto-handles JS/TS/JSX/TSX, CSS, images, and JSON natively
-   });
-   ```
-3. Update package scripts to `lunx dev` and `lunx build`.
+To convert permanently:
+
+```bash
+npx lunx migrate        # writes lunx.config.ts, points package.json scripts at lunx
+```
+
+### From Create React App
+
+```bash
+npx lunx migrate        # index.html from public/, lunx.config.ts, scripts
+```
+
+`REACT_APP_*` variables, JSX in `.js` files, CSS Modules and SVG/image imports
+keep working.
+
+### From webpack
+
+1. Remove `webpack.config.js`, `babel.config.js` and the loaders.
+2. Make sure `index.html` at the project root loads your entry:
+   `<script type="module" src="/src/main.tsx"></script>`.
+3. Update scripts to `lunx dev` / `lunx build`. `resolve.alias` and tsconfig
+   `paths` are honoured; add aliases to `lunx.config.ts` if you used webpack's.
 
 ---
 

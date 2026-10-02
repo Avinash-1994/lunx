@@ -1,4 +1,4 @@
-import { WebSocket } from '../internal/ws.js';
+import { WebSocket } from '../lib/ws.js';
 import { log } from '../utils/logger.js';
 
 interface HMRUpdate {

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CacheStore, RecordStore, fingerprint } from '../src/internal/store.ts';
+import { CacheStore, RecordStore, fingerprint } from '../src/lib/store.ts';
 
 const results = [];
 function check(name, ok, detail = '') {

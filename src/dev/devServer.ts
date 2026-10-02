@@ -2,8 +2,21 @@ import crypto from 'crypto';
 import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
+import { applyAlias, collectAliases, type AliasEntry } from '../config/aliases.js';
+import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css.js';
+import { transformGlobImports } from '../build/glob-import.js';
+import { compile, parse as parseModule } from '../engines/index.js';
+
+// Dependency URLs carry no version query: pre-bundled entries import each
+// other by relative path ("./preact.js"), and a browser treats
+// /@lunx-deps/preact.js?v=1 and /@lunx-deps/preact.js as two modules -- two
+// copies of Preact or React, broken hooks. Responses are no-cache instead.
+
+/** Imported from JS, these resolve to their URL (`import logo from './logo.svg'`). */
+const DEV_ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 import { anomalyDetector } from '../security/anomaly.js';
-import type { WebSocketServer, WebSocket } from '../internal/ws.js';
+import type { WebSocketServer, WebSocket } from '../lib/ws.js';
 import { fileURLToPath } from 'url';
 import { BuildConfig } from '../config/index.js';
 import { log } from '../utils/logger.js';
@@ -30,22 +43,30 @@ import { LiveConfigManager } from '../config/live-config.js';
  * Rewrite bare module imports to node_modules paths
  * Production-grade AST-based rewriting (Phase C1 Honest)
  */
-async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federationRemotes?: Set<string>, singletonRedirects?: Map<string, string>): Promise<string> {
+async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federationRemotes?: Set<string>, singletonRedirects?: Map<string, string>, aliases?: AliasEntry[]): Promise<string> {
   try {
-    const acorn = await import('acorn');
-    const ast = acorn.parse(code, {
-      sourceType: 'module',
-      ecmaVersion: 'latest'
-    }) as any;
+    const ast = parseModule('module.js', code);
 
     const replacements: { start: number, end: number, replacement: string }[] = [];
 
     const addReplacement = (node: any) => {
       if (node && node.type === 'Literal' && typeof node.value === 'string') {
-        const specifier = node.value;
+        let specifier = node.value;
+        // resolve.alias / tsconfig paths ('@/components/x' → '/src/components/x')
+        const aliased = aliases?.length && !specifier.startsWith('.') ? applyAlias(specifier, aliases) : null;
+        if (aliased) {
+          if (path.isAbsolute(aliased)) {
+            const rel = path.relative(rootDir, aliased).split(path.sep).join('/');
+            const url = rel.startsWith('..') ? '/@fs/' + aliased.split(path.sep).join('/').replace(/^\//, '') : '/' + rel;
+            const suffix = CSS_LANGS.test(url) || /\.json$/.test(url) || DEV_ASSET_EXT.test(url) ? '?import' : '';
+            replacements.push({ start: node.start, end: node.end, replacement: `'${url}${suffix}'` });
+            return;
+          }
+          specifier = aliased;
+        }
         if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('http')) {
           // Handle relative CSS/JSON 
-          if (specifier.endsWith('.css') || specifier.endsWith('.json')) {
+          if (CSS_LANGS.test(specifier) || specifier.endsWith('.json') || DEV_ASSET_EXT.test(specifier)) {
             replacements.push({
               start: node.start,
               end: node.end,
@@ -71,7 +92,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
           if (singletonRedirects.has(pkgRoot)) {
             const safeName = specifier.replace(/[/@]/g, '_');
             const hostBase = singletonRedirects.get(pkgRoot)!;
-            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js?v=${Date.now()}`;
+            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js`;
             replacements.push({ start: node.start, end: node.end, replacement: `'${singletonUrl}'` });
             return;
           }
@@ -80,7 +101,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
         let replacement = `/node_modules/${specifier}`;
         if (preBundledDeps && preBundledDeps.has(specifier)) {
           // Exact match: this full specifier (e.g. 'solid-js/web') was pre-bundled
-          replacement = `${preBundledDeps.get(specifier)}?v=${Date.now()}`;
+          replacement = `${preBundledDeps.get(specifier)}`;
         } else if (preBundledDeps) {
           // Subpath check: specifier is 'solid-js/web' but only 'solid-js' is in preBundledDeps
           const parts = specifier.split('/');
@@ -95,7 +116,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
             if (specifier.endsWith('.js') && !preBundledDeps.has(specifier)) {
               replacement = `/node_modules/${specifier}`;
             } else {
-              replacement = `/@lunx-deps/${safeName}.js?v=${Date.now()}`;
+              replacement = `/@lunx-deps/${safeName}.js`;
             }
           }
         }
@@ -214,7 +235,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     const originalLog = console.log;
     console.log = () => { }; // Silence console temporarily
 
-    const { config: loadEnv } = await import('../internal/dotenv.js');
+    const { config: loadEnv } = await import('../lib/dotenv.js');
     // .env.local wins over .env, so load it second with override.
     loadEnv({ path: path.join(cfg.root, '.env') });
     loadEnv({ path: path.join(cfg.root, '.env.local'), override: true });
@@ -223,6 +244,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   } catch (e) { }
 
   // Filter public env vars — also loads .env / .env.development / .env.local files
+  let devDefines: Record<string, string> = {};
   let publicEnv: Record<string, string | undefined> = Object.keys(process.env)
     .filter(key => key.startsWith('LUNX_') || key.startsWith('PUBLIC_') || key === 'NODE_ENV')
     .reduce((acc, key) => ({ ...acc, [key]: process.env[key] }), {
@@ -234,9 +256,17 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     const loaded = loadEnv('development', cfg.root);
     // Merge .env file vars on top (higher priority than process.env)
     publicEnv = { ...publicEnv, ...loaded.raw };
+    devDefines = { ...loaded.define, ...loaded.metaEnv };
   } catch {
     // env.ts not available — fall back to process.env only
   }
+
+  devDefines = {
+    'process.env.NODE_ENV': '"development"',
+    ...devDefines,
+    ...((cfg as any).define ?? {}),
+  };
+  const aliases = collectAliases(cfg.root, (cfg as any).resolve?.alias);
 
   log.debug('Loaded Environment Variables', { category: 'server', count: Object.keys(publicEnv).length });
 
@@ -336,7 +366,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // Auto-register Tailwind Plugin (Zero-Config or File-Based)
   const tailwindConfigPath = path.join(cfg.root, 'tailwind.config.js');
   const hasTailwindFile = await fs.access(tailwindConfigPath).then(() => true).catch(() => false);
-  const isTailwindRequested = cfg.css?.framework === 'tailwind' || hasTailwindFile;
+  // A PostCSS config already runs Tailwind through the shared CSS compiler.
+  const hasPostcssConfig = ['postcss.config.js', 'postcss.config.cjs', 'postcss.config.mjs', 'postcss.config.ts', '.postcssrc.json', '.postcssrc']
+    .some((f) => existsSync(path.join(cfg.root, f)));
+  const isTailwindRequested = !hasPostcssConfig && (cfg.css?.framework === 'tailwind' || hasTailwindFile);
 
   if (isTailwindRequested) {
     const { TailwindPlugin } = await import('../plugins/css/tailwind.js');
@@ -344,15 +377,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     log.info(`--> Dev Server: Tailwind CSS Plugin registered ${hasTailwindFile ? '(using file)' : '(zero-config)'}`, { category: 'server' });
   }
 
-  // Auto-register CSS Preprocessor Plugins
-  const { SassPlugin } = await import('../plugins/css/sass.js');
-  pluginManager.register(new SassPlugin(cfg.root));
-
-  const { LessPlugin } = await import('../plugins/css/less.js');
-  pluginManager.register(new LessPlugin(cfg.root));
-
-  const { StylusPlugin } = await import('../plugins/css/stylus.js');
-  pluginManager.register(new StylusPlugin(cfg.root));
+  // Sass / Less / Stylus / PostCSS are compiled by the shared CSS compiler
+  // (build/css.ts), the same one production uses.
 
   if (cfg.federation?.remotes && Object.keys(cfg.federation.remotes).length > 0) {
     const remoteNames = Object.keys(cfg.federation.remotes).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
@@ -385,6 +411,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   log.debug('Scanning dependencies for pre-bundling...');
   const entryPoint = path.join(cfg.root, 'public', 'index.html');
   let preBundledDeps = new Map<string, string>();
+  // Pre-bundling runs in the background, like Vite's optimizer: the page and
+  // HMR client are served at once, and only module requests (whose imports
+  // must point at the bundled deps) wait for it.
+  let prebundleReady: Promise<void> = Promise.resolve();
 
   try {
     // 1. Load package.json dependencies
@@ -458,6 +488,18 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       pkgDepsList = Object.keys({ ...pkgJson.dependencies, ...pkgJson.peerDependencies });
     } catch { }
 
+    // Pre-bundle what the app imports, not everything it lists: a crawl of
+    // the sources from the entry is a few ms; bundling unused dependencies
+    // cost ~1s per boot. Anything missed is still bundled on first request.
+    try {
+      const { scanDeps } = await import('./dep-scan.js');
+      const scan = await scanDeps(cfg.root, cfg.entry?.length ? cfg.entry : ['index.html'], aliases);
+      if (scan.files > 0) pkgDepsList = [...scan.deps];
+      _mark(`scanned ${scan.files} files, ${scan.deps.size} deps`);
+    } catch (e: any) {
+      log.debug(`dependency scan failed, pre-bundling package.json deps: ${e.message}`);
+    }
+
     // 3. User Config (prebundle)
     const prebundleConfig = cfg.prebundle || { enabled: true, include: [], exclude: [] };
 
@@ -481,9 +523,11 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
         'next', '@next/env', '@next/swc',
         'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
-        '@angular/core', '@angular/cli', '@angular/compiler-cli', '@angular/build',
+        // (@angular/core and @builder.io/qwik are browser runtimes: excluding
+        // them made other packages bundle private copies of them.)
+        '@angular/cli', '@angular/compiler-cli', '@angular/build',
         '@analogjs/platform', '@analogjs/vite-plugin-angular',
-        '@builder.io/qwik', '@builder.io/qwik-city',
+        '@builder.io/qwik-city',
         'waku', '@waku/dev-server',
         'vitepress', 'vite',
         '@solidjs/start',
@@ -531,14 +575,21 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
       if (validDeps.size > 0) {
         // 4. Pass to PreBundler
-        preBundledDeps = await preBundler.preBundleDependencies(Array.from(validDeps));
-        log.debug('Dependencies pre-bundled successfully', { count: preBundledDeps.size });
+        prebundleReady = preBundler.preBundleDependencies(Array.from(validDeps)).then(
+          (deps) => {
+            preBundledDeps = deps;
+            _mark('prebundle done');
+            log.debug('Dependencies pre-bundled successfully', { count: deps.size });
+          },
+          (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
+        );
       }
     }
 
-    // Warmup Build (Phase C1/C2) - Check for errors immediately
-    log.info('→ Dev Server: Warming up graph...');
-    const buildResult = await pipeline.build();
+    if (process.env.LUNX_DEV_WARMUP === '1') await prebundleReady;
+    // A full build before serving cost ~0.75s of every boot. Modules are
+    // compiled on request and errors reach the overlay, so it is opt-in.
+    const buildResult = process.env.LUNX_DEV_WARMUP === '1' ? await pipeline.build() : { success: true, skipped: true };
     if (!buildResult.success) {
       const error = (buildResult as any).error;
       const errorMsg = error?.message || 'Unknown error during warmup';
@@ -552,7 +603,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         plugin: 'lunx:pipeline'
       });
       log.error('→ Dev Server: Warmup build failed - Fix the errors above');
-    } else {
+    } else if (!(buildResult as any).skipped) {
       console.log(`\x1b[32mCompiled successfully!\x1b[0m\n`);
     }
   } catch (error: any) {
@@ -576,7 +627,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   }
 
   // 2. Setup Proxy
-  const { default: httpProxy } = await import('../internal/proxy.js');
+  const { default: httpProxy } = await import('../lib/proxy.js');
   const proxy = httpProxy.createProxyServer({});
 
   proxy.on('error', (err, req, res) => {
@@ -606,7 +657,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         };
       } else {
         log.info('Generating self-signed certificate...', { category: 'server' });
-        const { generate } = await import('../internal/self-signed.js');
+        const { generate } = await import('../lib/self-signed.js');
         const pems = generate([{ name: 'commonName', value: 'localhost' }], { days: 30 });
         await fs.writeFile(keyPath, pems.private);
         await fs.writeFile(certPath, pems.cert);
@@ -775,6 +826,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   };
 
   const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    const reqPath = (req.url || '/').split('?')[0]!;
+    if (reqPath !== '/' && !reqPath.endsWith('.html') && !reqPath.startsWith('/@lunx/hmr-client') && !reqPath.startsWith('/__lunx')) {
+      await prebundleReady;
+    }
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -1147,6 +1202,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         RefreshRuntime.register(type, id);
       };
       window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+      window.__lunx_react_refresh__ = RefreshRuntime;
       window.__vite_plugin_react_preamble_installed__ = true;
     </script>
           `;
@@ -1235,6 +1291,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           path.join(process.cwd(), 'node_modules/react-refresh/cjs/react-refresh-runtime.development.js'),
           path.join(__dirname, '../../node_modules/react-refresh/cjs/react-refresh-runtime.development.js')
         ];
+        // lunx depends on react-refresh, so its own copy is always resolvable.
+        try {
+          searchPaths.push(require.resolve('react-refresh/cjs/react-refresh-runtime.development.js'));
+        } catch { /* not installed */ }
 
         let runtime = null;
         for (const checkPath of searchPaths) {
@@ -1278,8 +1338,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       const clientPath = path.resolve(__dirname, '../runtime/client.ts');
       try {
         const raw = await fs.readFile(clientPath, 'utf-8');
-        const { transform } = await import('esbuild');
-        const result = await transform(raw, { loader: 'ts' });
+        const result = compile('runtime.ts', raw, { lang: 'ts' });
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
         res.end(result.code);
       } catch (e) {
@@ -1302,8 +1361,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       const overlayPath = path.resolve(__dirname, '../runtime/error-overlay.ts');
       try {
         const raw = await fs.readFile(overlayPath, 'utf-8');
-        const { transform } = await import('esbuild');
-        const result = await transform(raw, { loader: 'ts' });
+        const result = compile('runtime.ts', raw, { lang: 'ts' });
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
         res.end(result.code);
       } catch (e) {
@@ -1323,16 +1381,21 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
     // Phase 3.4 — HMR client runtime route
     if (url === '/@lunx/hmr-client' || url === '/@lunx/hmr-client.js') {
-      const srcPath = path.resolve(__dirname, '../../packages/lunx-hmr-client/src/index.ts');
+      // Source when running from the repo, compiled output in a packaged install.
+      const tsPath = path.resolve(__dirname, '../runtime/hmr-client.ts');
+      const jsPath = path.resolve(__dirname, '../runtime/hmr-client.js');
       try {
-        const raw = await fs.readFile(srcPath, 'utf-8');
-        const { transform } = await import('esbuild');
-        const result = await transform(raw, { loader: 'ts', format: 'esm', target: 'es2020' });
-        res.writeHead(200, { 'Content-Type': 'application/javascript' });
-        res.end(result.code);
+        let code: string;
+        if (existsSync(tsPath)) {
+          code = compile(tsPath, await fs.readFile(tsPath, 'utf-8')).code;
+        } else {
+          code = await fs.readFile(jsPath, 'utf-8');
+        }
+        res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+        res.end(code);
       } catch (e: any) {
         log.warn(`[lunx] /@lunx/hmr-client: ${e.message}`);
-        res.writeHead(404); res.end('/* @lunx/hmr-client not built */');
+        res.writeHead(404); res.end('/* lunx HMR runtime missing */');
       }
       return;
     }
@@ -1342,8 +1405,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       const srcPath = path.resolve(__dirname, '../../packages/lunx-module-registry/src/index.ts');
       try {
         const raw = await fs.readFile(srcPath, 'utf-8');
-        const { transform } = await import('esbuild');
-        const result = await transform(raw, { loader: 'ts', format: 'esm', target: 'es2020' });
+        const result = compile('runtime.ts', raw, { lang: 'ts' });
         const remotes = (cfg as any).federation?.remotes ?? {};
         const initCall = Object.keys(remotes).length
           ? `\nimport{__lunx_registry_init__ as _ri}from '/@lunx/module-registry';_ri(${JSON.stringify(remotes)});\n`
@@ -1366,7 +1428,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       const column = parseInt(urlObj.searchParams.get('column') || '1');
 
       if (file) {
-        const { openInEditor } = await import('../internal/open-editor.js');
+        const { openInEditor } = await import('../lib/open-editor.js');
         openInEditor(file, line, column);
         res.writeHead(200);
         res.end('Opened in editor');
@@ -1486,58 +1548,45 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
         const ext = path.extname(resolvedModulePath);
 
-        // ── Step 4: Bundle to ESM with esbuild ──
+        // ── Step 4: Bundle to ESM ──
         if (ext === '.js' || ext === '.mjs' || ext === '.cjs' || ext === '') {
-          const { build } = await import('esbuild');
+          const { getBundler } = await import('../engines/index.js');
           try {
-            // Determine which packages to bundle internally vs keep external.
-            // For solid-js subpaths (solid-js/web, solid-js/store, etc.) we bundle
-            // ALL solid-js internal sub-modules together to avoid cascading 404s.
+            // Which bare imports to bundle in vs keep external. For solid-js
+            // and preact subpaths, inline their internals to avoid cascades
+            // of 404s; react-dom carries its scheduler and react.
             const isSolidPkg = specifier.startsWith('solid-js');
             const isPreactPkg = specifier.startsWith('preact');
+            const keepInside = (dep: string) =>
+              (isSolidPkg && dep.startsWith('solid-js')) ||
+              (isPreactPkg && dep.startsWith('preact')) ||
+              dep === 'scheduler' ||
+              (dep === 'react' && (resolvedModulePath!.includes('react-dom') || resolvedModulePath!.includes('jsx-dev-runtime'))) ||
+              (dep === 'react-dom' && resolvedModulePath!.includes('react-dom/client'));
 
-            const result = await build({
-              entryPoints: [resolvedModulePath],
-              bundle: true,
-              format: 'esm',
+            const output = await getBundler().bundle({
+              input: resolvedModulePath,
               platform: 'browser',
-              write: false,
-              define: {
-                'process.env.NODE_ENV': '"development"',
-                'global': 'globalThis'
-              },
-              conditions: ['browser', 'import', 'default'],
+              quiet: true,
+              define: { 'process.env.NODE_ENV': '"development"', global: 'globalThis' },
+              conditions: ['browser', 'import', 'module', 'development', 'default'],
               plugins: [{
-                name: 'node-modules-resolver',
-                setup(build) {
-                  build.onResolve({ filter: /^[^./]/ }, args => {
-                    const dep = args.path;
-                    if (dep.startsWith('.')) return null;
-
-                    // Inline solid-js internals when serving a solid-js subpath
-                    if (isSolidPkg && dep.startsWith('solid-js')) return null;
-                    // Inline preact internals when serving preact subpaths
-                    if (isPreactPkg && dep.startsWith('preact')) return null;
-
-                    // Standard: bundle scheduler with react-dom
-                    if (dep === 'scheduler') return null;
-                    if (dep === 'react' && (resolvedModulePath!.includes('react-dom') || resolvedModulePath!.includes('jsx-dev-runtime'))) return null;
-                    if (dep === 'react-dom' && resolvedModulePath!.includes('react-dom/client')) return null;
-
-                    return { path: `/node_modules/${dep}`, external: true };
-                  });
-                }
-              }]
-            });
+                name: 'lunx:node-modules-external',
+                resolveId(dep: string) {
+                  if (/^[./]/.test(dep) || dep.startsWith('\0') || keepInside(dep)) return null;
+                  return { id: `/node_modules/${dep}`, external: true };
+                },
+              }],
+            }, { format: 'es', inlineDynamicImports: true });
 
             res.writeHead(200, {
               'Content-Type': 'application/javascript',
               'Cache-Control': 'no-cache'
             });
-            res.end(result.outputFiles[0].text);
+            res.end((output[0] as { code: string }).code);
             return;
           } catch (e: any) {
-            log.warn(`[DevServer] esbuild bundle failed for ${specifier}, serving raw: ${e.message}`);
+            log.warn(`[DevServer] bundling ${specifier} failed, serving raw: ${e.message}`);
             // Fall-through to raw serve
           }
         }
@@ -1649,16 +1698,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         // source. Pre-transforming here stripped JSX with SWC's *classic*
         // default, emitting `React.createElement` with no matching import, so
         // any component that did not hand-write `import React` died at runtime.
-        if (ext === '.ts' || ext === '.js' || ext === '.mjs') {
-          try {
-            const transformed = nativeWorker.transformSync(raw, filePath);
-            raw = typeof transformed === 'string' ? transformed : (transformed?.code ?? raw);
-          } catch (e: any) {
-            if (process.env.DEBUG) {
-              log.debug(`NativeWorker skipped for ${filePath}: ${e.message}`, { category: 'build' });
-            }
-          }
-        }
+        // (No native pre-transform here: the Rust transform_js lowers ESM to
+        // the legacy bundler's CommonJS runtime format, which a browser
+        // cannot load as a module -- "require is not defined" on every
+        // .ts/.js file whenever the native package was installed.)
 
         // Plugin transform (JS plugins like Tailwind)
         raw = await pluginManager.transform(raw, filePath);
@@ -1670,7 +1713,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             code: raw,
             framework: primaryFramework,
             root: cfg.root,
-            isDev: true
+            isDev: true,
+            define: devDefines
           });
 
           // Rewrite imports after transformation
@@ -1690,7 +1734,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             }
           }
 
-          let code = await rewriteImports(transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects);
+          const globbed = transformGlobImports(transformResult.code, filePath, cfg.root);
+          let code = await rewriteImports(globbed ?? transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects, aliases);
 
           res.writeHead(200, {
             'Content-Type': 'application/javascript',
@@ -1740,25 +1785,48 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         }
       }
 
-      if (ext === '.css' || ext === '.scss' || ext === '.sass' || ext === '.less' || ext === '.styl') {
+      if (CSS_LANGS.test(filePath)) {
         let raw = await fs.readFile(filePath, 'utf-8');
         raw = await pluginManager.transform(raw, filePath);
+        const compiled = await compileCss({
+          root: cfg.root,
+          file: filePath,
+          source: raw,
+          modules: isCssModule(filePath),
+          minify: false,
+          // Styles are injected into the page, so relative url()s must become
+          // server paths or they would resolve against the document instead.
+          resolveUrl: (from, ref) => {
+            if (/^(data:|https?:|\/\/|#|\/)/.test(ref)) return ref;
+            const target = resolveCssFile(cfg.root, from, ref);
+            if (!target) return ref;
+            const rel = path.relative(cfg.root, target).split(path.sep).join('/');
+            return rel.startsWith('..') ? ref : '/' + rel;
+          },
+        });
 
-        // Check if imported as module
+        if (/[?&]inline\b/.test(url)) {
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+          res.end(`export default ${JSON.stringify(compiled.code)};`);
+          return;
+        }
+
         if (url.includes('?import')) {
-          const jsModule = `
-      const style = document.createElement('style');
-      style.textContent = ${JSON.stringify(raw)};
-      document.head.appendChild(style);
-      export default ${JSON.stringify(raw)};
-      `;
-          res.writeHead(200, { 'Content-Type': 'application/javascript' });
+          const id = '/' + path.relative(cfg.root, filePath).split(path.sep).join('/');
+          // One <style> per file, replaced in place on every hot update.
+          const jsModule = `const id = ${JSON.stringify(id)};
+let el = document.querySelector('style[data-lunx-css="' + id + '"]');
+if (!el) { el = document.createElement('style'); el.setAttribute('data-lunx-css', id); document.head.appendChild(el); }
+el.textContent = ${JSON.stringify(compiled.code)};
+export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stringify(compiled.code)};
+`;
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
           res.end(jsModule);
           return;
         }
 
-        res.writeHead(200, { 'Content-Type': 'text/css' });
-        res.end(raw);
+        res.writeHead(200, { 'Content-Type': 'text/css', 'Cache-Control': 'no-cache' });
+        res.end(compiled.code);
         return;
       }
 
@@ -1773,7 +1841,12 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         res.end(raw);
         return;
       }
-      // Serve other files raw
+      // `?raw` → file contents as a string; `?url` / asset import → its URL
+      if (/[?&]raw\b/.test(url)) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(`export default ${JSON.stringify(await fs.readFile(filePath, 'utf-8'))};`);
+        return;
+      }
       if (url.includes('?url') || url.includes('?import')) {
         const publicPath = url.split('?')[0];
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
@@ -1799,6 +1872,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       RefreshRuntime.injectIntoGlobalHook(window);
       window.$RefreshReg$ = (type, id) => { RefreshRuntime.register(type, id); };
       window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+      window.__lunx_react_refresh__ = RefreshRuntime;
       window.__vite_plugin_react_preamble_installed__ = true;
     </script>
         `;
@@ -1877,6 +1951,9 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   if (existingServer) {
     server = existingServer;
     (server as any).__lunx_handler = requestHandler;
+    (server as any).__lunx_onHandler?.();
+    _mark('handler ready');
+    if (process.env.LUNX_DEBUG_BOOT) console.error(`process +${Math.round(process.uptime() * 1000 - (Date.now() - _t0))}ms → ` + _phases.map((p) => `${p.name}: ${p.ms}ms`).join(' | '));
   } else {
     const { createUWSServer } = await import('./uWS-shim.js');
     server = createUWSServer(httpsOptions);
@@ -1890,7 +1967,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // /__lunx_hmr and the client retries forever.
   wss = (server as any).wsServer;
   if (!wss) {
-    const { WebSocketServer } = await import('../internal/ws.js');
+    const { WebSocketServer } = await import('../lib/ws.js');
     wss = new WebSocketServer({ server });
     (server as any).wsServer = wss;
   }
@@ -2049,7 +2126,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             }
 
             // Normalize path for client (relative to root)
-            const rel = '/' + path.relative(cfg.root, affectedFile);
+            const rel = '/' + path.relative(cfg.root, affectedFile).split(path.sep).join('/');
 
             // Queue update via throttle
             hmrThrottle.queueUpdate(rel, type);

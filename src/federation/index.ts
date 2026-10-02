@@ -9,7 +9,7 @@
  *  Host app    → runtime loader fetches remoteEntry.js and calls get()
  */
 
-import type { Plugin } from 'esbuild'
+import type { LegacyPlugin as Plugin } from '../types/legacy-plugin.js'
 import fs from 'fs'
 import path from 'path'
 

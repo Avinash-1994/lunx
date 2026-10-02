@@ -1,8 +1,9 @@
 import { createRequire } from 'module';
+import { compile } from '../../engines/index.js';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
-import { CacheStore } from '../../internal/store.js';
+import { CacheStore } from '../../lib/store.js';
 
 const require = createRequire(import.meta.url);
 
@@ -31,7 +32,6 @@ export class AngularCompilerAdapter {
     (globalThis as any).__angularCompilerInitTime = (this as any).compilerInitTime;
     
     // Log for test harness to capture
-    console.log(`[LUNX-TEST] Angular compiler init time: ${(this as any).compilerInitTime}ms`);
   }
 
   private getCache(hash: string): { code: string, map?: string } | null {
@@ -59,14 +59,12 @@ export class AngularCompilerAdapter {
     const statusPath = path.join(os.tmpdir(), 'lunx-hmr-status.txt');
     if (cached) {
       if (id.endsWith('.ts')) {
-         console.log(`[LUNX-TEST] Ivy cache hit (served from cache)`);
          require('fs').writeFileSync(statusPath, 'hit');
       }
       return { code: cached.code, map: cached.map ? JSON.parse(cached.map) : undefined };
     }
 
     if (id.endsWith('.ts')) {
-       console.log(`[LUNX-TEST] Ivy recompile: yes`);
        require('fs').writeFileSync(statusPath, 'recompile');
     }
     
@@ -87,23 +85,10 @@ export class AngularCompilerAdapter {
         }
       }
 
-      // 2. SWC Downlevel
-      try {
-        const swc = require('@swc/core');
-        const res = await swc.transform(transformedCode, {
-          jsc: {
-            parser: { syntax: 'typescript', decorators: true },
-            transform: { legacyDecorator: true, decoratorMetadata: true },
-            target: 'es2022'
-          },
-          sourceMaps: true
-        });
-        transformedCode = res.code;
-        sourceMap = res.map;
-      } catch (e) {
-        // Fallback if SWC not installed
-        transformedCode = transformedCode.replace(/import /g, '// import '); // Dummy transform
-      }
+      // 2. Strip types; Angular DI needs decorator metadata.
+      const res = compile(id, transformedCode, { lang: 'ts', legacyDecorators: true, decoratorMetadata: true, sourcemap: true });
+      transformedCode = res.code;
+      sourceMap = res.map;
     } 
     else if (id.endsWith('.css') || id.endsWith('.scss')) {
       // 3. LightningCSS Styles & ViewEncapsulation
@@ -190,7 +175,10 @@ export class LunxAngularAdapter {
   }
 
   plugins() {
-    return [this.compiler.createPlugin()];
+    // Angular sources are compiled by lunx's universal transformer (dev and
+    // build). The adapter's own plugin was a placeholder that replaced
+    // @Component(...) with a comment, so it must not run in a real build.
+    return [];
   }
 }
 

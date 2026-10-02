@@ -97,7 +97,7 @@ export function injectWebpackOverride(configContent: string, lunxSwcLoaderPath: 
 
 // ─── Transform cache ───────────────────────────────────────────────────────
 
-import { CacheStore } from '../../internal/store.js';
+import { CacheStore } from '../../lib/store.js';
 
 /** One store per cache directory; callers pass the directory on every call. */
 const _caches = new Map<string, CacheStore<string>>();

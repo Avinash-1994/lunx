@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-10-01T12:15:35.502Z",
+  "results": [
+    {
+      "name": "next",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "astro",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "sveltekit",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "nuxt",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "react-router",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    }
+  ]
+}

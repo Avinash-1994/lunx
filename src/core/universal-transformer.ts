@@ -5,6 +5,7 @@
  */
 
 import path from 'path';
+import { looksLikeJsx } from './jsx-detect.js';
 import fs from 'fs/promises';
 import os from 'os';
 import type { Framework } from '../core/framework-detector.js';
@@ -12,7 +13,7 @@ import { getFrameworkPreset } from '../presets/frameworks.js';
 import { log } from '../utils/logger.js';
 import { createRequire } from 'module';
 import { fileURLToPath, pathToFileURL } from 'url';
-import * as esbuild from 'esbuild';
+import { compile } from '../engines/index.js';
 import { canonicalHash } from '../core/engine/hash.js';
 const _require = createRequire(import.meta.url);
 
@@ -60,6 +61,12 @@ export class UniversalTransformer {
      * Transform code based on framework
      * Automatically detects and uses the installed version
      */
+    /** The URL a module is served at — the key HMR updates are addressed by. */
+    private hmrId(filePath: string): string {
+        const rel = path.relative(this.root, filePath).replace(/\\/g, '/');
+        return rel.startsWith('..') || path.isAbsolute(rel) ? `/@fs/${filePath.replace(/\\/g, '/').replace(/^\//, '')}` : `/${rel}`;
+    }
+
     async transform(options: TransformOptions): Promise<TransformResult> {
         const { filePath, code, framework, isDev = true } = options;
         let frameworkToUse = framework;
@@ -144,16 +151,10 @@ export class UniversalTransformer {
 
         if (!skipNormalization) {
             try {
-                const targetFormat = options.format || (options.target === 'node' ? 'cjs' : 'esm');
-                const finalResult = await esbuild.transform(result.code, {
-                    define: options.define || {},
-                    loader: 'tsx',
-                    format: targetFormat,
-                    platform: options.target === 'node' ? 'node' : 'browser',
-                    target: isDev ? 'es2020' : 'esnext',
-                    minify: false
-                });
-                result.code = finalResult.code;
+                // Applies `define` and strips any TypeScript a framework compiler
+                // left behind. Output stays ESM; CommonJS output is the legacy
+                // engine's business.
+                result.code = compile(options.filePath, result.code, { lang: 'tsx', define: options.define }).code;
             } catch (err: any) {
                 // Log normalization failures for debugging
                 // These are usually non-critical but good to know about
@@ -163,6 +164,13 @@ export class UniversalTransformer {
                     }
                 }
             }
+        }
+
+        // Give modules that use HMR their `import.meta.hot`. Prepended on the
+        // first line so source-map line numbers are unaffected.
+        if (isDev && result.code.includes('import.meta.hot') && !options.filePath.includes('node_modules')) {
+            const id = JSON.stringify(this.hmrId(options.filePath));
+            result.code = `import { createHotContext as __lunx_createHot } from '/@lunx/hmr-client'; import.meta.hot = __lunx_createHot(${id}); ` + result.code;
         }
 
         // Cache the result (Advanced Determinism)
@@ -181,15 +189,14 @@ export class UniversalTransformer {
     private async transformReact(code: string, filePath: string, isDev: boolean, jsxOptions?: { importSource?: string }): Promise<TransformResult> {
         const ext = path.extname(filePath);
 
-        // Only transform JSX/TSX files
-        if (ext !== '.jsx' && ext !== '.tsx') {
+        // Only transform JSX/TSX files — plus app `.js` files that contain JSX,
+        // which Create React App allowed and many React codebases still use.
+        const jsxInJs = (ext === '.js' || ext === '.mjs') && !filePath.includes('node_modules') && looksLikeJsx(code);
+        if (ext !== '.jsx' && ext !== '.tsx' && !jsxInJs) {
             return this.transformVanilla(code, filePath, isDev);
         }
 
         try {
-            const swcModule = await import('@swc/core');
-            const swc = (swcModule as any).default || swcModule;
-
             // The automatic runtime is the default: it is what React >= 17,
             // Preact, Solid and every modern toolchain expect, and it needs no
             // `import React` in user code. Classic is used only when we can
@@ -200,46 +207,48 @@ export class UniversalTransformer {
             const majorReact = reactVersion ? parseInt(reactVersion, 10) : NaN;
             const useAutomatic = !!jsxOptions?.importSource || !Number.isFinite(majorReact) || majorReact >= 17;
 
-            const output = await swc.transform(code, {
-                filename: filePath,
-                sourceMaps: isDev ? 'inline' : false,
-                isModule: true,
-                jsc: {
-                    parser: {
-                        syntax: 'typescript',
-                        tsx: true,
-                        decorators: true,
-                        dynamicImport: true
-                    },
-                    transform: {
-                        react: {
-                            runtime: useAutomatic ? 'automatic' : 'classic',
-                            importSource: jsxOptions?.importSource,
-                            development: isDev,
-                            refresh: isDev
-                        }
-                    }
-                }
+            const output = compile(filePath, code, {
+                lang: ext === '.tsx' ? 'tsx' : 'jsx',
+                jsx: {
+                    runtime: useAutomatic ? 'automatic' : 'classic',
+                    importSource: jsxOptions?.importSource,
+                    development: isDev,
+                    // react-refresh is React's; Preact & co. reload instead.
+                    refresh: isDev && !jsxOptions?.importSource,
+                },
+                legacyDecorators: true,
+                sourcemap: isDev ? 'inline' : false,
             });
 
             let finalCode = output?.code || code;
 
-            // Inject HMR context for React
-            if (isDev) {
-                // Normalize path to prevent escape sequence issues on Windows
-                const normalizedPath = filePath.replace(/\\/g, '/');
+            // React Refresh. Registrations are namespaced by module so two
+            // files that both declare \`App\` do not overwrite each other.
+            // Preact needs @prefresh rather than react-refresh, so it reloads.
+            if (isDev && !jsxOptions?.importSource) {
+                const id = JSON.stringify(this.hmrId(filePath));
+                // One line, so the inline source map's line numbers stay correct.
+                const hmrHeader = 'const __lunx_refresh = window.__lunx_react_refresh__; ' +
+                    'const __lunx_prevRefreshReg = window.$RefreshReg$, __lunx_prevRefreshSig = window.$RefreshSig$; ' +
+                    `if (__lunx_refresh) { window.$RefreshReg$ = (type, name) => __lunx_refresh.register(type, ${id} + ' ' + name); ` +
+                    'window.$RefreshSig$ = __lunx_refresh.createSignatureFunctionForTransform; } ';
                 const hmrFooter = `
-
-// Lunx Advanced HMR (React)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept();
+// Lunx HMR (React Refresh)
+window.$RefreshReg$ = __lunx_prevRefreshReg;
+window.$RefreshSig$ = __lunx_prevRefreshSig;
+if (import.meta.hot && __lunx_refresh) {
+    import.meta.hot.accept((mod) => {
+        if (!mod) return;
+        // Only modules whose every export is a component can be refreshed in
+        // place; anything else (an entry, a hook module, constants) reloads.
+        const exports = Object.values(mod);
+        if (exports.length === 0 || !exports.every((e) => __lunx_refresh.isLikelyComponentType(e))) {
+            import.meta.hot.invalidate();
+        }
+    });
 }
                 `;
-                finalCode = finalCode + hmrFooter;
+                finalCode = hmrHeader + finalCode + hmrFooter;
             }
 
             return {
@@ -255,7 +264,7 @@ if (import.meta.hot) {
             log.projectError({
                 file: relativePath,
                 message: errorMessage,
-                line: error.loc?.line,
+                line: error.loc?.line ?? error.details?.[0]?.line,
                 column: error.loc?.column,
                 type: 'Transformation Error',
                 plugin: 'lunx:universal-transformer'
@@ -283,26 +292,7 @@ if (import.meta.hot) {
                 const compilerUrl = pathToFileURL(compilerPath).href;
                 compiler = await import(compilerUrl);
             } catch {
-                log.warn('No Vue 3 compiler found, using fallback with HMR');
-                // Fallback: Return raw code with HMR wrapper
-                if (isDev) {
-                    const normalizedPath = filePath.replace(/\\/g, '/');
-                    const wrappedCode = `
-// Vue fallback (compiler missing)
-const _sfc_main = { template: \`${code.replace(/`/g, '\\`')}\` };
-export default _sfc_main;
-
-// Lunx Advanced HMR (Vue - Fallback)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept();
-}
-                    `;
-                    return { code: wrappedCode };
-                }
+                log.warn('No Vue 3 compiler found; serving the template uncompiled');
                 return { code: `export default { template: \`${code.replace(/`/g, '\\`')}\` };` };
             }
 
@@ -404,23 +394,17 @@ if (import.meta.hot) {
                 export default _sfc_main;
             `;
 
-            // Add HMR footer for Vue (only in dev mode)
+            // Vue's own HMR runtime (present in its dev build) re-renders the
+            // component in place; the record id must be stable across edits.
             if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
+                const hmrId = canonicalHash(this.hmrId(filePath)).substring(0, 8);
                 output += `
-
-// Lunx Advanced HMR (Vue)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    _sfc_main.__hmrId = "${scopeId}";
-    import.meta.hot.accept((modules) => {
-        const newMod = modules[0];
-        if (!newMod) return;
-        // Vue HMR: Component hot-reload
-        // Real Vue HMR is complex, for now we trigger reload
+// Lunx HMR (Vue)
+_sfc_main.__hmrId = "${hmrId}";
+if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
+    __VUE_HMR_RUNTIME__.createRecord("${hmrId}", _sfc_main);
+    import.meta.hot.accept((mod) => {
+        if (mod) __VUE_HMR_RUNTIME__.reload("${hmrId}", mod.default);
     });
 }
                 `;
@@ -461,48 +445,13 @@ if (import.meta.hot) {
                 dev: isDev,
                 css: 'injected' as any,
                 generate: isSvelte5 ? 'client' : 'dom',
+                // Svelte 5 emits its own import.meta.hot handling.
+                ...(isSvelte5 && isDev ? { hmr: true } : {}),
                 hydratable: true,
                 enableSourcemap: isDev
             } as any);
 
             let finalCode = result.js.code;
-
-            // Advanced HMR for Svelte (Production-Grade)
-            if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
-                const componentId = canonicalHash(filePath).substring(0, 16);
-                finalCode += `
-
-// Lunx Advanced HMR (Svelte)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Svelte HMR: Re-create component instances
-        const instances = window.__LUNX_SVELTE_INSTANCES__ || (window.__LUNX_SVELTE_INSTANCES__ = new Map());
-        const componentInstances = instances.get("${componentId}") || [];
-        componentInstances.forEach(instance => {
-            if (instance && instance.$set) {
-                // Preserve state and re-render
-                const state = instance.$capture_state ? instance.$capture_state() : {};
-                instance.$destroy();
-                const NewComponent = newModule.default;
-                const newInstance = new NewComponent({
-                    target: instance.$$.root,
-                    props: instance.$$.props
-                });
-                if (newInstance.$inject_state && Object.keys(state).length > 0) {
-                    newInstance.$inject_state(state);
-                }
-            }
-        });
-    });
-}
-                `;
-            }
 
             return {
                 code: finalCode,
@@ -523,27 +472,14 @@ if (import.meta.hot) {
             const majorVersion = ngVersion ? parseInt(ngVersion.split('.')[0]) : 17;
 
             if (filePath.endsWith('.ts')) {
-                const compilerInitStart = performance.now();
-                const ts = await import('typescript');
-                const compilerInitTime = (performance.now() - compilerInitStart).toFixed(4);
-                console.log(`[LUNX-TEST] Angular compiler init time: ${compilerInitTime}ms`);
-
-                // Check if this file is in cache by hash
-                const fsSyncModule = await import('fs');
-                const cryptoModule = await import('crypto');
-                const cacheKey = cryptoModule.createHash('sha256').update(code).update(filePath).digest('hex');
-                const cacheFile = path.join(os.tmpdir(), `lunx-ang-cache-${cacheKey.substring(0, 16)}`);
-                const statusFile = path.join(os.tmpdir(), 'lunx-hmr-status.txt');
-                const isHit = fsSyncModule.existsSync(cacheFile);
-                if (isHit) {
-                    console.log(`[LUNX-TEST] Ivy cache hit (served from cache)`);
-                    fsSyncModule.writeFileSync(statusFile, 'hit');
-                } else {
-                    console.log(`[LUNX-TEST] Ivy recompile: yes`);
-                    fsSyncModule.writeFileSync(statusFile, 'recompile');
-                    // Mark as cached for subsequent requests
-                    fsSyncModule.writeFileSync(cacheFile, '1');
+                // The project's TypeScript first: lunx does not depend on it.
+                let ts: any;
+                try {
+                    ts = await import(pathToFileURL(_require.resolve('typescript', { paths: [this.root, process.cwd()] })).href);
+                } catch {
+                    ts = await import('typescript');
                 }
+                ts = ts.default ?? ts;
 
                 try {
                     const compilerOptions: any = {
@@ -560,38 +496,6 @@ if (import.meta.hot) {
                     });
 
                     let finalCode = result.outputText;
-
-                    // Advanced HMR for Angular (Production-Grade)
-                    if (isDev) {
-                        const normalizedPath = filePath.replace(/\\/g, '/');
-                        const componentId = canonicalHash(filePath).substring(0, 16);
-                        finalCode += `
-
-// Lunx Advanced HMR (Angular)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Angular HMR: Re-bootstrap components
-        const registry = window.__LUNX_ANGULAR_REGISTRY__ || (window.__LUNX_ANGULAR_REGISTRY__ = new Map());
-        const components = registry.get("${componentId}") || [];
-        components.forEach(({ componentRef, viewContainerRef }) => {
-            if (componentRef && viewContainerRef) {
-                const NewComponent = newModule.default || Object.values(newModule)[0];
-                if (NewComponent) {
-                    const index = viewContainerRef.indexOf(componentRef.hostView);
-                    viewContainerRef.remove(index);
-                    viewContainerRef.createComponent(NewComponent);
-                }
-            }
-        });
-    });
-}
-                        `;
-                    }
 
                     return { code: finalCode, map: result.sourceMapText };
                 } catch {
@@ -615,104 +519,55 @@ if (import.meta.hot) {
      */
     private async transformSolid(code: string, filePath: string, isDev: boolean): Promise<TransformResult> {
         const ext = path.extname(filePath);
-        if (ext !== '.jsx' && ext !== '.tsx') {
+        if (ext !== '.jsx' && ext !== '.tsx' && !(ext === '.js' && looksLikeJsx(code))) {
             return this.transformVanilla(code, filePath, isDev);
         }
 
-        try {
-            const swcModule = await import('@swc/core');
-            const swc = (swcModule as any).default || swcModule;
-            const output = await swc.transform(code, {
+        // Solid's JSX is compiled by its own compiler (dom-expressions) into
+        // fine-grained DOM updates; `{count()}` is only reactive that way.
+        // It ships as a Babel preset, so use the project's copy when present
+        // (vite-plugin-solid users have it).
+        const babel = await this.loadSolidCompiler();
+        if (babel) {
+            const stripped = compile(filePath, code, { lang: ext === '.tsx' ? 'tsx' : 'jsx', jsx: 'preserve', legacyDecorators: true }).code;
+            const out = await babel.core.transformAsync(stripped, {
                 filename: filePath,
+                babelrc: false,
+                configFile: false,
                 sourceMaps: isDev ? 'inline' : false,
-                isModule: true,
-                jsc: {
-                    parser: {
-                        syntax: 'typescript',
-                        tsx: true
-                    },
-                    transform: {
-                        react: {
-                            runtime: 'automatic',
-                            importSource: 'solid-js/h'
-                        }
-                    }
-                }
+                presets: [[babel.preset, { generate: 'dom', hydratable: false, dev: isDev }]],
             });
-
-            let finalCode = output?.code || code;
-
-            // Inject HMR context for Solid
-            if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
-                const hmrFooter = `
-
-// Lunx Advanced HMR (Solid)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Solid HMR: Re-render root components
-        const roots = window.__LUNX_SOLID_ROOTS__ || (window.__LUNX_SOLID_ROOTS__ = new Map());
-        const componentRoots = roots.get("${normalizedPath}") || [];
-        componentRoots.forEach(({ dispose, container, component }) => {
-            if (dispose) dispose();
-            const NewComponent = newModule.default || newModule[component];
-            if (NewComponent && container) {
-                // Use server-relative path so the dev server resolves via exports field
-                import('/node_modules/solid-js/web').then(({ render }) => {
-                    render(() => NewComponent({}), container);
-                });
-            }
-        });
-    });
-}
-                `;
-                finalCode = finalCode + hmrFooter;
-            }
-
-            return { code: finalCode, map: output?.map ? JSON.stringify(output.map) : undefined };
-        } catch (error: any) {
-            log.warn(`Solid transform failed (babel-preset-solid missing?), using esbuild fallback with HMR`);
-            // Fallback: use esbuild but still add HMR
-            try {
-                const result = await esbuild.transform(code, {
-                    loader: 'tsx',
-                    sourcemap: isDev ? 'inline' : false,
-                    format: 'esm',
-                    target: 'es2020',
-                    jsx: 'automatic',
-                    jsxImportSource: 'solid-js'
-                });
-
-                let finalCode = result.code;
-
-                // Still add HMR even in fallback
-                if (isDev) {
-                    const normalizedPath = filePath.replace(/\\/g, '/');
-                    const hmrFooter = `
-
-// Lunx Advanced HMR (Solid - Fallback)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept();
-}
-                    `;
-                    finalCode = finalCode + hmrFooter;
-                }
-
-                return { code: finalCode, map: result.map };
-            } catch (fallbackError: any) {
-                log.error(`Solid fallback also failed: ${fallbackError.message}`);
-                return this.transformVanilla(code, filePath, isDev);
-            }
+            return { code: out?.code ?? stripped };
         }
+
+        // Fallback: hyperscript runtime. Renders, but JSX expressions are not
+        // reactive, so say so once.
+        if (!this.solidWarned) {
+            this.solidWarned = true;
+            log.warn('Solid: install babel-preset-solid and @babel/core for reactive JSX (npm i -D babel-preset-solid @babel/core). Using solid-js/h meanwhile.');
+        }
+        return compile(filePath, code, {
+            lang: ext === '.tsx' ? 'tsx' : 'jsx',
+            jsx: { runtime: 'automatic', importSource: 'solid-js/h' },
+            sourcemap: isDev ? 'inline' : false,
+        });
+    }
+
+    private solidWarned = false;
+    private solidCompiler: Promise<{ core: any; preset: any } | null> | null = null;
+
+    private loadSolidCompiler(): Promise<{ core: any; preset: any } | null> {
+        this.solidCompiler ??= (async () => {
+            try {
+                const paths = [this.root, process.cwd()];
+                const core = await import(pathToFileURL(_require.resolve('@babel/core', { paths })).href);
+                const preset = await import(pathToFileURL(_require.resolve('babel-preset-solid', { paths })).href);
+                return { core: core.default ?? core, preset: preset.default ?? preset };
+            } catch {
+                return null;
+            }
+        })();
+        return this.solidCompiler;
     }
 
     /**
@@ -744,41 +599,35 @@ if (import.meta.hot) {
             }
 
             const optimizer = await qwik.createOptimizer();
+            const srcDir = path.join(this.root, 'src');
             const result = await optimizer.transformModules({
-                input: [{ code, path: filePath }],
-                srcDir: path.join(this.root, 'src'),
+                // Relative to srcDir, or the optimizer nests the path twice.
+                input: [{ code, path: path.relative(srcDir, filePath).split(path.sep).join('/') }],
+                srcDir,
                 rootDir: this.root,
+                // Inline: QRL segments stay in this module, so handlers like
+                // onClick$ work without serving separate segment files.
                 entryStrategy: { type: 'inline' },
                 minify: isDev ? 'none' : 'simplify',
                 sourceMaps: isDev,
-                mode: isDev ? 'dev' : 'lib',
-                transpile: true,
+                mode: isDev ? 'dev' : 'prod',
+                // `transpile: true` is not an optimizer option; without these
+                // two, $-handlers were never turned into QRLs and did nothing.
+                transpileTs: true,
+                transpileJsx: true,
+                isServer: false,
             });
-
-            const output = result.modules[0];
-            const { transform } = await import('esbuild');
-            const final = await transform(output.code, {
-                loader: 'tsx',
-                format: 'esm',
-                target: 'es2020',
-                jsx: 'automatic',
-                jsxImportSource: '@builder.io/qwik'
-            });
-            const finalCode = final.code;
-            return { code: finalCode, map: final.map ? JSON.stringify(final.map) : undefined };
+            const errors = (result.diagnostics ?? []).filter((d: any) => d.category === 'error');
+            if (errors.length) throw new Error(errors.map((d: any) => d.message).join('; '));
+            return { code: result.modules[0].code };
         }
         catch (error: any) {
-            // Fallback: use esbuild directly with Qwik JSX classic mode
-            log.warn(`Qwik optimizer failed, using esbuild fallback: ${error.message}`);
+            // Fallback: compile directly with Qwik JSX classic mode
+            log.warn(`Qwik optimizer failed, compiling without it: ${error.message}`);
             try {
-                const final = await esbuild.transform(code, {
-                    loader: (path.extname(filePath) === '.tsx' || path.extname(filePath) === '.jsx') ? 'tsx' : 'ts',
-                    format: 'esm',
-                    target: 'es2020',
-                    jsx: 'transform',
-                    jsxFactory: 'h',
-                    jsxFragment: 'Fragment',
-                    jsxImportSource: undefined,
+                const final = compile(filePath, code, {
+                    lang: (path.extname(filePath) === '.tsx' || path.extname(filePath) === '.jsx') ? 'tsx' : 'ts',
+                    jsx: { runtime: 'classic', pragma: 'h', pragmaFrag: 'Fragment' },
                 });
                 // Inject h/Fragment imports from qwik
                 const imports = `import { h, Fragment } from '@builder.io/qwik';\n`;
@@ -808,43 +657,6 @@ if (import.meta.hot) {
             });
 
             let finalCode = result.outputText;
-
-            // Advanced HMR for Lit (Production-Grade)
-            if (isDev) {
-                const normalizedPath = filePath.replace(/\\/g, '/');
-                const componentId = canonicalHash(filePath).substring(0, 16);
-                finalCode += `
-
-// Lunx Advanced HMR (Lit)
-import { createHotContext } from '/@lunx/client';
-if (!import.meta.hot) {
-    import.meta.hot = createHotContext("${normalizedPath}");
-}
-if (import.meta.hot) {
-    import.meta.hot.accept((newModule) => {
-        if (!newModule) return;
-        // Lit HMR: Re-register custom elements
-        const registry = window.__LUNX_LIT_REGISTRY__ || (window.__LUNX_LIT_REGISTRY__ = new Map());
-        const elements = registry.get("${componentId}") || [];
-        elements.forEach(({ tagName, constructor }) => {
-            const instances = document.querySelectorAll(tagName);
-            instances.forEach(instance => {
-                const NewClass = newModule.default || newModule[constructor.name];
-                if (NewClass && customElements.get(tagName)) {
-                    const attrs = Array.from(instance.attributes);
-                    const children = Array.from(instance.childNodes);
-                    const parent = instance.parentNode;
-                    const newElement = document.createElement(tagName);
-                    attrs.forEach(attr => newElement.setAttribute(attr.name, attr.value));
-                    children.forEach(child => newElement.appendChild(child.cloneNode(true)));
-                    parent?.replaceChild(newElement, instance);
-                }
-            });
-        });
-    });
-}
-                `;
-            }
 
             return { code: finalCode, map: result.sourceMapText };
         } catch (error: any) {
@@ -908,22 +720,22 @@ if (import.meta.hot) {
                     try {
                         return await bunParser.transform(code, filePath, { isDev });
                     } catch (e) {
-                        log.warn(`Bun transform failed, falling back to esbuild: ${e}`);
+                        log.warn(`Bun transform failed, falling back to Oxc: ${e}`);
                     }
                 }
 
-                // Fallback to esbuild
-                const result = await esbuild.transform(code, {
-                    loader: (ext === '.mjs' ? 'js' : ext.slice(1)) as any,
+                const result = compile(filePath, code, {
+                    lang: ext === '.mjs' ? 'js' : (ext.slice(1) as any),
+                    legacyDecorators: true,
                     sourcemap: isDev ? 'inline' : false,
-                    format: 'esm',
-                    target: 'es2020',
-                    tsconfigRaw: { compilerOptions: { experimentalDecorators: true } }
                 });
                 return { code: result.code, map: result.map };
             } catch (error: any) {
-                log.error(`Vanilla transform failed for ${filePath}:`, error.message);
-                return { code };
+                // Serving the untransformed source would hand the browser
+                // TypeScript; fail loudly so the overlay shows the cause.
+                const detail = error.details?.[0]?.message ?? error.message;
+                log.error(`Transform failed for ${filePath}: ${detail}`);
+                throw new Error(`${path.basename(filePath)}: ${detail}`);
             }
         }
         return { code };
@@ -977,3 +789,5 @@ if (import.meta.hot) {
         return null;
     }
 }
+
+export { looksLikeJsx };

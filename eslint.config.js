@@ -94,6 +94,16 @@ export default [
             'lunx-governance': lunxGovernance,
         },
         rules: {
+            // TypeScript already checks undefined names (incl. DOM and Node types);
+            // the core rule cannot see type-only globals like BufferEncoding.
+            'no-undef': 'off',
+            // Compile and bundle through src/engines, never a tool directly.
+            'no-restricted-imports': ['error', { paths: [
+                { name: 'rolldown', message: 'Use getBundler() from src/engines.' },
+                { name: 'rolldown/experimental', message: 'Use compile/minify/parse from src/engines.' },
+                { name: 'esbuild', message: 'Use src/engines.' },
+                { name: '@swc/core', message: 'Use src/engines.' },
+            ] }],
             ...tsPlugin.configs.recommended.rules,
             '@typescript-eslint/no-explicit-any': 'off',
             '@typescript-eslint/no-unused-vars': 'off',
@@ -143,5 +153,10 @@ export default [
             '@typescript-eslint/no-explicit-any': 'off',
             '@typescript-eslint/no-unused-vars': 'off'
         }
-    }
+    },
+    {
+        // The engine adapters are the one place allowed to talk to the tools.
+        files: ['src/engines/**/*.ts', 'tests/**/*.ts', 'src/**/__tests__/**/*.ts'],
+        rules: { 'no-restricted-imports': 'off' },
+    },
 ];

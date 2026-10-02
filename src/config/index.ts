@@ -1,11 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
-import kleur from '../internal/colors.js';
+import kleur from '../lib/colors.js';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-import yaml from '../internal/yaml.js';
+import yaml from '../lib/yaml.js';
 
-import { z } from '../internal/schema.js';
+import { z } from '../lib/schema.js';
 import { log } from '../utils/logger.js';
 import { spaPreset, ssrPreset, ssgPreset } from '../presets/index.js';
 
@@ -72,6 +72,20 @@ export const BuildConfigSchema = z.object({
     cssModules: z.boolean().default(false),
     targets: z.array(z.string()).optional(),
     manualChunks: z.record(z.string(), z.array(z.string())).optional(),
+    /** Production bundler: 'rolldown' (Rust, default) or the 'legacy' JS engine. */
+    bundler: z.enum(['rolldown', 'legacy']).optional(),
+    /** Assets smaller than this many bytes are inlined as data URLs (default 4096; 0 disables). */
+    assetsInlineLimit: z.number().optional(),
+  }).optional(),
+  /** Public base path the app is served from, e.g. '/my-app/'. */
+  base: z.string().optional(),
+  /** Global constant replacements, e.g. { __APP_VERSION__: '"1.2.3"' }. */
+  define: z.record(z.string(), z.string()).optional(),
+  resolve: z.object({
+    alias: z.union([
+      z.record(z.string(), z.string()),
+      z.array(z.object({ find: z.string(), replacement: z.string() })),
+    ]).optional(),
   }).optional(),
   server: z.object({
     host: z.string().optional(),
@@ -141,7 +155,12 @@ export type BuildConfig = {
     cssModules?: boolean;
     targets?: string[];
     manualChunks?: Record<string, string[]>;
+    bundler?: 'rolldown' | 'legacy';
+    assetsInlineLimit?: number;
   };
+  base?: string;
+  define?: Record<string, string>;
+  resolve?: { alias?: Record<string, string> | Array<{ find: string; replacement: string }> };
   server?: {
     host?: string;
     port?: number;
@@ -194,7 +213,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'entry', 'outDir', 'framework', 'preset', 'mode', 'platform', 'port',
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
-  'prebundle', 'cache', 'compatRollup'
+  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate'
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {
@@ -329,6 +348,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
   let rawConfig: any;
   let loadedConfigPath = 'default';
+  let foreign: import('./vite-compat.js').ForeignConfig | null = null;
 
   try {
     if (await fs.access(lunxTsPath).then(() => true).catch(() => false)) {
@@ -368,6 +388,12 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
       const raw = await fs.readFile(legacyYmlPath, 'utf-8');
       rawConfig = yaml.load(raw);
       loadedConfigPath = 'lunx.build.yml';
+    } else if ((foreign = await (await import('./vite-compat.js')).readViteConfig(cwd))) {
+      // A Vite project: run it as-is. `lunx migrate` writes a native config.
+      rawConfig = foreign.config;
+      loadedConfigPath = foreign.file;
+      log.info(`[lunx] Using ${foreign.file} (Vite-compatible). Run \`lunx migrate\` to convert it.`);
+      for (const note of foreign.notes) log.info(`[lunx]   ${note}`);
     } else {
       // Return default config if file not found, with auto-detection
       log.info('No config file found, using defaults...');
@@ -418,6 +444,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
     const config = result.data as BuildConfig;
     const root = config.root || cwd;
+    if (foreign?.plugins.length) (config as any).__rollupPlugins = foreign.plugins;
 
     // CFG-02: normalise entry (handles string, array, or auto-detect)
     config.entry = normaliseEntry(config.entry as any, root);
@@ -491,57 +518,13 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
 async function loadModuleConfig(tsPath: string, cwd: string): Promise<any> {
   log.info(`Loading config from ${path.basename(tsPath)}...`);
-  const { build } = await import('esbuild');
-  const outfile = path.join(cwd, `lunx.config.temp.${Date.now()}.mjs`);
-
-  try {
-    await build({
-      entryPoints: [tsPath],
-      outfile,
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      target: 'es2020',
-      external: [
-        'esbuild', 'zod', 'kleur',
-        'svelte-preprocess', 'svelte', 'esbuild-svelte', 'js-yaml',
-        'coffeescript', 'pug', 'stylus', 'less', 'postcss', 'sass', 'postcss-load-config', 'sugarss',
-        'react', 'react-dom',
-        // The config imports the tool itself for `defineConfig`. It is not a
-        // dependency of the user's project, so it can never be bundled here;
-        // the plugin below supplies it instead.
-        'lunx', 'lunx-dev'
-      ],
-      plugins: [
-        {
-          name: 'lunx-self-import',
-          setup(build) {
-            // A config written as `import { defineConfig } from 'lunx'` must
-            // work whether the package is installed as `lunx` or `lunx-dev`,
-            // and even when neither is resolvable from the project (linked
-            // checkouts, pnpm, monorepos).
-            build.onResolve({ filter: /^lunx(-dev)?$/ }, () => ({
-              path: 'lunx-self',
-              namespace: 'lunx-self',
-            }));
-            build.onLoad({ filter: /.*/, namespace: 'lunx-self' }, () => ({
-              // defineConfig is an identity helper that exists for types only.
-              contents: [
-                'export const defineConfig = (c) => c;',
-                'export default { defineConfig };',
-              ].join(String.fromCharCode(10)),
-              loader: 'js',
-            }));
-          },
-        },
-      ],
-    });
-
-    const mod = await import('file://' + outfile);
-    return mod.default || mod;
-  } finally {
-    await fs.unlink(outfile).catch(() => { });
-  }
+  const { importBundled } = await import('../lib/load-module.js');
+  // A config written as `import { defineConfig } from 'lunx'` must work
+  // whether the package is installed as `lunx` or `lunx-dev`, and even when
+  // neither is resolvable from the project (linked checkouts, pnpm,
+  // monorepos). defineConfig is an identity helper that exists for types.
+  const self = 'export const defineConfig = (c) => c;\nexport default { defineConfig };\n';
+  return importBundled(tsPath, { root: cwd, stubs: { lunx: self, 'lunx-dev': self } });
 }
 
 export async function saveConfig(cwd: string, config: any): Promise<void> {

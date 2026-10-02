@@ -33,3 +33,14 @@ benchmarks/**/package-lock.json
 
 # Test cache manifests
 tests/fixtures/cache/
+
+# Local artifacts that were committed by accident before
+*.tgz
+.tmp-*/
+node_trace.*.log
+playwright-report*/
+test-results/
+**/.next/
+**/.nuxt/
+**/.svelte-kit/
+**/.output/

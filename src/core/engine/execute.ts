@@ -252,7 +252,7 @@ export async function executeParallel(execPlan: ExecutionPlan, buildPlan: BuildP
                     // They start with `#`, so the bare-specifier pattern below
                     // never matched them and they reached the bundle verbatim.
                     moduleCode = moduleCode.replace(
-                        /require\s*\(\s*["'](#[^"']+)["']\s*\)/g,
+                        /\brequire\s*\(\s*["'](#[^"']+)["']\s*\)/g,
                         (match, specifier) => {
                             const depId = specMap[specifier];
                             if (depId) {

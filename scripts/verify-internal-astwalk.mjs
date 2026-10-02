@@ -4,7 +4,7 @@
  */
 import * as acorn from 'acorn';
 import * as reference from 'acorn-walk';
-import * as ours from '../src/internal/ast-walk.ts';
+import * as ours from '../src/lib/ast-walk.ts';
 
 const results = [];
 function check(name, ok, detail = '') {

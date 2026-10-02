@@ -1,7 +1,7 @@
 {
   "name": "lunx-dev",
   "version": "1.0.3",
-  "description": "⚡ Lunx — a modern JavaScript build tool powered by SWC and LightningCSS. Fast HMR, module federation, tree shaking, and multi-framework support (React, Vue, Svelte, Solid). A fast, Rust-native build pipeline.",
+  "description": "\u26a1 Lunx \u2014 a modern JavaScript build tool powered by SWC and LightningCSS. Fast HMR, module federation, tree shaking, and multi-framework support (React, Vue, Svelte, Solid). A fast, Rust-native build pipeline.",
   "homepage": "https://lunx.dev",
   "type": "module",
   "main": "./dist/index.js",
@@ -48,7 +48,7 @@
     "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:build": "tsc -p tsconfig.build.json --noEmit",
-    "test:all": "tsc -p tsconfig.build.json && npx tsx tests/config_test.ts && npx tsx tests/bootstrap_test.ts && npx tsx tests/integration_test.ts && npx tsx tests/asset_test.ts && npx tsx tests/federation_core_test.ts && npx tsx tests/core_engine_test.ts && npx tsx tests/framework_verification_test.ts && npx tsx tests/phase_3_1_hmr_classification_test.ts && npx tsx tests/phase_3_1_hmr_integration_test.ts",
+    "test:all": "tsc -p tsconfig.build.json && node ./scripts/postbuild.js && npx tsx tests/config_test.ts && npx tsx tests/bootstrap_test.ts && npx tsx tests/integration_test.ts && npx tsx tests/asset_test.ts && npx tsx tests/federation_core_test.ts && npx tsx tests/core_engine_test.ts && npx tsx tests/framework_verification_test.ts && npx tsx tests/phase_3_1_hmr_classification_test.ts && npx tsx tests/phase_3_1_hmr_integration_test.ts",
     "test:regression": "npx tsx src/test/regression.ts",
     "test:snapshot": "cross-env NODE_OPTIONS=\"--experimental-vm-modules\" jest tests/build/snapshot.test.ts",
     "test:performance": "cross-env NODE_OPTIONS=\"--experimental-vm-modules\" jest tests/performance/regression.test.ts --testTimeout=30000",
@@ -77,7 +77,9 @@
     "build:workspaces": "npm --prefix packages/lunx-adapter-core run build && npm --prefix packages/lunx-security run build",
     "bench:vs-vite": "tsx scripts/bench-vs-vite.mjs",
     "bench:arena": "tsx scripts/bench-arena.mjs",
-    "test:cli-surface": "tsx scripts/verify-cli-surface.mjs"
+    "test:cli-surface": "tsx scripts/verify-cli-surface.mjs",
+    "test:conformance": "tsx scripts/library-conformance.mjs",
+    "test:meta": "tsx scripts/meta-matrix.mjs"
   },
   "keywords": [
     "build-tool",
@@ -131,10 +133,9 @@
   "dependencies": {
     "@lunx/adapter-core": "file:packages/lunx-adapter-core",
     "@lunx/security": "file:packages/lunx-security",
-    "@swc/core": "~1.15.24",
-    "acorn": "^8.15.0",
-    "esbuild": "^0.27.2",
-    "lightningcss": "^1.30.1"
+    "lightningcss": "^1.30.1",
+    "react-refresh": "^0.18.0",
+    "rolldown": "^1.0.0-rc.1"
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",
@@ -144,7 +145,7 @@
     "@napi-rs/cli": "^3.4.1",
     "@napi-rs/triples": "^2.1.4",
     "@playwright/test": "^1.58.0",
-    "@swc/core-win32-x64-msvc": "^1.16.2",
+    "@swc/core": "~1.15.24",
     "@tauri-apps/api": "^2.11.0",
     "@types/babel__core": "^7.20.5",
     "@types/better-sqlite3": "^7.6.13",
@@ -163,6 +164,7 @@
     "@typescript-eslint/parser": "^8.51.0",
     "@vue/compiler-sfc": "^3.5.26",
     "@vue/server-renderer": "^3.5.26",
+    "acorn": "^8.15.0",
     "autocannon": "^8.0.0",
     "axe-core": "^4.11.1",
     "babel-preset-solid": "^1.8.0",
@@ -170,6 +172,7 @@
     "chokidar": "^3.6.0",
     "cross-env": "^10.1.0",
     "dotenv": "^17.2.3",
+    "esbuild": "^0.27.2",
     "esbuild-svelte": "^0.9.4",
     "eslint": "^9.39.2",
     "eslint-plugin-lunx-governance": "file:eslint-plugin-lunx-governance",
@@ -187,9 +190,7 @@
     "puppeteer": "^24.34.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-refresh": "^0.18.0",
     "rimraf": "^6.1.2",
-    "rolldown": "^1.0.0-rc.1",
     "rollup": "^4.55.1",
     "selfsigned": "^5.5.0",
     "solid-js": "^1.9.15",
@@ -217,9 +218,9 @@
     "esbuild-svelte": "^0.9.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-refresh": "^0.18.0",
     "svelte-preprocess": "^6.0.3",
-    "vue": "^3.5.26"
+    "vue": "^3.5.26",
+    "@swc/core": ">=1.15.24"
   },
   "peerDependenciesMeta": {
     "@babel/core": {
@@ -258,13 +259,13 @@
     "react-dom": {
       "optional": true
     },
-    "react-refresh": {
-      "optional": true
-    },
     "svelte-preprocess": {
       "optional": true
     },
     "vue": {
+      "optional": true
+    },
+    "@swc/core": {
       "optional": true
     }
   }

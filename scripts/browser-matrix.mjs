@@ -25,7 +25,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CLI = path.join(REPO, 'src', 'cli.ts');
+// LUNX_CLI=dist/cli.js runs the built CLI with plain node (no tsx).
+const CLI = process.env.LUNX_CLI ? path.resolve(REPO, process.env.LUNX_CLI) : path.join(REPO, 'src', 'cli.ts');
 
 const args = process.argv.slice(2);
 const only = args.find((a) => a.startsWith('--only='))?.split('=')[1]?.split(',');
@@ -78,8 +79,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.tsx'),
             'src/index.css': SHARED_CSS,
             'src/main.tsx': `import './index.css';\nimport { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
-            'src/App.tsx': `export default function App() {\n  return <h1 className="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/App.tsx': `import { useState } from 'react';\nexport default function App() {\n  const [n, setN] = useState(0);\n  return <><h1 className="marker">${MARKER_BEFORE}</h1><button id="inc" onClick={() => setN(n + 1)}>{n}</button></>;\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'preact',
@@ -90,13 +92,14 @@ const FRAMEWORKS = [
             'index.html': html('src/main.tsx'),
             'src/index.css': SHARED_CSS,
             'src/main.tsx': `import './index.css';\nimport { render } from 'preact';\nimport App from './App';\nrender(<App />, document.getElementById('root')!);\n`,
-            'src/App.tsx': `export default function App() {\n  return <h1 class="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/App.tsx': `import { useState } from 'preact/hooks';\nexport default function App() {\n  const [n, setN] = useState(0);\n  return <><h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" onClick={() => setN(n + 1)}>{n}</button></>;\n}\n`,
             'tsconfig.json': JSON.stringify(
                 { compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'preact', target: 'ES2020', module: 'ESNext', moduleResolution: 'bundler', strict: false } },
                 null,
                 2,
             ),
         },
+        interactive: true,
     },
     {
         name: 'vue',
@@ -106,8 +109,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.ts'),
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport { createApp } from 'vue';\nimport App from './App.vue';\ncreateApp(App).mount('#root');\n`,
-            'src/App.vue': `<template>\n  <h1 class="marker">${MARKER_BEFORE}</h1>\n</template>\n`,
+            'src/App.vue': `<script setup>\nimport { ref } from 'vue';\nconst n = ref(0);\n</script>\n<template>\n  <h1 class="marker">${MARKER_BEFORE}</h1>\n  <button id="inc" @click="n++">{{ n }}</button>\n</template>\n`,
         },
+        interactive: true,
     },
     {
         name: 'svelte',
@@ -117,8 +121,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.ts'),
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport { mount } from 'svelte';\nimport App from './App.svelte';\nmount(App, { target: document.getElementById('root')! });\n`,
-            'src/App.svelte': `<h1 class="marker">${MARKER_BEFORE}</h1>\n`,
+            'src/App.svelte': `<script>\n  let n = $state(0);\n</script>\n<h1 class="marker">${MARKER_BEFORE}</h1>\n<button id="inc" onclick={() => n++}>{n}</button>\n`,
         },
+        interactive: true,
     },
     {
         name: 'solid',
@@ -129,8 +134,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.tsx'),
             'src/index.css': SHARED_CSS,
             'src/main.tsx': `import './index.css';\nimport { render } from 'solid-js/web';\nimport App from './App';\nrender(() => <App />, document.getElementById('root')!);\n`,
-            'src/App.tsx': `export default function App() {\n  return <h1 class="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/App.tsx': `import { createSignal } from 'solid-js';\nexport default function App() {\n  const [n, setN] = createSignal(0);\n  return <><h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" onClick={() => setN(n() + 1)}>{n()}</button></>;\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'lit',
@@ -140,7 +146,155 @@ const FRAMEWORKS = [
             'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root"><app-root></app-root></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport './app-root';\n`,
-            'src/app-root.ts': `import { LitElement, html, css } from 'lit';\n\nexport class AppRoot extends LitElement {\n  static styles = css\`h1 { color: rgb(0, 187, 119); font-weight: 700; }\`;\n  render() { return html\`<h1 class="marker">${MARKER_BEFORE}</h1>\`; }\n}\ncustomElements.define('app-root', AppRoot);\n`,
+            'src/app-root.ts': `import { LitElement, html, css } from 'lit';\n\nexport class AppRoot extends LitElement {\n  static styles = css\`h1 { color: rgb(0, 187, 119); font-weight: 700; }\`;\n  static properties = { n: { state: true } };\n  constructor() { super(); this.n = 0; }\n  render() { return html\`<h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" @click=\${() => this.n++}>\${this.n}</button>\`; }\n}\ncustomElements.define('app-root', AppRoot);\n`,
+        },
+        interactive: true,
+    },
+
+    // ── Ecosystem: libraries and stacks real apps are built from ─────────────
+    // Installed once into a shared cache (see ensureEcosystem), not into the repo.
+    {
+        name: 'alpine',
+        ecosystem: true,
+        deps: { alpinejs: '3.14.9' },
+        hmrFile: 'src/message.ts',
+        files: {
+            'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root" x-data="state"><h1 class="marker" x-text="msg"></h1><button id="inc" @click="n++" x-text="n"></button></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
+            'src/index.css': SHARED_CSS,
+            'src/message.ts': `export const message = '${MARKER_BEFORE}';\n`,
+            'src/main.ts': `import './index.css';\nimport Alpine from 'alpinejs';\nimport { message } from './message';\nAlpine.data('state', () => ({ msg: message, n: 0 }));\nAlpine.start();\n`,
+        },
+        interactive: true,
+    },
+    {
+        name: 'mithril',
+        ecosystem: true,
+        deps: { mithril: '2.2.15' },
+        hmrFile: 'src/app.ts',
+        files: {
+            'index.html': html('src/main.ts'),
+            'src/index.css': SHARED_CSS,
+            'src/app.ts': `import m from 'mithril';\nlet n = 0;\nexport const App = { view: () => [m('h1.marker', '${MARKER_BEFORE}'), m('button#inc', { onclick: () => n++ }, n)] };\n`,
+            'src/main.ts': `import './index.css';\nimport m from 'mithril';\nimport { App } from './app';\nm.mount(document.getElementById('root')!, App);\n`,
+        },
+        interactive: true,
+    },
+    {
+        name: 'jquery',
+        ecosystem: true,
+        deps: { jquery: '3.7.1' },
+        hmrFile: 'src/main.ts',
+        files: {
+            'index.html': html('src/main.ts'),
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport $ from 'jquery';\n$('#root').html('<h1 class="marker">${MARKER_BEFORE}</h1>');\n`,
+        },
+    },
+    {
+        name: 'three',
+        ecosystem: true,
+        deps: { three: '0.182.0' },
+        hmrFile: 'src/main.ts',
+        files: {
+            'index.html': html('src/main.ts'),
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport { Vector3, MathUtils } from 'three';\nconst v = new Vector3(1, 2, 2);\ndocument.getElementById('root')!.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1><p>' + v.length() + ' ' + MathUtils.clamp(5, 0, 1) + '</p>';\n`,
+        },
+    },
+    {
+        name: 'react-tailwind',
+        ecosystem: true,
+        deps: { react: '19.2.3', 'react-dom': '19.2.3', tailwindcss: '4.1.18', '@tailwindcss/postcss': '4.1.18', postcss: '8.5.6' },
+        hmrFile: 'src/App.tsx',
+        files: {
+            'index.html': html('src/main.tsx'),
+            'postcss.config.mjs': `export default { plugins: { '@tailwindcss/postcss': { base: import.meta.dirname } } };\n`,
+            'src/index.css': `@import "tailwindcss";\n`,
+            'src/main.tsx': `import './index.css';\nimport { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
+            'src/App.tsx': `export default function App() {\n  return <h1 className="marker text-[rgb(0,187,119)] font-bold">${MARKER_BEFORE}</h1>;\n}\n`,
+        },
+    },
+    {
+        name: 'react-styled',
+        ecosystem: true,
+        deps: { react: '19.2.3', 'react-dom': '19.2.3', 'styled-components': '6.1.19' },
+        hmrFile: 'src/App.tsx',
+        files: {
+            'index.html': html('src/main.tsx'),
+            'src/main.tsx': `import { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
+            'src/App.tsx': `import styled from 'styled-components';\nconst Title = styled.h1\`\n  color: rgb(0, 187, 119);\n  font-weight: 700;\n\`;\nexport default function App() {\n  return <Title className="marker">${MARKER_BEFORE}</Title>;\n}\n`,
+        },
+    },
+    {
+        name: 'react-router',
+        ecosystem: true,
+        deps: { react: '19.2.3', 'react-dom': '19.2.3', 'react-router': '7.9.4' },
+        hmrFile: 'src/Home.tsx',
+        files: {
+            'index.html': html('src/main.tsx'),
+            'src/index.css': SHARED_CSS,
+            'src/main.tsx': `import './index.css';\nimport { createRoot } from 'react-dom/client';\nimport { createBrowserRouter, RouterProvider } from 'react-router';\nimport Home from './Home';\nconst router = createBrowserRouter([{ path: '/', element: <Home /> }]);\ncreateRoot(document.getElementById('root')!).render(<RouterProvider router={router} />);\n`,
+            'src/Home.tsx': `export default function Home() {\n  return <h1 className="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+        },
+    },
+    {
+        name: 'vue-router',
+        ecosystem: true,
+        deps: { vue: '3.5.26', 'vue-router': '4.6.3' },
+        hmrFile: 'src/Home.vue',
+        files: {
+            'index.html': html('src/main.ts'),
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport { createApp } from 'vue';\nimport { createRouter, createWebHistory } from 'vue-router';\nimport App from './App.vue';\nimport Home from './Home.vue';\nconst router = createRouter({ history: createWebHistory(), routes: [{ path: '/', component: Home }] });\ncreateApp(App).use(router).mount('#root');\n`,
+            'src/App.vue': `<template>\n  <RouterView />\n</template>\n`,
+            'src/Home.vue': `<script setup lang="ts">\nconst text: string = '${MARKER_BEFORE}';\n</script>\n<template>\n  <h1 class="marker">{{ text }}</h1>\n</template>\n`,
+        },
+    },
+    {
+        name: 'sass',
+        ecosystem: true,
+        deps: { sass: '1.93.2' },
+        hmrFile: 'src/main.ts',
+        files: {
+            'index.html': html('src/main.ts', 'app'),
+            'src/_theme.scss': `$brand: rgb(0, 187, 119);\n`,
+            'src/styles.scss': `@use 'theme';\n#app {\n  .marker { color: theme.$brand; font-weight: 700; }\n}\n`,
+            'src/main.ts': `import './styles.scss';\ndocument.getElementById('app')!.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1>';\n`,
+        },
+    },
+    {
+        name: 'angular',
+        ecosystem: true,
+        deps: {
+            '@angular/core': '20.3.4', '@angular/common': '20.3.4', '@angular/compiler': '20.3.4',
+            '@angular/platform-browser': '20.3.4', rxjs: '7.8.2', tslib: '2.8.1', typescript: '5.9.3',
+        },
+        hmrFile: 'src/app.component.ts',
+        config: `import { defineConfig } from 'lunx';\nexport default defineConfig({ framework: 'angular' });\n`,
+        files: {
+            'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root"><app-root></app-root></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
+            'src/index.css': SHARED_CSS,
+            'src/main.ts': `import './index.css';\nimport '@angular/compiler';\nimport { provideZonelessChangeDetection } from '@angular/core';\nimport { bootstrapApplication } from '@angular/platform-browser';\nimport { AppComponent } from './app.component';\nbootstrapApplication(AppComponent, { providers: [provideZonelessChangeDetection()] });\n`,
+            'src/app.component.ts': `import { Component, signal } from '@angular/core';\n@Component({\n  selector: 'app-root',\n  template: '<h1 class="marker">{{ text }}</h1><button id="inc" (click)="n.set(n() + 1)">{{ n() }}</button>',\n})\nexport class AppComponent {\n  text = '${MARKER_BEFORE}';\n  n = signal(0);\n}\n`,
+            'tsconfig.json': JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ES2022', experimentalDecorators: true, useDefineForClassFields: false, strict: false } }, null, 2),
+        },
+        interactive: true,
+    },
+    {
+        name: 'qwik',
+        ecosystem: true,
+        deps: { '@builder.io/qwik': '1.17.1' },
+        hmrFile: 'src/app.tsx',
+        // Known issue: in client-only render() mode the $-handlers render without
+        // listeners, so clicks do nothing. Rendering, HMR and build are covered.
+        knownIssue: 'client-side render(): event handlers not attached',
+        config: `import { defineConfig } from 'lunx';\nexport default defineConfig({ framework: 'qwik' });\n`,
+        files: {
+            'index.html': html('src/main.tsx'),
+            'src/index.css': SHARED_CSS,
+            'src/main.tsx': `import './index.css';\nimport '@builder.io/qwik/qwikloader.js';\nimport { render } from '@builder.io/qwik';\nimport { App } from './app';\nrender(document.getElementById('root')!, <App />);\n`,
+            'src/app.tsx': `import { component$, useSignal } from '@builder.io/qwik';\nexport const App = component$(() => {\n  const n = useSignal(0);\n  return <><h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" onClick$={() => n.value++}>{n.value}</button></>;\n});\n`,
+            'tsconfig.json': JSON.stringify({ compilerOptions: { jsx: 'react-jsx', jsxImportSource: '@builder.io/qwik', target: 'ES2022', module: 'ES2022', moduleResolution: 'bundler' } }, null, 2),
         },
     },
 ];
@@ -157,6 +311,30 @@ function freePort() {
         });
     });
 }
+
+/** One shared install of every ecosystem package, reused across runs. */
+async function ensureEcosystem(frameworks) {
+    const deps = {};
+    for (const f of frameworks) if (f.ecosystem) Object.assign(deps, f.deps);
+    if (Object.keys(deps).length === 0) return null;
+    const key = Object.entries(deps).sort().map(([k, v]) => `${k}@${v}`).join(',');
+    const dir = path.join(os.tmpdir(), 'lunx-matrix-ecosystem');
+    const stamp = path.join(dir, '.installed');
+    if (fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8') === key) return dir;
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'lunx-matrix-ecosystem', private: true, dependencies: deps }, null, 2));
+    console.log(`installing ecosystem packages (${Object.keys(deps).length})...`);
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const result = await new Promise((resolve) => {
+        const child = spawn(npm, ['install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: dir, stdio: 'inherit', shell: process.platform === 'win32' });
+        child.on('exit', resolve);
+    });
+    if (result !== 0) throw new Error('ecosystem install failed');
+    await fsp.writeFile(stamp, key);
+    return dir;
+}
+
+let ecosystemDir = null;
 
 async function scaffold(framework, root) {
     await fsp.mkdir(path.join(root, 'src'), { recursive: true });
@@ -175,7 +353,8 @@ async function scaffold(framework, root) {
     const link = path.join(root, 'node_modules');
     if (!fs.existsSync(link)) {
         try {
-            fs.symlinkSync(path.join(REPO, 'node_modules'), link, 'junction');
+            const source = framework.ecosystem ? path.join(ecosystemDir, 'node_modules') : path.join(REPO, 'node_modules');
+            fs.symlinkSync(source, link, 'junction');
         } catch {
             // Fall back to a directory junction failure being non-fatal; the
             // dev server also resolves from the repo root.
@@ -267,13 +446,32 @@ function run(commandArgs, cwd, timeoutMs = 180_000) {
     });
 }
 
-const tsxLoader = ['--import', 'tsx'];
+/** Click #inc twice (shadow DOM included) and expect it to read 2. */
+async function clickCounter(page) {
+    try {
+        const button = page.locator('#inc').first();
+        await button.click({ timeout: 5000 });
+        await button.click({ timeout: 5000 });
+        await page.waitForFunction(() => {
+            const el = document.querySelector('#inc') ?? document.querySelector('app-root')?.shadowRoot?.querySelector('#inc');
+            return el?.textContent?.trim() === '2';
+        }, null, { timeout: 5000 });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+const tsxLoader = process.env.LUNX_CLI ? [] : ['--import', 'tsx'];
 
 // ── The matrix ──────────────────────────────────────────────────────────────
 
 const selected = only ? FRAMEWORKS.filter((f) => only.includes(f.name)) : FRAMEWORKS;
 const results = [];
-const browser = await chromium.launch({ headless: !headed });
+// CHROMIUM_PATH lets CI / sandboxes reuse a pre-installed browser instead of
+// matching Playwright's pinned download.
+ecosystemDir = await ensureEcosystem(selected);
+const browser = await chromium.launch({ headless: !headed, executablePath: process.env.CHROMIUM_PATH || undefined });
 
 for (const framework of selected) {
     const result = {
@@ -281,6 +479,7 @@ for (const framework of selected) {
         dev: 'skip',
         css: 'skip',
         consoleClean: 'skip',
+        interactive: 'skip',
         hmr: 'skip',
         build: 'skip',
         preview: 'skip',
@@ -331,6 +530,14 @@ for (const framework of selected) {
         result.consoleClean = consoleErrors.length === 0 ? 'pass' : 'fail';
         if (consoleErrors.length > 0) result.notes.push(`console: ${consoleErrors[0]}`);
 
+        // 4b. The UI reacts: click a counter twice and expect "2". Rendering
+        // alone can pass with a compiler that is not wired up for reactivity.
+        if (framework.knownIssue) result.notes.push(`known issue: ${framework.knownIssue}`);
+        if (framework.interactive) {
+            result.interactive = (await clickCounter(page)) ? 'pass' : 'fail';
+            if (result.interactive === 'fail') result.notes.push('counter did not update after clicks');
+        }
+
         // 5. HMR: edit a source file, expect the browser to show the new text
         const hmrPath = path.join(root, framework.hmrFile);
         const before = await fsp.readFile(hmrPath, 'utf8');
@@ -373,6 +580,13 @@ for (const framework of selected) {
                     MARKER_AFTER,
                     { timeout: 20_000 },
                 );
+                // The production CSS pipeline is separate from dev's, so check it too.
+                const previewColour = await previewPage.evaluate(() => {
+                    const el = document.querySelector('.marker') ?? document.querySelector('app-root')?.shadowRoot?.querySelector('h1');
+                    return el ? getComputedStyle(el).color : null;
+                });
+                if (previewColour !== 'rgb(0, 187, 119)') previewErrors.push(`production marker colour was ${previewColour}`);
+                if (framework.interactive && !(await clickCounter(previewPage))) previewErrors.push('production counter did not update after clicks');
                 result.preview = previewErrors.length === 0 ? 'pass' : 'fail';
                 if (previewErrors.length > 0) result.notes.push(`preview: ${previewErrors[0]}`);
             } catch {
@@ -404,6 +618,7 @@ for (const framework of selected) {
         `dev:${result.dev}`.padEnd(10),
         `css:${result.css}`.padEnd(10),
         `console:${result.consoleClean}`.padEnd(14),
+        `ui:${result.interactive}`.padEnd(8),
         `hmr:${result.hmr}`.padEnd(10),
         `build:${result.build}`.padEnd(12),
         `preview:${result.preview}`.padEnd(14),
@@ -417,7 +632,7 @@ await browser.close();
 
 // ── Report ──────────────────────────────────────────────────────────────────
 
-const checks = ['dev', 'css', 'consoleClean', 'hmr', 'build', 'preview'];
+const checks = ['dev', 'css', 'consoleClean', 'interactive', 'hmr', 'build', 'preview'];
 const total = results.length * checks.length;
 const passed = results.reduce((n, r) => n + checks.filter((c) => r[c] === 'pass').length, 0);
 const failed = results.reduce((n, r) => n + checks.filter((c) => r[c] === 'fail').length, 0);
