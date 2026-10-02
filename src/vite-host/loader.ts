@@ -13,6 +13,11 @@ const VITE_ENTRY_RE = /\/node_modules\/vite\/dist\/node\/index\.js$/;
 export function installViteRedirect(): void {
     if (installed) return;
     installed = true;
+    // Child processes the framework starts get the same redirect.
+    const register = new URL('./register.js', import.meta.url).href;
+    if (!(process.env.NODE_OPTIONS ?? '').includes(register)) {
+        process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --import ${register}`.trim();
+    }
     const shimUrl = new URL('./shim.js', import.meta.url).href;
     const registerHooks = (module as any).registerHooks as undefined | ((hooks: any) => void);
     if (registerHooks) {

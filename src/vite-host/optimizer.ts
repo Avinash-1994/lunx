@@ -119,7 +119,8 @@ export class DepsOptimizer {
     }
 
     private optimizable(spec: string, resolved: string): boolean {
-        if (!/[\\/]node_modules[\\/]/.test(resolved) || !/\.(m|c)?jsx?$/.test(resolved)) return false;
+        // JSX/TSX sources (Solid, Qwik libraries) need the framework's compiler: served raw, never bundled here.
+        if (!/[\\/]node_modules[\\/]/.test(resolved) || !/\.(m|c)?js$/.test(resolved)) return false;
         return !this.exclude(spec);
     }
 
@@ -154,7 +155,8 @@ export class DepsOptimizer {
 
     /** Scan and pre-bundle in the background; the first optimized import waits for it. */
     start(): void {
-        this.initPromise ??= this.init().catch((err) => this.config.logger.error(`[lunx] dependency pre-bundling failed: ${err.message}`));
+        // console.error as well: frameworks often install a quiet logger (vinxi), and a failure here breaks every page.
+        this.initPromise ??= this.init().catch((err) => console.error(`[lunx] dependency pre-bundling failed: ${err?.stack ?? err}`));
     }
 
     private async init(): Promise<void> {
@@ -291,10 +293,27 @@ export class DepsOptimizer {
                 conditions: [...resolve.conditions, 'import', 'default'],
                 plugins: [{
                     name: 'lunx:optimize-deps',
-                    resolveId(id: string) {
+                    async resolveId(this: any, id: string, importer?: string) {
                         if (virtual.has(id)) return id;
                         const bare = id.replace(/^node:/, '');
                         if (builtins.has(bare) || builtins.has(bare.split('/')[0]!)) return isClient ? BUILTIN + bare : { id, external: true };
+                        // A dependency importing a framework's virtual module (vinxi/routes): keep the import for
+                        // the dev server to resolve, as Vite's optimizer does.
+                        if (importer && /^[\w@]/.test(id)) {
+                            const resolved = await this.resolve(id, importer, { skipSelf: true });
+                            if (!resolved) return { id, external: true };
+                        }
+                        // CSS and assets imported by dependencies stay imports (by absolute path) for the dev
+                        // server's CSS/asset pipeline, as in Vite.
+                        if (importer && (/\.(css|less|sass|scss|styl|stylus|pcss|postcss|sss|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|wasm)(\?|$)/i.test(id) || /[?&](url|raw|inline|worker|sharedworker)\b/.test(id))) {
+                            const resolved = await this.resolve(id, importer, { skipSelf: true });
+                            return { id: resolved?.id ?? id, external: true };
+                        }
+                        // JSX/TSX inside a dependency: left to the framework plugin in the dev pipeline.
+                        if (importer && /^\.{1,2}\//.test(id)) {
+                            const resolved = await this.resolve(id, importer, { skipSelf: true });
+                            if (resolved && /\.[jt]sx$/.test(resolved.id.split('?')[0]!)) return { id: resolved.id, external: true };
+                        }
                         return null;
                     },
                     load(id: string) {

@@ -65,18 +65,19 @@ function isHotMember(node: any, method: string): boolean {
     );
 }
 
-/** `define` entries for `import.meta.env.X` belong in the injected env object (as in Vite). */
-function userDefineEnv(config: any, env: any): Record<string, unknown> {
-    const out: Record<string, unknown> = {};
+/**
+ * The injected `import.meta.env` object, as Vite's serializeDefine writes it:
+ * env values as JSON, `define` entries for `import.meta.env.X` as the code
+ * they are (vinxi defines MANIFEST as `globalThis.MANIFEST`).
+ */
+function envObjectCode(config: any, env: any): string {
+    const entries = new Map<string, string>();
+    for (const [key, value] of Object.entries({ ...config.env, SSR: false })) entries.set(key, JSON.stringify(value));
     for (const [key, value] of Object.entries({ ...config.define, ...env.config.define })) {
         if (!key.startsWith('import.meta.env.')) continue;
-        try {
-            out[key.slice('import.meta.env.'.length)] = typeof value === 'string' ? JSON.parse(value) : value;
-        } catch {
-            out[key.slice('import.meta.env.'.length)] = value;
-        }
+        entries.set(key.slice('import.meta.env.'.length), typeof value === 'string' ? value : JSON.stringify(value));
     }
-    return out;
+    return `{${[...entries].map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(', ')}}`;
 }
 
 export function importAnalysisPlugin(config: any): any {
@@ -178,10 +179,13 @@ export function importAnalysisPlugin(config: any): any {
                 const discoverable = !!known || !/[\\/]node_modules[\\/]/.test(file);
                 if (optimizer && discoverable && (known || /^[\w@]/.test(spec)) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(depName, resolved.id)) {
                     const url = await optimizer.urlFor(depName, resolved.id);
-                    return { url, hmrUrl: url.replace(/\?.*$/, '') };
+                    return { url: isClient ? withBase(url) : url, hmrUrl: url.replace(/\?.*$/, '') };
                 }
                 let url = idToUrl(config, resolved.id);
                 const hmrUrl = unwrapId(removeImportQuery(removeTimestampQuery(url)));
+                // Imports between pre-bundled files carry the same ?v= as imports into them, or one
+                // dependency loads twice (Rolldown links sibling entries directly: ./solid-js.js).
+                if (optimizer?.version && optimizer.isOptimizedFile(cleanUrl(resolved.id)) && !/[?&]v=/.test(url)) url = injectQuery(url, `v=${optimizer.version}`);
                 if (isClient) {
                     if (!isJSRequest(url) && !isCSSRequest(url)) url = injectQuery(url, 'import');
                     const dep = graph.getModuleById(resolved.id);
@@ -210,7 +214,7 @@ export function importAnalysisPlugin(config: any): any {
             const mod = graph.getModuleById(importer);
             if (isClient) {
                 if (source.includes('import.meta.env')) {
-                    s.prepend(`import.meta.env = ${JSON.stringify({ ...config.env, ...userDefineEnv(config, env), SSR: false })};`);
+                    s.prepend(`import.meta.env = ${envObjectCode(config, env)};`);
                 }
                 if (source.includes('import.meta.hot')) {
                     const ownUrl = mod?.url ?? idToUrl(config, importer);

@@ -119,6 +119,7 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
     VitePress: { dev: ['dev'], build: ['build'] },
     Waku: { dev: ['dev'], build: ['build'] },
     Nuxt: { dev: ['dev'], build: ['build'] },
+    SolidStart: { dev: ['dev'], build: ['build'] },
 };
 
 /**

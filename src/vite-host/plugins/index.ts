@@ -50,6 +50,7 @@ export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post
             buildHtmlPlugin(config, getState),
             ...user.post,
             manifestPlugin(getState),
+            literalDynamicImportPlugin(),
             loadFallbackPlugin(),
         ];
     }
@@ -204,6 +205,25 @@ function modulePreloadPolyfillPlugin(config: any): any {
     fetch(link.href, getFetchOpts(link));
   }
 })();`;
+        },
+    };
+}
+
+/**
+ * `import(/* @vite-ignore *\/ '/abs/route.jsx?pick=default')`: Rollup bundles a
+ * literal dynamic import regardless of the comment, Rolldown leaves it alone.
+ * The comment only matters for computed specifiers, so drop it before literals
+ * (vinxi's route manifest).
+ */
+function literalDynamicImportPlugin(): any {
+    return {
+        name: 'lunx:literal-dynamic-import',
+        transform: {
+            filter: { code: '@vite-ignore' },
+            handler(code: string) {
+                const next = code.replace(/import\(\s*\/\*\s*@vite-ignore\s*\*\/\s*(?=(?:'[^']*'|"[^"]*"|`(?:[^`$]|\$(?!\{))*`)\s*\))/g, 'import(');
+                return next === code ? null : { code: next, map: null };
+            },
         },
     };
 }

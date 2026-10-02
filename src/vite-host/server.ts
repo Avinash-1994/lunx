@@ -153,7 +153,7 @@ function clientRuntime(config: ResolvedConfig): string {
         .map(([k, v]) => `${JSON.stringify(k)}: (${typeof v === 'string' ? v : JSON.stringify(v)})`)
         .join(',\n');
     return code
-        .replace(/__LUNX_CLIENT_CONFIG__/g, JSON.stringify({ base: config.base, hmr: config.server.hmr !== false, overlay: (config.server.hmr as any)?.overlay !== false, timeout: 30000 }))
+        .replace(/__LUNX_CLIENT_CONFIG__/g, JSON.stringify({ base: config.base, hmr: config.server.hmr !== false, overlay: (config.server.hmr as any)?.overlay !== false, timeout: 30000, socket: (config as any)._hmrClient ?? null }))
         .replace(/__LUNX_DEFINES__/g, `{${defines}}`)
         .replace(/^export \{\};?$/m, '');
 }
@@ -175,7 +175,28 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
     const middlewares: Connect = createConnect();
     const httpServer = config.server.middlewareMode ? null : http.createServer(middlewares as any);
     const ws = createWsHotChannel(config);
-    ws.attach(httpServer ?? (typeof config.server.hmr === 'object' ? (config.server.hmr as any).server : null));
+    // HMR socket: the dev server's own HTTP server, a server the host app provides (Nuxt), or — middleware
+    // mode without one (vinxi) — a dedicated server on hmr.port, as in Vite.
+    const hmrOptions: any = typeof config.server.hmr === 'object' ? config.server.hmr : {};
+    let hmrServer: http.Server | null = null;
+    if (httpServer) ws.attach(httpServer);
+    else if (hmrOptions.server) ws.attach(hmrOptions.server);
+    else if (config.server.hmr !== false) {
+        hmrServer = http.createServer((_req, res) => {
+            res.statusCode = 426;
+            res.end('Upgrade Required');
+        });
+        ws.attach(hmrServer);
+        const hmrPort = hmrOptions.port ?? 24678;
+        hmrServer.on('error', (err: any) => config.logger.warn(`HMR server on port ${hmrPort}: ${err.message}`));
+        hmrServer.listen(hmrPort, hmrOptions.host);
+    }
+    (config as any)._hmrClient = {
+        port: httpServer || hmrOptions.server ? (hmrOptions.clientPort ?? null) : (hmrOptions.clientPort ?? hmrOptions.port ?? 24678),
+        host: hmrOptions.host ?? null,
+        path: hmrOptions.path ?? null,
+        protocol: hmrOptions.protocol ?? null,
+    };
 
     // `server.watch: null` (child compilers such as React Router's) turns file watching off, as in Vite.
     const watcher: any = config.inlineConfig?.server?.watch === null || (config as any).server.watch === null ? noopWatcher() : watch(config.root, {
@@ -283,6 +304,7 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
                 ws.close(),
                 ...Object.values(environments).map((e) => e.close()),
                 httpServer ? new Promise<void>((r) => { httpServer.closeAllConnections?.(); httpServer.close(() => r()); }) : undefined,
+                hmrServer ? new Promise<void>((r) => hmrServer!.close(() => r())) : undefined,
             ]);
         },
         printUrls() {

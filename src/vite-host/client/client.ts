@@ -6,7 +6,7 @@
  * The server replaces the two placeholders below when serving it.
  */
 
-declare const __LUNX_CLIENT_CONFIG__: { base: string; hmr: boolean; overlay: boolean; timeout: number };
+declare const __LUNX_CLIENT_CONFIG__: { base: string; hmr: boolean; overlay: boolean; timeout: number; socket: { port: number | null; host: string | null; path: string | null; protocol: string | null } | null };
 declare const __LUNX_DEFINES__: Record<string, unknown>;
 
 const config = __LUNX_CLIENT_CONFIG__;
@@ -57,7 +57,10 @@ function notifyListeners(event: string, data: unknown): void {
 function connect(): void {
     if (!config.hmr) return;
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    socket = new WebSocket(`${protocol}://${location.host}${base}`, 'vite-hmr');
+    // The page's own host, or a dedicated HMR port (frameworks running the server in middleware mode).
+    const sock = config.socket;
+    const host = `${sock?.host || location.hostname}${sock?.port ? `:${sock.port}` : location.port ? `:${location.port}` : ''}`;
+    socket = new WebSocket(`${sock?.protocol || protocol}://${host}${sock?.path ?? base}`, 'vite-hmr');
     let opened = false;
     socket.addEventListener('open', () => {
         opened = true;
