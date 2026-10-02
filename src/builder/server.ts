@@ -4,7 +4,7 @@
  */
 
 import http from 'http';
-import { WebSocketServer } from '../internal/ws.js';
+import { WebSocketServer } from '../lib/ws.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -138,7 +138,7 @@ async function handleAPI(req: http.IncomingMessage, res: http.ServerResponse, ur
             const column = parseInt(urlObj.searchParams.get('column') || '1');
 
             if (file) {
-                const { openInEditor } = await import('../internal/open-editor.js');
+                const { openInEditor } = await import('../lib/open-editor.js');
                 openInEditor(file, line, column);
                 res.writeHead(200);
                 res.end('Opened in editor');

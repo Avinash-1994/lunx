@@ -172,7 +172,7 @@ async function loadPostcss(root: string): Promise<PostcssRunner | null> {
     if (name.startsWith('.postcssrc')) {
         loaded = JSON.parse(await fsp.readFile(file, 'utf8'));
     } else if (name.endsWith('.ts')) {
-        const { importBundled } = await import('../internal/load-module.js');
+        const { importBundled } = await import('../lib/load-module.js');
         loaded = await importBundled(file, { root });
     } else {
         loaded = (await import(pathToFileURL(file).href)).default;

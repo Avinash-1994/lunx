@@ -116,7 +116,7 @@ async function transformSolidJSX(
 ): Promise<string | null> {
     try {
         // Use esbuild for fast JSX transformation
-        const esbuild = await import('../../internal/esbuild-compat.js');
+        const esbuild = await import('../../lib/esbuild-compat.js');
 
         const result = await esbuild.transform(code, {
             loader: options.loader,

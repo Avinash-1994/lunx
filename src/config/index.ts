@@ -1,11 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
-import kleur from '../internal/colors.js';
+import kleur from '../lib/colors.js';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-import yaml from '../internal/yaml.js';
+import yaml from '../lib/yaml.js';
 
-import { z } from '../internal/schema.js';
+import { z } from '../lib/schema.js';
 import { log } from '../utils/logger.js';
 import { spaPreset, ssrPreset, ssgPreset } from '../presets/index.js';
 
@@ -515,7 +515,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
 async function loadModuleConfig(tsPath: string, cwd: string): Promise<any> {
   log.info(`Loading config from ${path.basename(tsPath)}...`);
-  const { importBundled } = await import('../internal/load-module.js');
+  const { importBundled } = await import('../lib/load-module.js');
   // A config written as `import { defineConfig } from 'lunx'` must work
   // whether the package is installed as `lunx` or `lunx-dev`, and even when
   // neither is resolvable from the project (linked checkouts, pnpm,

@@ -1,4 +1,4 @@
-import { RecordStore } from '../internal/store.js';
+import { RecordStore } from '../lib/store.js';
 import { createHash } from 'crypto';
 import type { BuildContext } from '../core/engine/types.js';
 import type { RootCauseIssue } from '../visual/root-cause.js';

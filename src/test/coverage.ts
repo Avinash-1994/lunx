@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { parse as parseModule } from '../internal/oxc.js';
-import { simple } from '../internal/ast-walk.js';
+import { parse as parseModule } from '../lib/oxc.js';
+import { simple } from '../lib/ast-walk.js';
 
 /**
  * Coverage Audit Tool

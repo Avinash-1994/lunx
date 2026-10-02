@@ -30,7 +30,6 @@ function rewriteScripts(root: string, from: 'vite' | 'cra'): void {
   }
   pkg.devDependencies ??= {};
   if (!pkg.devDependencies['lunx-dev'] && !pkg.dependencies?.['lunx-dev']) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const own = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
     pkg.devDependencies['lunx-dev'] = `^${own.version}`;
   }

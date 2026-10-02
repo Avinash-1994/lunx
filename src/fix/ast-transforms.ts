@@ -1,5 +1,5 @@
-import { parse as parseModule } from '../internal/oxc.js';
-import * as walk from '../internal/ast-walk.js';
+import { parse as parseModule } from '../lib/oxc.js';
+import * as walk from '../lib/ast-walk.js';
 
 /**
  * Auto-Fix Engine

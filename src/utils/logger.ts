@@ -1,4 +1,4 @@
-import kleur from '../internal/colors.js';
+import kleur from '../lib/colors.js';
 import fs from 'fs';
 import path from 'path';
 

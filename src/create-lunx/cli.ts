@@ -10,7 +10,7 @@ import * as path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { TEMPLATES } from '../utils/templates.js';
-import { red, green, blue, bold } from '../internal/colors.js';
+import { red, green, blue, bold } from '../lib/colors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

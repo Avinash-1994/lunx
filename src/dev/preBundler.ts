@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
-import { parse as parseModule } from '../internal/oxc.js';
+import { parse as parseModule } from '../lib/oxc.js';
 import { createHash } from 'crypto';
 import { builtinModules, createRequire } from 'module';
 import { log } from '../utils/logger.js';

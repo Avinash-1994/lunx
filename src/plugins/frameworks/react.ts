@@ -176,7 +176,7 @@ if (import.meta.hot) {
 async function transformJSX(code: string, options: any): Promise<string> {
     // Use esbuild for fast JSX transformation
     try {
-        const esbuild = await import('../../internal/esbuild-compat.js');
+        const esbuild = await import('../../lib/esbuild-compat.js');
         const result = await esbuild.transform(code, options);
         return result.code;
     } catch (error) {

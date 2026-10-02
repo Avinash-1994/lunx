@@ -724,6 +724,8 @@ export const z = {
     ZodError,
 };
 
+// Type namespace merged with the `z` value, so `z.infer<typeof X>` works as in zod.
+// eslint-disable-next-line @typescript-eslint/no-namespace, no-redeclare
 export namespace z {
     export type infer<T extends Type<any>> = T['_output'];
     export type ZodType<T> = Type<T>;

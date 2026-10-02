@@ -3,7 +3,7 @@
  * Universal server-side rendering for Next.js, Nuxt, and Remix
  */
 
-import { loadUWS, type HttpRequest as UWSHttpRequest, type HttpResponse as UWSHttpResponse, type TemplatedApp as UWSTemplatedApp } from '../../internal/uws.js';
+import { loadUWS, type HttpRequest as UWSHttpRequest, type HttpResponse as UWSHttpResponse, type TemplatedApp as UWSTemplatedApp } from '../../lib/uws.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { Route, RouteMatch } from '../types.js';

@@ -6,7 +6,7 @@
  * plain ANSI strings, so a build tool no longer ships a UI framework.
  */
 
-import colors from '../internal/colors.js';
+import colors from '../lib/colors.js';
 import type { Warning } from './types.js';
 
 export type { Warning };

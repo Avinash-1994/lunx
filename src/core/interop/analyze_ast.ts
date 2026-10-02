@@ -1,6 +1,6 @@
 
 import { ExportMap } from './types.js';
-import { parse as parseModule } from '../../internal/oxc.js';
+import { parse as parseModule } from '../../lib/oxc.js';
 
 // Phase A: AST-Based Export Analysis
 

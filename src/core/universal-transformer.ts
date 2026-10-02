@@ -13,7 +13,7 @@ import { getFrameworkPreset } from '../presets/frameworks.js';
 import { log } from '../utils/logger.js';
 import { createRequire } from 'module';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { compile } from '../internal/oxc.js';
+import { compile } from '../lib/oxc.js';
 import { canonicalHash } from '../core/engine/hash.js';
 const _require = createRequire(import.meta.url);
 

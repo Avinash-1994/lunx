@@ -165,7 +165,7 @@ export const searchForWorkspaceRoot = (dir) => dir;`,
 };
 
 async function loadConfigModule(file: string, root: string, stubFrameworks: boolean): Promise<any> {
-    const { importBundled } = await import('../internal/load-module.js');
+    const { importBundled } = await import('../lib/load-module.js');
     return importBundled(file, { root, stubs: stubFrameworks ? STUBS : {} });
 }
 

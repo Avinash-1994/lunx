@@ -94,6 +94,9 @@ export default [
             'lunx-governance': lunxGovernance,
         },
         rules: {
+            // TypeScript already checks undefined names (incl. DOM and Node types);
+            // the core rule cannot see type-only globals like BufferEncoding.
+            'no-undef': 'off',
             ...tsPlugin.configs.recommended.rules,
             '@typescript-eslint/no-explicit-any': 'off',
             '@typescript-eslint/no-unused-vars': 'off',

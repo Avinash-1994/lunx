@@ -1,5 +1,5 @@
 import path from 'path';
-import { RecordStore } from '../../internal/store.js';
+import { RecordStore } from '../../lib/store.js';
 import { LearnedError } from '../core/errorMemory.js';
 import { FixAction } from '../healer/fixer.js';
 
@@ -25,7 +25,7 @@ interface FixRow {
  *
  * Backed by two small JSON collections rather than SQLite -- the data is a few
  * hundred rows and never needed joins, so the native addon was pure install
- * cost. See `src/internal/store.ts`.
+ * cost. See `src/lib/store.ts`.
  */
 export class FixStore {
     private readonly errors: RecordStore<ErrorRow>;

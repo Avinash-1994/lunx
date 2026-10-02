@@ -9,7 +9,7 @@ import { appRouter, createContext } from './server.js';
 import { PluginSigner, PluginManifest } from '../plugins/signer.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { green, red, blue, yellow, bold } from '../internal/colors.js';
+import { green, red, blue, yellow, bold } from '../lib/colors.js';
 
 // Create a caller for local execution (CLI -> Local DB)
 const caller = appRouter.createCaller(createContext());

@@ -10,7 +10,7 @@
  * Never show "Build failed" without context.
  */
 
-import kleur from '../../internal/colors.js';
+import kleur from '../../lib/colors.js';
 import path from 'path';
 
 export interface ErrorContext {

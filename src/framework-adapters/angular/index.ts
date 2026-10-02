@@ -1,9 +1,9 @@
 import { createRequire } from 'module';
-import { compile } from '../../internal/oxc.js';
+import { compile } from '../../lib/oxc.js';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
-import { CacheStore } from '../../internal/store.js';
+import { CacheStore } from '../../lib/store.js';
 
 const require = createRequire(import.meta.url);
 

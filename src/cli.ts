@@ -75,7 +75,7 @@ async function main() {
   // BUG-CLI-01: short-circuit block REMOVED — yargs is the single handler for all commands
 
   const { log } = await import('./utils/logger.js');
-  const { default: yargs, hideBin } = await import('./internal/cli-args.js');
+  const { default: yargs, hideBin } = await import('./lib/cli-args.js');
 
   // Import extracted command modules
   const { default: devCmd }      = await import('./cli/commands/dev.js');

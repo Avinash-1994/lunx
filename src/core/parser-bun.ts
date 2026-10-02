@@ -81,7 +81,7 @@ export class BunParser {
             // Per MODULE 1 plan: "Keep SWC as fallback for edge cases"
             // Spawning Bun subprocess is too slow (~10ms per file)
             // Use esbuild directly instead (same as v1.0 fallback)
-            const esbuild = await import('../internal/esbuild-compat.js');
+            const esbuild = await import('../lib/esbuild-compat.js');
             try {
                 const result = await esbuild.transform(code, {
                     loader: loader as any,

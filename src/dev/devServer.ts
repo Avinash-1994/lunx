@@ -6,7 +6,7 @@ import { existsSync } from 'fs';
 import { applyAlias, collectAliases, type AliasEntry } from '../config/aliases.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css.js';
 import { transformGlobImports } from '../build/glob-import.js';
-import { compile, parse as parseModule } from '../internal/oxc.js';
+import { compile, parse as parseModule } from '../lib/oxc.js';
 
 // Dependency URLs carry no version query: pre-bundled entries import each
 // other by relative path ("./preact.js"), and a browser treats
@@ -16,7 +16,7 @@ import { compile, parse as parseModule } from '../internal/oxc.js';
 /** Imported from JS, these resolve to their URL (`import logo from './logo.svg'`). */
 const DEV_ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 import { anomalyDetector } from '../security/anomaly.js';
-import type { WebSocketServer, WebSocket } from '../internal/ws.js';
+import type { WebSocketServer, WebSocket } from '../lib/ws.js';
 import { fileURLToPath } from 'url';
 import { BuildConfig } from '../config/index.js';
 import { log } from '../utils/logger.js';
@@ -235,7 +235,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     const originalLog = console.log;
     console.log = () => { }; // Silence console temporarily
 
-    const { config: loadEnv } = await import('../internal/dotenv.js');
+    const { config: loadEnv } = await import('../lib/dotenv.js');
     // .env.local wins over .env, so load it second with override.
     loadEnv({ path: path.join(cfg.root, '.env') });
     loadEnv({ path: path.join(cfg.root, '.env.local'), override: true });
@@ -627,7 +627,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   }
 
   // 2. Setup Proxy
-  const { default: httpProxy } = await import('../internal/proxy.js');
+  const { default: httpProxy } = await import('../lib/proxy.js');
   const proxy = httpProxy.createProxyServer({});
 
   proxy.on('error', (err, req, res) => {
@@ -657,7 +657,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         };
       } else {
         log.info('Generating self-signed certificate...', { category: 'server' });
-        const { generate } = await import('../internal/self-signed.js');
+        const { generate } = await import('../lib/self-signed.js');
         const pems = generate([{ name: 'commonName', value: 'localhost' }], { days: 30 });
         await fs.writeFile(keyPath, pems.private);
         await fs.writeFile(certPath, pems.cert);
@@ -1428,7 +1428,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       const column = parseInt(urlObj.searchParams.get('column') || '1');
 
       if (file) {
-        const { openInEditor } = await import('../internal/open-editor.js');
+        const { openInEditor } = await import('../lib/open-editor.js');
         openInEditor(file, line, column);
         res.writeHead(200);
         res.end('Opened in editor');
@@ -1969,7 +1969,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   // /__lunx_hmr and the client retries forever.
   wss = (server as any).wsServer;
   if (!wss) {
-    const { WebSocketServer } = await import('../internal/ws.js');
+    const { WebSocketServer } = await import('../lib/ws.js');
     wss = new WebSocketServer({ server });
     (server as any).wsServer = wss;
   }

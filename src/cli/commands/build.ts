@@ -170,7 +170,7 @@ export default {
       // NEW-04: --watch mode
       if (args.watch) {
         console.log('\n  Watching for changes... (Ctrl+C to stop)\n');
-        const chokidar = await import('../../internal/watcher.js');
+        const chokidar = await import('../../lib/watcher.js');
         const srcDir = path.join(root, 'src');
         const watcher = chokidar.watch(srcDir, { ignoreInitial: true, persistent: true });
 

@@ -12,7 +12,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { compile } from '../internal/oxc.js';
+import { compile } from '../lib/oxc.js';
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 

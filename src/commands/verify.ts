@@ -10,8 +10,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import kleur from '../internal/colors.js';
-import { z } from '../internal/schema.js';
+import kleur from '../lib/colors.js';
+import { z } from '../lib/schema.js';
 
 export interface VerifyOptions {
     ci?: boolean;

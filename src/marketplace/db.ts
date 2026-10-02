@@ -5,12 +5,12 @@
  * Local plugin registry, backed by a JSON record collection rather than
  * SQLite. The registry holds tens of rows and only ever did lookups by
  * (name, version) plus a substring search, so the native addon bought nothing.
- * See `src/internal/store.ts`.
+ * See `src/lib/store.ts`.
  */
 
 import * as fs from 'fs';
 import path from 'path';
-import { RecordStore } from '../internal/store.js';
+import { RecordStore } from '../lib/store.js';
 
 const DB_PATH = path.resolve('.lunx-marketplace.json');
 const ARTIFACT_ROOT = path.resolve('.lunx-marketplace-artifacts');
