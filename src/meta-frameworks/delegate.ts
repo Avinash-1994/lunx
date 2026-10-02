@@ -102,3 +102,23 @@ export async function delegate(meta: MetaFramework, command: Command, root: stri
         });
     });
 }
+
+/**
+ * CLI entry: run `command` through the project's meta-framework when there is
+ * one. Returns false (the caller continues with lunx's own pipeline) when the
+ * project is not a meta-framework, opts out with `delegate: false`, or the
+ * framework CLI is not installed.
+ */
+export async function maybeDelegate(command: Command, root: string, port?: number): Promise<boolean> {
+    const meta = detectMetaFramework(root);
+    if (!meta) return false;
+    const { loadConfig } = await import('../config/index.js');
+    const optOut = await loadConfig(root).then((c: any) => c?.delegate === false).catch(() => false);
+    if (optOut) return false;
+    if (!findBin(root, meta.bin)) {
+        console.warn(`[lunx] ${meta.name} project, but its CLI (${meta.bin}) is not installed; using lunx's built-in ${meta.name} support. Install dependencies to run the full framework.`);
+        return false;
+    }
+    process.exitCode = await delegate(meta, command, root, { port });
+    return true;
+}

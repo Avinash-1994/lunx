@@ -53,16 +53,8 @@ export default {
         : process.cwd();
 
       // Meta-frameworks run their own toolchain (see meta-frameworks/delegate.ts).
-      const { detectMetaFramework, delegate } = await import('../../meta-frameworks/delegate.js');
-      const meta = detectMetaFramework(root);
-      if (meta) {
-        const { loadConfig: loadForDelegate } = await import('../../config/index.js');
-        const optOut = await loadForDelegate(root).then((c: any) => c?.delegate === false).catch(() => false);
-        if (!optOut) {
-          process.exitCode = await delegate(meta, 'dev', root, { port: args.port });
-          return;
-        }
-      }
+      const { maybeDelegate } = await import('../../meta-frameworks/delegate.js');
+      if (await maybeDelegate('dev', root, args.port)) return;
 
       // Load lunx.config.ts BEFORE starting the server so that
       // server.port from the user's config is respected when binding the port.

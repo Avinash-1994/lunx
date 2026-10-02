@@ -52,7 +52,7 @@ export const rolldownBundler: Bundler = {
             assetFileNames: output.assetFileNames,
             minify: output.minify,
             sourcemap: output.sourcemap,
-            inlineDynamicImports: output.inlineDynamicImports,
+            ...(output.inlineDynamicImports ? { codeSplitting: false } : {}),
             ...(output.chunkGroups?.length ? { advancedChunks: { groups: output.chunkGroups } } : {}),
         };
         for (const key of Object.keys(outputOptions)) if (outputOptions[key] === undefined) delete outputOptions[key];

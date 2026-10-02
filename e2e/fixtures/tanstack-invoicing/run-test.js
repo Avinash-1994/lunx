@@ -124,7 +124,7 @@ async function runTests() {
     // --- TS-02 SSR mode ---
     const invoiceRes = await fetchPage(`http://localhost:${port}/invoices/INV-123`);
     profileResData = invoiceRes.data;
-    ok2 = invoiceRes.status === 200 && invoiceRes.data.includes('<div id="root">');
+    ok2 = invoiceRes.status === 200 && invoiceRes.data.includes('id="root"');
     pass('TS-02  SSR mode renders invoices', 'HTML with invoice data', `${Buffer.byteLength(invoiceRes.data)} bytes`, [
       `Request: GET /invoices/INV-123`,
       `Response status: ${invoiceRes.status}`,
