@@ -367,10 +367,13 @@ export class WebSocketServer extends EventEmitter {
         }
 
         const accept = createHash('sha1').update(key + GUID).digest('base64');
+        // Browsers drop the connection unless a requested subprotocol is echoed back.
+        const protocol = String(req.headers['sec-websocket-protocol'] ?? '').split(',')[0]!.trim();
         socket.write(
             'HTTP/1.1 101 Switching Protocols\r\n' +
                 'Upgrade: websocket\r\n' +
                 'Connection: Upgrade\r\n' +
+                (protocol ? `Sec-WebSocket-Protocol: ${protocol}\r\n` : '') +
                 `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
         );
 

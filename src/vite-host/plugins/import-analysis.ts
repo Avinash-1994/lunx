@@ -23,6 +23,7 @@ import {
     normalizePath,
     removeImportQuery,
     removeTimestampQuery,
+    unwrapId,
     wrapId,
 } from '../utils.js';
 
@@ -146,7 +147,7 @@ export function importAnalysisPlugin(config: any): any {
                 }
                 if (resolved.external) return null;
                 let url = idToUrl(config, resolved.id);
-                const hmrUrl = removeImportQuery(removeTimestampQuery(url));
+                const hmrUrl = unwrapId(removeImportQuery(removeTimestampQuery(url)));
                 if (isClient) {
                     if (!isJSRequest(url) && !isCSSRequest(url)) url = injectQuery(url, 'import');
                     const dep = graph.getModuleById(resolved.id);

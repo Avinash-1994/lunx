@@ -252,7 +252,8 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
 
     const assetsIncludeList = arraify(config.assetsInclude ?? []);
     const { createFilter } = await import('./utils.js');
-    const assetsFilter = createFilter(assetsIncludeList.filter(Boolean), undefined, { resolve: false });
+    const assetsPatterns = assetsIncludeList.filter(Boolean);
+    const assetsFilter = assetsPatterns.length ? createFilter(assetsPatterns, undefined, { resolve: false }) : () => false;
 
     const resolved: any = {
         ...config,

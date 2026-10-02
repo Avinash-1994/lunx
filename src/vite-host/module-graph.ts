@@ -4,7 +4,7 @@
  */
 
 import path from 'node:path';
-import { cleanUrl, isCSSRequest, isJSRequest, removeImportQuery, removeTimestampQuery } from './utils.js';
+import { cleanUrl, isCSSRequest, isJSRequest, removeImportQuery, removeTimestampQuery, unwrapId } from './utils.js';
 
 export class EnvironmentModuleNode {
     id: string | null = null;
@@ -47,7 +47,7 @@ export class EnvironmentModuleGraph {
     constructor(public environment: string, private resolveId: (url: string) => Promise<{ id: string; meta?: any } | null>) {}
 
     async getModuleByUrl(rawUrl: string): Promise<EnvironmentModuleNode | undefined> {
-        rawUrl = removeImportQuery(removeTimestampQuery(rawUrl));
+        rawUrl = unwrapId(removeImportQuery(removeTimestampQuery(rawUrl)));
         const mod = this.urlToModuleMap.get(rawUrl);
         if (mod) return mod;
         const [url] = await this.resolveUrl(rawUrl);
@@ -173,7 +173,7 @@ export class EnvironmentModuleGraph {
     }
 
     async resolveUrl(url: string): Promise<[string, string, Record<string, any> | undefined]> {
-        url = removeImportQuery(removeTimestampQuery(url));
+        url = unwrapId(removeImportQuery(removeTimestampQuery(url)));
         const mod = this.urlToModuleMap.get(url);
         if (mod?.id) return [mod.url, mod.id, mod.meta];
         const resolved = await this.resolveId(url);

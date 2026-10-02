@@ -71,3 +71,9 @@ export async function ssrTransform(file: string, code: string, sourcemap = false
 
 /** MagicString-compatible string editor (overwrite / prepend / appendLeft / toString / generateMap). */
 export const MagicString: new (code: string, options?: { filename?: string }) => any = rolldown.RolldownMagicString;
+
+/** Oxc's transform with its own options (Vite's `transformWithOxc`). */
+export async function oxcTransform(filename: string, code: string, options: Record<string, any> = {}): Promise<{ code: string; map: any; errors: any[]; warnings: any[] }> {
+    const result = await experimental.transform(filename, code, options);
+    return { code: result.code, map: result.map ?? null, errors: result.errors ?? [], warnings: result.warnings ?? [] };
+}

@@ -153,7 +153,6 @@ function definePlugin(config: any): any {
         name: 'vite:define',
         transform(this: any, code: string, id: string) {
             if (this.environment.config.consumer === 'client') return null;
-            if (id.includes('node_modules') && !code.includes('import.meta.env')) return null;
             const file = cleanUrl(id);
             if (!/\.(m?[jt]sx?|cjs|svelte|vue|astro)$/.test(file) && !id.startsWith('\0') && path.extname(file)) return null;
             const define: Record<string, string> = {};

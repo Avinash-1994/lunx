@@ -11,7 +11,7 @@ import { createResolver, ssrTransform, type ModuleResolver } from '../engines/to
 import { environmentConfig, type ResolvedConfig } from './config.js';
 import { EnvironmentModuleGraph, type EnvironmentModuleNode } from './module-graph.js';
 import { PluginContainer } from './plugin-container.js';
-import { cleanUrl, isBuiltin, removeTimestampQuery } from './utils.js';
+import { cleanUrl, isBuiltin, removeTimestampQuery, unwrapId } from './utils.js';
 
 const AsyncFunction = async function () {}.constructor as new (...args: string[]) => (...args: any[]) => Promise<void>;
 
@@ -85,7 +85,7 @@ export class DevEnvironment {
     }
 
     async transformRequest(rawUrl: string): Promise<{ code: string; map: any; etag?: string; deps?: string[]; dynamicDeps?: string[] } | null> {
-        const url = removeTimestampQuery(rawUrl);
+        const url = unwrapId(removeTimestampQuery(rawUrl));
         const cached = await this.moduleGraph.getModuleByUrl(url);
         if (cached?.transformResult) return cached.transformResult;
         const inflight = this.pending.get(url);
@@ -118,7 +118,9 @@ export class DevEnvironment {
         const transformed = await this.pluginContainer.transform(code, id, { inMap: map });
         let result: any = { code: transformed.code, map: transformed.map, etag: `W/"${transformed.code.length.toString(16)}-${hash(transformed.code)}"` };
         if (!this.isClient) {
-            const ssr = await ssrTransform(id, transformed.code);
+            // Plugins have produced JavaScript by now; the runner transform keys its parser off the extension.
+            const name = cleanUrl(id).replace(/^\0/, '');
+            const ssr = await ssrTransform(/\.(m|c)?js$/.test(name) ? name : `${name}.js`, transformed.code);
             result = { code: ssr.code, map: ssr.map ?? null, deps: ssr.deps, dynamicDeps: ssr.dynamicDeps };
         }
         // An invalidation during the transform makes this result stale.
@@ -130,7 +132,7 @@ export class DevEnvironment {
 
     /** Load a module the way Vite's ssrLoadModule does; externals use Node's own import. */
     async ssrLoadModule(url: string, chain: string[] = []): Promise<Record<string, any>> {
-        const mod = await this.moduleGraph.ensureEntryFromUrl(removeTimestampQuery(url));
+        const mod = await this.moduleGraph.ensureEntryFromUrl(unwrapId(removeTimestampQuery(url)));
         if (mod.ssrModule) return mod.ssrModule;
         const pending = this.ssrPending.get(mod);
         if (pending) {

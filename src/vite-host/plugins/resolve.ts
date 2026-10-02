@@ -12,7 +12,8 @@ import { arraify, bareImportRE, cleanUrl, FS_PREFIX, fsPathFromId, isBuiltin, is
 export const BROWSER_EXTERNAL_ID = '__vite-browser-external';
 
 function splitQuery(id: string): [string, string] {
-    const i = id.search(/[?#]/);
+    // A leading `#` is a package subpath import, not a hash.
+    const i = id.startsWith('#') ? id.indexOf('?') : id.search(/[?#]/);
     return i === -1 ? [id, ''] : [id.slice(0, i), id.slice(i)];
 }
 
@@ -118,6 +119,12 @@ export function resolvePlugin(config: any): any {
                 return found ? found + query : null;
             }
 
+            // Package subpath imports (`#internal/x`): resolved inside the importing package, never externalized.
+            if (file.startsWith('#')) {
+                const found = resolver.resolve(basedir, file);
+                return found ? found + query : null;
+            }
+
             if (/^[A-Za-z]:[\\/]/.test(file)) {
                 const found = tryFs(resolver, file);
                 return found ? found + query : null;
@@ -129,8 +136,9 @@ export function resolvePlugin(config: any): any {
                     return `${BROWSER_EXTERNAL_ID}:${file}`;
                 }
                 const resolved = resolver.resolve(basedir, file) ?? resolver.resolve(root, file);
-                if (!isClient && shouldExternalize(env.config, file, resolved)) return { id: file, external: true };
+                // Unresolvable: leave it to later plugins (virtual modules such as `__sveltekit/server`).
                 if (!resolved) return null;
+                if (!isClient && shouldExternalize(env.config, file, resolved)) return { id: file, external: true };
                 return resolved + query;
             }
             return null;
