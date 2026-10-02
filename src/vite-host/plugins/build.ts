@@ -258,8 +258,12 @@ export function manifestPlugin(getState: StateLookup): any {
             handler(this: any, _options: any, bundle: Record<string, any>) {
                 const state = getState(this);
                 const { config } = state;
+                // ssrEmitAssets: false drops the CSS and imported assets this build emitted, not files
+                // other plugins emit (Nuxt's styles.mjs).
                 if (state.ssr && !state.build.ssrEmitAssets) {
-                    for (const [fileName, item] of Object.entries(bundle)) if (item.type === 'asset') delete bundle[fileName];
+                    const own = new Set<string>([...state.assets.values()].map((a) => a.fileName));
+                    for (const meta of state.chunkMeta.values()) for (const css of meta.importedCss) own.add(css);
+                    for (const [fileName, item] of Object.entries(bundle)) if (item.type === 'asset' && own.has(fileName)) delete bundle[fileName];
                 }
                 if (!state.build.manifest) return;
                 const keyFor = (chunk: any): string =>

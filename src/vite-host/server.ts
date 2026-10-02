@@ -345,7 +345,8 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
                 req.url = stripBase(url, config.base);
                 return next();
             }
-            if (url === '/' || url === '/index.html') {
+            // A standalone server redirects the root to the base; in middleware mode the host app owns `/` (Nuxt).
+            if (!config.server.middlewareMode && (url === '/' || url === '/index.html')) {
                 res.writeHead(302, { Location: config.base });
                 res.end();
                 return;

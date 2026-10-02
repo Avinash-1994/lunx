@@ -11,6 +11,7 @@ import { parse } from '../../engines/index.js';
 import { MagicString } from '../../engines/toolkit.js';
 import { full as walk } from '../../lib/ast-walk.js';
 import { globImports } from './index.js';
+import { shouldExternalize } from './resolve.js';
 import {
     CLIENT_PUBLIC_PATH,
     cleanUrl,
@@ -147,6 +148,8 @@ export function importAnalysisPlugin(config: any): any {
             });
 
             const s = new MagicString(source);
+            // Served URLs carry the base (/_nuxt/@vite/client under Nuxt).
+            const withBase = (url: string) => (config.base !== '/' && config.base !== './' && url.startsWith('/') ? config.base.replace(/\/$/, '') + url : url);
             const importedUrls = new Set<string>();
             const staticImportedUrls = new Set<string>();
             const graph = env.moduleGraph;
@@ -154,7 +157,7 @@ export function importAnalysisPlugin(config: any): any {
             const normalize = async (spec: string): Promise<{ url: string; hmrUrl: string } | null> => {
                 // file:// imports resolve like paths (plugin-rsc imports its runtime that way); only remote URLs stay.
                 if ((isExternalUrl(spec) && !spec.startsWith('file://')) || isDataUrl(spec)) return null;
-                if (spec === CLIENT_PUBLIC_PATH || spec.startsWith('/@vite/')) return { url: spec, hmrUrl: spec };
+                if (spec === CLIENT_PUBLIC_PATH || spec.startsWith('/@vite/')) return { url: withBase(spec), hmrUrl: spec };
                 const resolved = await this.resolve(spec, importer, { skipSelf: false });
                 if (!resolved) {
                     if (!isClient) return null;
@@ -165,6 +168,8 @@ export function importAnalysisPlugin(config: any): any {
                     throw err;
                 }
                 if (resolved.external) return null;
+                // Dev SSR externalization (Vite's rule): plain-JS dependencies run natively in Node.
+                if (!isClient && /^[\w@]/.test(spec) && !spec.startsWith('#') && shouldExternalize(env.config, spec, resolved.id)) return null;
                 const optimizer = env.depsOptimizer;
                 // As Vite: imports inside node_modules never discover new dependencies (an excluded
                 // package's own imports stay raw so framework transforms still run on them).
@@ -209,7 +214,7 @@ export function importAnalysisPlugin(config: any): any {
                 }
                 if (source.includes('import.meta.hot')) {
                     const ownUrl = mod?.url ?? idToUrl(config, importer);
-                    s.prepend(`import { createHotContext as __vite__createHotContext } from "${CLIENT_PUBLIC_PATH}";import.meta.hot = __vite__createHotContext(${JSON.stringify(ownUrl)});`);
+                    s.prepend(`import { createHotContext as __vite__createHotContext } from "${withBase(CLIENT_PUBLIC_PATH)}";import.meta.hot = __vite__createHotContext(${JSON.stringify(ownUrl)});`);
                 }
             }
 

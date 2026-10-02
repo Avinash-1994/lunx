@@ -153,7 +153,9 @@ export function resolvePlugin(config: any): any {
                 const resolved = resolver.resolve(basedir, file) ?? resolver.resolve(root, file);
                 // Unresolvable: leave it to later plugins (virtual modules such as `__sveltekit/server`).
                 if (!resolved) return null;
-                if (!isClient && shouldExternalize(env.config, file, resolved)) return { id: file, external: true };
+                // Builds mark server externals here (Rolldown needs it). In dev, as in Vite, resolveId returns the
+                // file and import analysis keeps the bare import (vite-node / transformRequest resolve directly).
+                if (!isClient && config.command === 'build' && shouldExternalize(env.config, file, resolved)) return { id: file, external: true };
                 return resolved + query;
             }
             return null;

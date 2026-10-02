@@ -118,6 +118,7 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
     Astro: { dev: ['dev'], build: ['build'] },
     VitePress: { dev: ['dev'], build: ['build'] },
     Waku: { dev: ['dev'], build: ['build'] },
+    Nuxt: { dev: ['dev'], build: ['build'] },
 };
 
 /**

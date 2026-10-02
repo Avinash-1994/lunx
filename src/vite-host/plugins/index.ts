@@ -38,6 +38,7 @@ export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post
         return [
             aliasPlugin(config),
             ...user.pre,
+            modulePreloadPolyfillPlugin(config),
             resolvePlugin(config),
             css,
             oxcPlugin(config),
@@ -55,6 +56,7 @@ export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post
     return [
         aliasPlugin(config),
         ...user.pre,
+        modulePreloadPolyfillPlugin(config),
         resolvePlugin(config),
         cssPlugin(config),
         oxcPlugin(config),
@@ -159,6 +161,49 @@ function oxcPlugin(config: any): any {
                 });
                 return { code: result.code, map: null, moduleType: 'js' };
             },
+        },
+    };
+}
+
+const PRELOAD_POLYFILL_ID = 'vite/modulepreload-polyfill';
+
+/** `import 'vite/modulepreload-polyfill'` (Nuxt's entry): the polyfill in client builds, empty otherwise. */
+function modulePreloadPolyfillPlugin(config: any): any {
+    const resolved = '\0' + PRELOAD_POLYFILL_ID + '.js';
+    return {
+        name: 'vite:modulepreload-polyfill',
+        resolveId(id: string) {
+            return id === PRELOAD_POLYFILL_ID ? resolved : null;
+        },
+        load(this: any, id: string) {
+            if (id !== resolved) return null;
+            const isClient = this.environment?.config?.consumer !== 'server';
+            if (config.command !== 'build' || !isClient || config.build.modulePreload === false || config.build.modulePreload?.polyfill === false) return '';
+            return `(function polyfill() {
+  const relList = document.createElement('link').relList;
+  if (relList && relList.supports && relList.supports('modulepreload')) return;
+  for (const link of document.querySelectorAll('link[rel="modulepreload"]')) processPreload(link);
+  new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type !== 'childList') continue;
+      for (const node of mutation.addedNodes) if (node.tagName === 'LINK' && node.rel === 'modulepreload') processPreload(node);
+    }
+  }).observe(document, { childList: true, subtree: true });
+  function getFetchOpts(link) {
+    const fetchOpts = {};
+    if (link.integrity) fetchOpts.integrity = link.integrity;
+    if (link.referrerPolicy) fetchOpts.referrerPolicy = link.referrerPolicy;
+    if (link.crossOrigin === 'use-credentials') fetchOpts.credentials = 'include';
+    else if (link.crossOrigin === 'anonymous') fetchOpts.credentials = 'omit';
+    else fetchOpts.credentials = 'same-origin';
+    return fetchOpts;
+  }
+  function processPreload(link) {
+    if (link.ep) return;
+    link.ep = true;
+    fetch(link.href, getFetchOpts(link));
+  }
+})();`;
         },
     };
 }
