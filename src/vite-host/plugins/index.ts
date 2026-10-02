@@ -35,6 +35,7 @@ export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post
             cssPost,
             ...user.post,
             manifestPlugin(state),
+            loadFallbackPlugin(),
         ];
     }
     return [
@@ -139,6 +140,19 @@ function oxcPlugin(config: any): any {
                 });
                 return { code: result.code, map: null, moduleType: 'js' };
             },
+        },
+    };
+}
+
+/** Vite's load fallback: a file id with a query (`route.jsx?client-route`) loads the file itself. */
+function loadFallbackPlugin(): any {
+    const types: Record<string, string> = { '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'jsx', '.ts': 'ts', '.mts': 'ts', '.cts': 'ts', '.tsx': 'tsx', '.json': 'json' };
+    return {
+        name: 'vite:load-fallback',
+        load(id: string) {
+            const file = cleanUrl(id);
+            if (file === id || id.startsWith('\0') || !path.isAbsolute(file) || !fs.existsSync(file)) return null;
+            return { code: fs.readFileSync(file, 'utf-8'), moduleType: types[path.extname(file)] ?? 'js' };
         },
     };
 }

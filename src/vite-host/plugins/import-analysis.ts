@@ -75,6 +75,10 @@ export function importAnalysisPlugin(config: any): any {
             const file = cleanUrl(importer);
             const original = source;
 
+            // As Vite's client-inject: `process.env.NODE_ENV` is replaced, not defined as a global.
+            if (isClient && source.includes('process.env.NODE_ENV')) {
+                source = source.replace(/\bprocess\.env\.NODE_ENV\b(?!\s*=[^=])/g, JSON.stringify(process.env.NODE_ENV || (config.isProduction ? 'production' : 'development')));
+            }
             if (source.includes('import.meta.glob') && path.isAbsolute(file)) {
                 source = transformGlobImports(source, file, config.root) ?? source;
             }
@@ -146,6 +150,11 @@ export function importAnalysisPlugin(config: any): any {
                     throw err;
                 }
                 if (resolved.external) return null;
+                const optimizer = isClient ? env.depsOptimizer : undefined;
+                if (optimizer && /^[\w@]/.test(spec) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(spec, resolved.id)) {
+                    const url = await optimizer.urlFor(spec, resolved.id);
+                    return { url, hmrUrl: url.replace(/\?.*$/, '') };
+                }
                 let url = idToUrl(config, resolved.id);
                 const hmrUrl = unwrapId(removeImportQuery(removeTimestampQuery(url)));
                 if (isClient) {

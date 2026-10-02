@@ -184,6 +184,15 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
     const client = environments.client!;
     const ssr = environments.ssr!;
     const moduleGraph = new ModuleGraph(() => client.moduleGraph, () => ssr.moduleGraph);
+    if (config.optimizeDeps?.disabled !== true && config.optimizeDeps?.noDiscovery !== true) {
+        const { DepsOptimizer } = await import('./optimizer.js');
+        const { createEnvResolver } = await import('./plugins/resolve.js');
+        client.depsOptimizer = new DepsOptimizer(config, createEnvResolver(config, 'client'), () => {
+            // New bundle hashes: every module that imported the old ones is stale.
+            client.moduleGraph.invalidateAll();
+            ws.send({ type: 'full-reload' });
+        });
+    }
 
     let serverClosed = false;
     const server: any = {
@@ -216,6 +225,12 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
         async ssrLoadModule(url: string, _opts?: { fixStacktrace?: boolean }) {
             return ssr.ssrLoadModule(url);
         },
+        async ssrTransform(code: string, _inMap: any, url: string) {
+            const { ssrTransform } = await import('../engines/toolkit.js');
+            const name = cleanUrl(url).replace(/^\0/, '');
+            const result = await ssrTransform(/\.(m|c)?js$/.test(name) ? name : `${name}.js`, code);
+            return { code: result.code, map: result.map ?? null, deps: result.deps, dynamicDeps: result.dynamicDeps };
+        },
         ssrFixStacktrace(_e: Error) {},
         ssrRewriteStacktrace(stack: string) {
             return stack;
@@ -238,6 +253,7 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
             const local = `http://${host && host !== '0.0.0.0' ? host : 'localhost'}:${listenPort}${config.base}`;
             server.resolvedUrls = { local: [local], network: host === '0.0.0.0' ? [`http://0.0.0.0:${listenPort}${config.base}`] : [] };
             if (!isRestart && config.server.open) server.openBrowser();
+            client.depsOptimizer?.start();
             return server;
         },
         async close() {

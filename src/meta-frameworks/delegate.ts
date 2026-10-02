@@ -104,8 +104,15 @@ export async function delegate(meta: MetaFramework, command: Command, root: stri
     });
 }
 
-/** Framework commands lunx runs itself through its Vite-compatible host (src/vite-host). */
-const NATIVE: Record<string, Command[]> = { SvelteKit: ['dev', 'build'] };
+/**
+ * Framework commands lunx runs itself through its Vite-compatible host
+ * (src/vite-host): 'vite' means lunx acts as the Vite CLI; an argument list
+ * means the framework's own CLI runs in-process with `vite` pointing at lunx.
+ */
+const NATIVE: Record<string, Partial<Record<Command, 'vite' | string[]>>> = {
+    SvelteKit: { dev: 'vite', build: 'vite' },
+    'React Router (framework)': { dev: 'vite', build: ['build'] },
+};
 
 /**
  * CLI entry: run `command` through the project's meta-framework when there is
@@ -118,7 +125,7 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
     if (!meta) return false;
     // Framework plugins read their config from the working directory and cache it, so be there before loading anything.
     if (process.cwd() !== root) process.chdir(root);
-    const native = NATIVE[meta.name]?.includes(command) && process.env.LUNX_VITE_HOST !== '0';
+    const native = process.env.LUNX_VITE_HOST !== '0' ? NATIVE[meta.name]?.[command] : undefined;
     // Before anything imports a framework plugin, so its `import 'vite'` binds to lunx's host.
     if (native) (await import('../vite-host/loader.js')).installViteRedirect();
     const { loadConfig } = await import('../config/index.js');
@@ -127,7 +134,15 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
     if (native) {
         console.log(`[lunx] ${meta.name} project → lunx vite host (Vite plugins on lunx + Rolldown; LUNX_VITE_HOST=0 to use ${meta.bin})`);
         const host = await import('../vite-host/index.js');
-        if (command === 'build') {
+        if (Array.isArray(native)) {
+            const bin = findBin(root, meta.bin);
+            if (!bin) {
+                console.error(`[lunx] ${meta.name}: its CLI (${meta.bin}) is not installed. Run your package manager's install first.`);
+                process.exitCode = 1;
+                return true;
+            }
+            await host.runFrameworkCli(root, bin, native);
+        } else if (command === 'build') {
             try {
                 await host.runViteHostBuild(root);
             } catch (err: any) {

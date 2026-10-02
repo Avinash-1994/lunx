@@ -81,7 +81,7 @@ export function resolvePlugin(config: any): any {
 
     return {
         name: 'vite:resolve',
-        async resolveId(this: any, id: string, importer: string | undefined) {
+        async resolveId(this: any, id: string, importer: string | undefined, options?: { isEntry?: boolean }) {
             if (id.startsWith('\0') || id.startsWith('virtual:') || id.startsWith('/virtual:')) return null;
             if (id.startsWith(BROWSER_EXTERNAL_ID)) return id;
             const env = this.environment;
@@ -130,6 +130,12 @@ export function resolvePlugin(config: any): any {
                 return found ? found + query : null;
             }
 
+            // Entries may be written relative to the root without `./` (React Router's route modules).
+            if ((options?.isEntry || !importer) && bareImportRE.test(file)) {
+                const found = tryFs(resolver, path.resolve(root, file));
+                if (found) return found + query;
+            }
+
             if (bareImportRE.test(file) || isBuiltin(file)) {
                 if (isBuiltin(file)) {
                     if (!isClient) return { id: file, external: true };
@@ -158,4 +164,17 @@ function safeRealpath(file: string, config: any): string {
     } catch {
         return file;
     }
+}
+
+/** A bare-specifier resolver with an environment's conditions (for the dependency optimizer). */
+export function createEnvResolver(config: any, envName: string): (spec: string) => string | null {
+    const r = config.environments[envName]?.resolve ?? config.resolve;
+    const resolver = createResolver({
+        conditionNames: [...r.conditions, 'import', 'default'],
+        mainFields: [...r.mainFields, 'main'],
+        extensions: r.extensions,
+        aliasFields: envName === 'client' ? [['browser']] : undefined,
+        symlinks: !r.preserveSymlinks,
+    });
+    return (spec) => resolver.resolve(config.root, spec);
 }

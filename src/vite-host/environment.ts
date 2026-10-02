@@ -80,6 +80,13 @@ export class DevEnvironment {
         await this.pluginContainer.close();
     }
 
+    /** Re-run HMR for a module as if its file had changed (Vite 6 `environment.reloadModule`). */
+    async reloadModule(module: EnvironmentModuleNode): Promise<void> {
+        if (!this.isClient || !module?.id || !this.moduleGraph.idToModuleMap.has(module.id)) return;
+        const { updateModules } = await import('./hmr.js');
+        updateModules(this, module.file ?? module.url, [module], Date.now());
+    }
+
     async warmupRequest(url: string): Promise<void> {
         await this.transformRequest(url).catch(() => {});
     }

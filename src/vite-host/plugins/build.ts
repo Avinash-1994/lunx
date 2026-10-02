@@ -239,7 +239,7 @@ export function manifestPlugin(state: BuildState): any {
                 }
                 if (!config.build.manifest) return;
                 const keyFor = (chunk: any): string =>
-                    chunk.facadeModuleId ? normalizePath(path.relative(config.root, cleanUrl(chunk.facadeModuleId.replace(/^\0/, '')))) : `_${path.basename(chunk.fileName)}`;
+                    chunk.facadeModuleId ? normalizePath(path.relative(config.root, chunk.facadeModuleId)).replace(/\0/g, '') : `_${path.basename(chunk.fileName)}`;
                 const manifest: Record<string, any> = {};
                 for (const item of Object.values(bundle)) {
                     if (item.type !== 'chunk') continue;

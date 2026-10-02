@@ -27,3 +27,18 @@ export async function runViteHostBuild(root: string, options: { mode?: string } 
     const { build } = await import('./build.js');
     await build({ root, mode: options.mode });
 }
+
+/**
+ * Run a framework's own CLI (e.g. `react-router build`) inside this process,
+ * with `vite` already pointing at lunx: the framework orchestrates its builds
+ * exactly as it does under Vite, on lunx + Rolldown.
+ */
+export async function runFrameworkCli(root: string, bin: string, args: string[]): Promise<void> {
+    installViteRedirect();
+    if (process.cwd() !== root) process.chdir(root);
+    const fs = await import('node:fs');
+    const { pathToFileURL } = await import('node:url');
+    const real = fs.realpathSync(bin);
+    process.argv = [process.execPath, real, ...args];
+    await import(pathToFileURL(real).href);
+}
