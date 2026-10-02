@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs/promises';
-import { parse as parseModule } from '../lib/oxc.js';
+import { parse as parseModule } from '../engines/index.js';
 import { createHash } from 'crypto';
 import { builtinModules, createRequire } from 'module';
 import { log } from '../utils/logger.js';
@@ -323,16 +323,15 @@ export class DependencyPreBundler {
                 return bundledDeps;
             }
 
-            // One Rolldown build for every dependency: shared code lands in
-            // common chunks, so React (say) exists once however many entries
-            // import it.
-            const { rolldown } = await import('rolldown');
+            // One bundle for every dependency: shared code lands in common
+            // chunks, so React (say) exists once however many entries import it.
+            const { getBundler } = await import('../engines/index.js');
             const VIRTUAL = '\0lunx-dep:';
             const BUILTIN = '\0lunx-builtin:';
             const builtins = new Set(builtinModules);
             const input: Record<string, string> = {};
             const virtualCode = new Map<string, string>();
-            // Entries are bare specifiers resolved by Rolldown itself, so an
+            // Entries are bare specifiers resolved by the bundler itself, so an
             // entry and the imports inside other packages resolve with the
             // same conditions. Resolving entries separately put solid-js's
             // browser build next to its dev build: two copies, dead signals.
@@ -358,13 +357,13 @@ export class DependencyPreBundler {
                 input[name] = id;
             }
 
-            const bundle = await rolldown({
+            await getBundler().bundle({
                 input,
                 cwd: root,
                 platform: 'browser',
-                logLevel: 'silent',
-                transform: { define: { 'process.env.NODE_ENV': '"development"', global: 'globalThis' } },
-                resolve: { conditionNames: ['browser', 'import', 'module', 'development', 'default'] },
+                quiet: true,
+                define: { 'process.env.NODE_ENV': '"development"', global: 'globalThis' },
+                conditions: ['browser', 'import', 'module', 'development', 'default'],
                 plugins: [{
                     name: 'lunx:prebundle',
                     resolveId(id: string) {
@@ -382,15 +381,13 @@ export class DependencyPreBundler {
                         return { code: `const stub = new Proxy({}, { get(_, key) { if (typeof key === 'symbol' || key === '__esModule' || key === 'then') return undefined; throw new Error('Module "${name}" is a Node built-in, not available in the browser (accessed .' + String(key) + ')'); } });\nmodule.exports = stub;\n`, moduleType: 'js' };
                     },
                 }],
-            } as any);
-            await bundle.write({
+            }, {
                 dir: cacheDir,
                 format: 'es',
                 entryFileNames: '[name].js',
                 chunkFileNames: 'chunks/[name]-[hash].js',
                 sourcemap: true,
-            } as any);
-            await bundle.close();
+            }, true);
 
             const depMap: Record<string, string> = {};
             for (const dep of deps) {

@@ -16,6 +16,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import type { BuildConfig } from '../config/index.js';
+import { getBundler, type OutputItem } from '../engines/index.js';
 import { transformGlobImports } from './glob-import.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
@@ -33,23 +34,19 @@ export interface BuildArtifact {
     source: string | Uint8Array;
 }
 
-export interface RolldownBuildResult {
+export interface ProductionBuildResult {
     success: true;
-    engine: 'rolldown';
+    /** Name of the bundler that produced it (see src/engines). */
+    engine: string;
     durationMs: number;
     artifacts: BuildArtifact[];
     /** Every module that ended up in the bundle (absolute paths). */
     modules: string[];
 }
 
-/** Rolldown is a regular dependency, but a broken native binding must not take the CLI down. */
-export async function rolldownAvailable(): Promise<boolean> {
-    try {
-        await import('rolldown');
-        return true;
-    } catch {
-        return false;
-    }
+/** The bundler is a regular dependency, but a broken native binding must not take the CLI down. */
+export function bundlerAvailable(): Promise<boolean> {
+    return getBundler().available();
 }
 
 const hash8 = (data: string | Uint8Array) => crypto.createHash('sha256').update(data).digest('hex').slice(0, 8);
@@ -59,15 +56,14 @@ const toPosix = (p: string) => p.split(path.sep).join('/');
 interface HtmlEntry {
     file: string;
     source: string;
-    /** script src attribute → rolldown input name */
+    /** script src attribute → bundler input name */
     scripts: Map<string, string>;
     /** local stylesheets linked from the page */
     styles: string[];
 }
 
-export async function rolldownBuild(config: BuildConfig, framework: string): Promise<RolldownBuildResult> {
+export async function productionBuild(config: BuildConfig, framework: string): Promise<ProductionBuildResult> {
     const started = performance.now();
-    const { rolldown } = await import('rolldown');
     const root = path.resolve(config.root || process.cwd());
     const outDir = path.resolve(root, config.outDir || 'dist');
     const base = ensureSlashes((config as any).base ?? '/');
@@ -346,57 +342,38 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
     const tsconfig = ['tsconfig.json', 'jsconfig.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
     const jsxImportSource = framework === 'preact' ? 'preact' : undefined;
 
-    let bundle: any;
-    if (Object.keys(input).length > 0) {
-        bundle = await rolldown({
-            input,
-            cwd: root,
-            platform: 'browser',
-            plugins,
-            ...(tsconfig ? { tsconfig } : {}),
-            resolve: {
-                ...(alias ? { alias } : {}),
-                extensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.vue', '.svelte', '.json'],
-                // Never `development`: dev-only builds of React/Vue are 3–10× larger.
-                conditionNames: ['browser', 'import', 'module', config.mode === 'production' ? 'production' : 'development', 'default'],
-            },
-            transform: {
-                define,
-                ...(jsxImportSource ? { jsx: { runtime: 'automatic', importSource: jsxImportSource } } : {}),
-            },
-            onLog(level: string, log: any, handler: (level: any, log: any) => void) {
-                // Rolldown is chatty about things that are normal in app code.
-                if (log.code === 'EVAL' || log.code === 'CIRCULAR_DEPENDENCY' || log.code === 'MIXED_EXPORT') return;
-                handler(level, log);
-            },
-        } as any);
-    }
-
     await emptyDir(outDir, root);
 
     const manualChunks = build.manualChunks;
-    const output: any[] = bundle
-        ? (await bundle.write({
-              dir: outDir,
-              format: 'es',
-              entryFileNames: 'assets/[name].[hash].js',
-              chunkFileNames: 'assets/[name].[hash].js',
-              assetFileNames: 'assets/[name].[hash][extname]',
-              minify,
-              sourcemap: sourcemapOption(build.sourcemap),
-              ...(manualChunks && Object.keys(manualChunks).length
-                  ? {
-                        advancedChunks: {
-                            groups: Object.entries(manualChunks).map(([name, pkgs]) => ({
-                                name,
-                                test: new RegExp(`[\\\\/]node_modules[\\\\/](${pkgs.map(escapeRe).join('|')})[\\\\/]`),
-                            })),
-                        },
-                    }
-                  : {}),
-          })).output
-        : [];
-    await bundle?.close();
+    const output: OutputItem[] = Object.keys(input).length === 0 ? [] : await getBundler().bundle({
+        input,
+        cwd: root,
+        platform: 'browser',
+        plugins,
+        tsconfig,
+        alias: alias ?? undefined,
+        extensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.vue', '.svelte', '.json'],
+        // Never `development`: dev-only builds of React/Vue are 3–10× larger.
+        conditions: ['browser', 'import', 'module', config.mode === 'production' ? 'production' : 'development', 'default'],
+        define,
+        jsx: jsxImportSource ? { runtime: 'automatic', importSource: jsxImportSource } : undefined,
+        // Normal in app code; not worth a warning on every build.
+        onWarning: (w) => !['EVAL', 'CIRCULAR_DEPENDENCY', 'MIXED_EXPORT'].includes(w.code ?? ''),
+    }, {
+        dir: outDir,
+        format: 'es',
+        entryFileNames: 'assets/[name].[hash].js',
+        chunkFileNames: 'assets/[name].[hash].js',
+        assetFileNames: 'assets/[name].[hash][extname]',
+        minify,
+        sourcemap: sourcemapOption(build.sourcemap),
+        chunkGroups: manualChunks
+            ? Object.entries(manualChunks).map(([name, pkgs]) => ({
+                  name,
+                  test: new RegExp(`[\\\\/]node_modules[\\\\/](${pkgs.map(escapeRe).join('|')})[\\\\/]`),
+              }))
+            : undefined,
+    }, true);
 
     // ── CSS ──────────────────────────────────────────────────────────────────
     const htmlCss = new Map<HtmlEntry, string[]>();
@@ -483,7 +460,7 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
     const modules = new Set<string>();
     for (const o of output) if (o.type === 'chunk') for (const id of o.moduleIds as string[]) if (path.isAbsolute(cleanId(id))) modules.add(cleanId(id));
 
-    return { success: true, engine: 'rolldown', durationMs: performance.now() - started, artifacts, modules: [...modules] };
+    return { success: true, engine: getBundler().name, durationMs: performance.now() - started, artifacts, modules: [...modules] };
 }
 
 // ── CSS processing ───────────────────────────────────────────────────────────

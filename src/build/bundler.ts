@@ -169,24 +169,24 @@ export async function build(rawConfig: BuildConfig) {
   })();
   securityGate.catch(() => {}); // observed below; avoid an unhandled rejection meanwhile
 
-  // Rolldown (Rust) is the default production bundler. The legacy engine
+  // The engine bundler (src/engines; Rolldown by default) builds for production. The legacy engine
   // still owns module federation, SSR/node targets, and `build.bundler: 'legacy'`.
-  const { rolldownAvailable, rolldownBuild } = await import('./rolldown-engine.js');
-  const useRolldown =
+  const { bundlerAvailable, productionBuild } = await import('./production.js');
+  const useEngine =
     (config.build as any)?.bundler !== 'legacy' &&
     !config.federation &&
     config.preset !== 'ssr' &&
     (config.platform ?? 'browser') === 'browser' &&
-    (await rolldownAvailable());
+    (await bundlerAvailable());
 
   let pipeline: any = null;
   try {
     let result: any;
-    if (useRolldown) {
+    if (useEngine) {
       const { detectFramework } = await import('../core/framework-detector.js');
       const framework = config.framework || (await detectFramework(config.root));
-      result = await rolldownBuild(config, framework);
-      console.log(`[lunx] bundled ${result.modules.length} modules with rolldown in ${Math.round(result.durationMs)}ms`);
+      result = await productionBuild(config, framework);
+      console.log(`[lunx] bundled ${result.modules.length} modules with ${result.engine} in ${Math.round(result.durationMs)}ms`);
     } else {
       const { FrameworkPipeline } = await import('../core/pipeline/framework-pipeline.js');
       pipeline = await FrameworkPipeline.auto(config);

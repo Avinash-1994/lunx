@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-import { minify as oxcMinify } from '../../lib/oxc.js';
+import { minify as oxcMinify } from '../../engines/index.js';
 const require = createRequire(import.meta.url);
 const { NativeWorker, minifySync } = require('../../native/index.js');
 import fs from 'fs/promises';

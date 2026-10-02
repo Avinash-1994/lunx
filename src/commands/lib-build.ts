@@ -74,26 +74,24 @@ export async function buildLib(config: BuildConfig, lib: LunxLibConfig): Promise
   for (const format of formats) {
     const outFile = path.join(outDir, resolveFileName(lib, format))
 
-    // Rolldown emits real UMD (not esbuild's iife stand-in) and the same
-    // tree shaking as app builds; externals match exact names and subpaths.
-    const { rolldown } = await import('rolldown')
+    // Real UMD (not an iife stand-in) and the same tree shaking as app
+    // builds; externals match exact names and subpaths.
+    const { getBundler } = await import('../engines/index.js')
     const isExternal = (id: string) => uniqueExternals.some((e) => id === e || id.startsWith(e + '/')) || id.startsWith('node:')
-    const bundle = await rolldown({
+    await getBundler().bundle({
       input: path.resolve(process.cwd(), lib.entry),
       platform: format === 'cjs' ? 'node' : 'browser',
+      quiet: true,
       external: isExternal,
-      logLevel: 'silent',
-      transform: { define: { 'process.env.NODE_ENV': JSON.stringify('production') } },
-    } as any)
-    await bundle.write({
+      define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    }, {
       file: outFile,
-      format: format === 'es' ? 'es' : format,
+      format: format as 'es' | 'cjs' | 'iife' | 'umd',
       name: format === 'umd' || format === 'iife' ? lib.name : undefined,
       minify: config.build?.minify ?? true,
       sourcemap: (config.build?.sourcemap === 'external' || config.build?.sourcemap === 'inline') ? true : false,
       inlineDynamicImports: true,
-    } as any)
-    await bundle.close()
+    }, true)
 
     const size = fs.statSync(outFile).size
     outputs.push({ file: outFile, format, size })

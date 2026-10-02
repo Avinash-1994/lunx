@@ -10,34 +10,7 @@ import path from 'node:path';
 
 const oxc: any = await import('rolldown/experimental');
 
-export type Lang = 'js' | 'jsx' | 'ts' | 'tsx';
-
-export interface CompileOptions {
-    /** Defaults from the file extension. */
-    lang?: Lang;
-    jsx?: 'preserve' | {
-        runtime?: 'automatic' | 'classic';
-        importSource?: string;
-        pragma?: string;
-        pragmaFrag?: string;
-        development?: boolean;
-        /** Emit React Refresh registrations ($RefreshReg$ / $RefreshSig$). */
-        refresh?: boolean;
-    };
-    /** TypeScript's experimentalDecorators (Angular, Lit, MobX…). */
-    legacyDecorators?: boolean;
-    /** Emit decorator metadata (Angular DI). */
-    decoratorMetadata?: boolean;
-    define?: Record<string, string>;
-    /** 'inline' appends a data-URL map comment. */
-    sourcemap?: boolean | 'inline';
-    target?: string;
-}
-
-export interface CompileResult {
-    code: string;
-    map?: string;
-}
+import type { CompileOptions, CompileResult, Compiler, Lang } from './types.js';
 
 export class CompileError extends Error {
     constructor(public file: string, public details: Array<{ message: string; line?: number; column?: number }>) {
@@ -54,7 +27,7 @@ export function langOf(file: string): Lang {
 }
 
 /** Strip types, compile JSX, apply defines. Output stays ES modules. */
-export function compile(file: string, code: string, opts: CompileOptions = {}): CompileResult {
+function compile(file: string, code: string, opts: CompileOptions = {}): CompileResult {
     const result = oxc.transformSync(file, code, {
         lang: opts.lang ?? langOf(file),
         sourceType: 'module',
@@ -94,13 +67,13 @@ export function compile(file: string, code: string, opts: CompileOptions = {}): 
     return { code: out, map: opts.sourcemap === 'inline' ? undefined : map };
 }
 
-export function minify(file: string, code: string, opts: { mangle?: boolean; compress?: boolean } = {}): CompileResult {
+function minify(file: string, code: string, opts: { mangle?: boolean; compress?: boolean } = {}): CompileResult {
     const result = oxc.minifySync(file, code, { mangle: opts.mangle ?? true, compress: opts.compress ?? true });
     return { code: result.code, map: result.map ? JSON.stringify(result.map) : undefined };
 }
 
 /** ESTree-compatible AST (node.start / node.end offsets, like acorn). */
-export function parse(file: string, code: string, lang?: Lang, sourceType: 'module' | 'script' = 'module'): any {
+function parse(file: string, code: string, lang?: Lang, sourceType: 'module' | 'script' = 'module'): any {
     const result = oxc.parseSync(file, code, { lang: lang ?? langOf(file), sourceType });
     const errors = (result.errors ?? []).filter((e: any) => e.severity !== 'Warning');
     if (errors.length) throw new CompileError(file, errors.map((e: any) => ({ message: e.message })));
@@ -127,3 +100,6 @@ function lineOf(code: string, offset: number): number {
     for (let i = 0; i < offset && i < code.length; i++) if (code.charCodeAt(i) === 10) line++;
     return line;
 }
+
+/** The default `Compiler`. This file is the only place lunx talks to Oxc. */
+export const oxcCompiler: Compiler = { name: 'oxc', compile, minify, parse };

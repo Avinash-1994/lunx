@@ -1,6 +1,6 @@
 /**
  * Import a config file written in TypeScript or ESM (lunx.config.ts,
- * vite.config.ts, postcss.config.ts): bundle its local imports with Rolldown,
+ * vite.config.ts, postcss.config.ts): bundle its local imports,
  * keep packages external, and import the result.
  */
 
@@ -17,26 +17,24 @@ export interface LoadModuleOptions {
 }
 
 export async function importBundled(file: string, opts: LoadModuleOptions): Promise<any> {
-    const { rolldown } = await import('rolldown');
+    const { getBundler } = await import('../engines/index.js');
     const stubs = opts.stubs ?? {};
     const STUB = '\0lunx-stub:';
     const dir = path.dirname(file);
-    const bundle = await rolldown({
+    const output = await getBundler().bundle({
         input: file,
         cwd: opts.root,
         platform: 'node',
-        logLevel: 'silent',
+        quiet: true,
         // Packages stay external: the config runs against the project's own copies.
         external: (id: string) => !(id in stubs) && !id.startsWith(STUB) && !/^[./]/.test(id) && !path.isAbsolute(id),
-        transform: {
-            // The bundle runs from a temp file; keep the config's own location.
-            define: {
-                'import.meta.url': JSON.stringify(pathToFileURL(file).href),
-                'import.meta.dirname': JSON.stringify(dir),
-                'import.meta.filename': JSON.stringify(file),
-                __dirname: JSON.stringify(dir),
-                __filename: JSON.stringify(file),
-            },
+        // The bundle runs from a temp file; keep the config's own location.
+        define: {
+            'import.meta.url': JSON.stringify(pathToFileURL(file).href),
+            'import.meta.dirname': JSON.stringify(dir),
+            'import.meta.filename': JSON.stringify(file),
+            __dirname: JSON.stringify(dir),
+            __filename: JSON.stringify(file),
         },
         plugins: [{
             name: 'lunx:config-stubs',
@@ -47,10 +45,8 @@ export async function importBundled(file: string, opts: LoadModuleOptions): Prom
                 return id.startsWith(STUB) ? { code: stubs[id.slice(STUB.length)]!, moduleType: 'js' } : null;
             },
         }],
-    } as any);
-    const { output } = await bundle.generate({ format: 'es', inlineDynamicImports: true } as any);
-    await bundle.close();
-    const code = (output[0] as any).code as string;
+    }, { format: 'es', inlineDynamicImports: true });
+    const code = (output[0] as { code: string }).code;
 
     const tmpDir = path.join(opts.root, 'node_modules', '.lunx');
     await fs.mkdir(tmpDir, { recursive: true });

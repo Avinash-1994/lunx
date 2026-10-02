@@ -6,7 +6,7 @@ import { existsSync } from 'fs';
 import { applyAlias, collectAliases, type AliasEntry } from '../config/aliases.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css.js';
 import { transformGlobImports } from '../build/glob-import.js';
-import { compile, parse as parseModule } from '../lib/oxc.js';
+import { compile, parse as parseModule } from '../engines/index.js';
 
 // Dependency URLs carry no version query: pre-bundled entries import each
 // other by relative path ("./preact.js"), and a browser treats
@@ -1548,9 +1548,9 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
         const ext = path.extname(resolvedModulePath);
 
-        // ── Step 4: Bundle to ESM with Rolldown ──
+        // ── Step 4: Bundle to ESM ──
         if (ext === '.js' || ext === '.mjs' || ext === '.cjs' || ext === '') {
-          const { rolldown } = await import('rolldown');
+          const { getBundler } = await import('../engines/index.js');
           try {
             // Which bare imports to bundle in vs keep external. For solid-js
             // and preact subpaths, inline their internals to avoid cascades
@@ -1564,12 +1564,12 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
               (dep === 'react' && (resolvedModulePath!.includes('react-dom') || resolvedModulePath!.includes('jsx-dev-runtime'))) ||
               (dep === 'react-dom' && resolvedModulePath!.includes('react-dom/client'));
 
-            const bundle = await rolldown({
+            const output = await getBundler().bundle({
               input: resolvedModulePath,
               platform: 'browser',
-              logLevel: 'silent',
-              transform: { define: { 'process.env.NODE_ENV': '"development"', global: 'globalThis' } },
-              resolve: { conditionNames: ['browser', 'import', 'module', 'development', 'default'] },
+              quiet: true,
+              define: { 'process.env.NODE_ENV': '"development"', global: 'globalThis' },
+              conditions: ['browser', 'import', 'module', 'development', 'default'],
               plugins: [{
                 name: 'lunx:node-modules-external',
                 resolveId(dep: string) {
@@ -1577,15 +1577,13 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
                   return { id: `/node_modules/${dep}`, external: true };
                 },
               }],
-            } as any);
-            const { output } = await bundle.generate({ format: 'es', inlineDynamicImports: true } as any);
-            await bundle.close();
+            }, { format: 'es', inlineDynamicImports: true });
 
             res.writeHead(200, {
               'Content-Type': 'application/javascript',
               'Cache-Control': 'no-cache'
             });
-            res.end((output[0] as any).code);
+            res.end((output[0] as { code: string }).code);
             return;
           } catch (e: any) {
             log.warn(`[DevServer] bundling ${specifier} failed, serving raw: ${e.message}`);

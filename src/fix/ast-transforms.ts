@@ -1,4 +1,4 @@
-import { parse as parseModule } from '../lib/oxc.js';
+import { parse as parseModule } from '../engines/index.js';
 import * as walk from '../lib/ast-walk.js';
 
 /**

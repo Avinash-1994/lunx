@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-import { compile } from '../../lib/oxc.js';
+import { compile } from '../../engines/index.js';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';

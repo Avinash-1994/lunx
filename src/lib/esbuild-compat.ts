@@ -4,7 +4,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { compile, minify as oxcMinify, type Lang } from './oxc.js';
+import { compile, minify as oxcMinify, type Lang } from '../engines/index.js';
 
 const require = createRequire(import.meta.url);
 
