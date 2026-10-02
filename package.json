@@ -48,7 +48,7 @@
     "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:build": "tsc -p tsconfig.build.json --noEmit",
-    "test:all": "tsc -p tsconfig.build.json && npx tsx tests/config_test.ts && npx tsx tests/bootstrap_test.ts && npx tsx tests/integration_test.ts && npx tsx tests/asset_test.ts && npx tsx tests/federation_core_test.ts && npx tsx tests/core_engine_test.ts && npx tsx tests/framework_verification_test.ts && npx tsx tests/phase_3_1_hmr_classification_test.ts && npx tsx tests/phase_3_1_hmr_integration_test.ts",
+    "test:all": "tsc -p tsconfig.build.json && node ./scripts/postbuild.js && npx tsx tests/config_test.ts && npx tsx tests/bootstrap_test.ts && npx tsx tests/integration_test.ts && npx tsx tests/asset_test.ts && npx tsx tests/federation_core_test.ts && npx tsx tests/core_engine_test.ts && npx tsx tests/framework_verification_test.ts && npx tsx tests/phase_3_1_hmr_classification_test.ts && npx tsx tests/phase_3_1_hmr_integration_test.ts",
     "test:regression": "npx tsx src/test/regression.ts",
     "test:snapshot": "cross-env NODE_OPTIONS=\"--experimental-vm-modules\" jest tests/build/snapshot.test.ts",
     "test:performance": "cross-env NODE_OPTIONS=\"--experimental-vm-modules\" jest tests/performance/regression.test.ts --testTimeout=30000",

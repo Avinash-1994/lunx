@@ -43,7 +43,9 @@ export default logo;
             mode: 'development' as const,
             outDir: 'dist',
             port: 3000,
-            platform: 'browser' as const
+            platform: 'browser' as const,
+            // The fixture is a 1x1 PNG; small assets are inlined by default.
+            build: { assetsInlineLimit: 0 }
         };
 
         // Run build

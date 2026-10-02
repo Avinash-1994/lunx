@@ -25,7 +25,7 @@ const brotli = promisify(zlib.brotliCompress);
 
 const ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 const CSS_EXT = CSS_LANGS;
-const INLINE_LIMIT = 4096;
+const DEFAULT_INLINE_LIMIT = 4096;
 
 export interface BuildArtifact {
     fileName: string;
@@ -73,6 +73,7 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
     const base = ensureSlashes((config as any).base ?? '/');
     const build = config.build ?? {};
     const minify = build.minify !== false;
+    const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
 
     // ── Entries ──────────────────────────────────────────────────────────────
     const entries = (config.entry?.length ? config.entry : ['index.html']).map((e) => path.resolve(root, e));
@@ -140,7 +141,7 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
     }
 
     // ── Plugins ──────────────────────────────────────────────────────────────
-    const css = new CssCollector(root, base, minify);
+    const css = new CssCollector(root, base, minify, inlineLimit);
     const assets = new Map<string, string>(); // source file → public URL
     const emittedAssets: BuildArtifact[] = [];
 
@@ -238,7 +239,7 @@ export async function rolldownBuild(config: BuildConfig, framework: string): Pro
                 if (CSS_EXT.test(file) && !wantsUrl) return null;
                 if (wantsRaw) return { code: `export default ${JSON.stringify(await fsp.readFile(file, 'utf8'))};`, moduleType: 'js' };
                 const data = await fsp.readFile(file);
-                const url = !wantsUrl && data.length < INLINE_LIMIT && !/\.(svg|wasm)$/i.test(file)
+                const url = !wantsUrl && data.length < inlineLimit && !/\.(svg|wasm)$/i.test(file)
                     ? `data:${mimeOf(file)};base64,${data.toString('base64')}`
                     : emitAsset(this, file, data);
                 return { code: `export default ${JSON.stringify(url)};`, moduleType: 'js' };
@@ -492,7 +493,7 @@ class CssCollector {
     order: string[] = [];
     emitAsset!: (ctx: any, file: string, data: Buffer) => string;
 
-    constructor(private root: string, private base: string, private minify: boolean) {}
+    constructor(private root: string, private base: string, private minify: boolean, private inlineLimit: number) {}
 
     has(file: string) { return this.sheets.has(file); }
     get(file: string) { return this.sheets.get(file); }
@@ -511,7 +512,7 @@ class CssCollector {
                 const target = resolveCssFile(this.root, from, url);
                 if (!target) return url;
                 const data = fs.readFileSync(target);
-                if (data.length < INLINE_LIMIT && !/\.svg$/i.test(target)) return `data:${mimeOf(target)};base64,${data.toString('base64')}`;
+                if (data.length < this.inlineLimit && !/\.svg$/i.test(target)) return `data:${mimeOf(target)};base64,${data.toString('base64')}`;
                 return this.emitAsset(ctx, target, data) + url.slice(clean.length);
             },
         });

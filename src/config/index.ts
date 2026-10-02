@@ -74,6 +74,8 @@ export const BuildConfigSchema = z.object({
     manualChunks: z.record(z.string(), z.array(z.string())).optional(),
     /** Production bundler: 'rolldown' (Rust, default) or the 'legacy' JS engine. */
     bundler: z.enum(['rolldown', 'legacy']).optional(),
+    /** Assets smaller than this many bytes are inlined as data URLs (default 4096; 0 disables). */
+    assetsInlineLimit: z.number().optional(),
   }).optional(),
   /** Public base path the app is served from, e.g. '/my-app/'. */
   base: z.string().optional(),
@@ -154,6 +156,7 @@ export type BuildConfig = {
     targets?: string[];
     manualChunks?: Record<string, string[]>;
     bundler?: 'rolldown' | 'legacy';
+    assetsInlineLimit?: number;
   };
   base?: string;
   define?: Record<string, string>;

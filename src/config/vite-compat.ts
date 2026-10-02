@@ -104,6 +104,7 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
     const build: Record<string, any> = {};
     if (b.sourcemap !== undefined) build.sourcemap = b.sourcemap === true ? 'external' : b.sourcemap === false ? 'none' : b.sourcemap;
     if (b.minify === false) build.minify = false;
+    if (typeof b.assetsInlineLimit === 'number') build.assetsInlineLimit = b.assetsInlineLimit;
     if (Object.keys(build).length) config.build = build;
     const input = b.rollupOptions?.input ?? b.rolldownOptions?.input;
     if (input) config.entry = typeof input === 'string' ? [input] : Array.isArray(input) ? input : Object.values(input);
