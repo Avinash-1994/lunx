@@ -89,7 +89,8 @@ export class PluginContainer {
     constructor(public environment: any, public plugins: any[]) {}
 
     private context(plugin: any, extra: Record<string, any> = {}): any {
-        const container = this;
+        // Hook functions get `ctx` as `this`; keep a handle on the container.
+        const { resolveId, moduleMeta, watchFiles } = { resolveId: this.resolveId.bind(this), moduleMeta: this.moduleMeta, watchFiles: this.watchFiles };
         const env = this.environment;
         const ctx: any = {
             environment: env,
@@ -102,7 +103,7 @@ export class PluginContainer {
             async resolve(id: string, importer?: string, options?: ResolveIdOptions & { skipSelf?: boolean }) {
                 const skip = new Set<any>(extra.skip ?? []);
                 if (options?.skipSelf !== false) skip.add(plugin);
-                return container.resolveId(id, importer, { ...options, skip });
+                return resolveId(id, importer, { ...options, skip });
             },
             async load(options: { id: string }) {
                 await env.transformRequest?.(options.id).catch(() => null);
@@ -110,7 +111,7 @@ export class PluginContainer {
             },
             getModuleInfo(id: string) {
                 const node = env.moduleGraph?.getModuleById(id);
-                const meta = container.moduleMeta.get(id) ?? (node ? (node.meta ??= {}) : null);
+                const meta = moduleMeta.get(id) ?? (node ? (node.meta ??= {}) : null);
                 if (!node && !meta) return null;
                 return {
                     id,
@@ -132,11 +133,11 @@ export class PluginContainer {
                 return env.moduleGraph ? env.moduleGraph.idToModuleMap.keys() : [][Symbol.iterator]();
             },
             addWatchFile(file: string) {
-                container.watchFiles.add(file);
+                watchFiles.add(file);
                 env.watcher?.add?.(file);
             },
             getWatchFiles() {
-                return [...container.watchFiles];
+                return [...watchFiles];
             },
             emitFile() {
                 env.logger?.warnOnce?.(`[plugin ${plugin.name}] emitFile() is not supported in serve mode.`);
