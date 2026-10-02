@@ -6,7 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createResolver, ssrTransform, type ModuleResolver } from '../engines/toolkit.js';
 import { environmentConfig, type ResolvedConfig } from './config.js';
 import { EnvironmentModuleGraph, type EnvironmentModuleNode } from './module-graph.js';
@@ -176,7 +176,7 @@ export class DevEnvironment {
         const ssrImport = async (dep: string) => {
             if (isBuiltin(dep)) return import(dep.startsWith('node:') ? dep : `node:${dep}`);
             if (dep.startsWith('/') || dep.startsWith('\0')) return this.ssrLoadModule(dep, nextChain);
-            if (dep.startsWith('file://')) return import(dep);
+            if (dep.startsWith('file://')) return this.ssrLoadModule(fileURLToPath(dep), nextChain);
             if (/^(https?|data):/.test(dep)) return import(dep);
             return this.importExternal(dep, file);
         };
@@ -221,6 +221,7 @@ export class DevEnvironment {
 
     /** Externalized dependency: resolved with Node's conditions and imported natively. */
     private async importExternal(spec: string, importerFile: string): Promise<any> {
+        if (process.env.LUNX_DEBUG?.includes('externals')) console.log(`[lunx:${this.name}] external ${spec} <- ${importerFile}`);
         this.externalResolver ??= createResolver({
             conditionNames: [...(this.config.resolve?.externalConditions ?? ['node']), 'import', 'module-sync', 'default'],
             mainFields: ['main'],

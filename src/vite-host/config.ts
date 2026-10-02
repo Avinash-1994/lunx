@@ -180,8 +180,7 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
         ssr: false,
         ...config.build,
     };
-    if (build.rolldownOptions && !config.build?.rollupOptions) build.rollupOptions = build.rolldownOptions;
-    build.rolldownOptions = build.rollupOptions;
+    build.rollupOptions = build.rolldownOptions = { ...build.rollupOptions, ...build.rolldownOptions };
 
     const server = {
         port: 5173,
@@ -252,10 +251,15 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
                           external: ssr.external === true || userResolve.external === true ? true : [...arraify(ssr.external ?? []), ...arraify(userResolve.external ?? [])],
                       },
                 build: { ...build, ssr: !isClient },
+                // Vite 6: server environments run modules through the module runner.
+                dev: { ...environmentDefaults.dev, moduleRunnerTransform: !isClient },
             },
             user,
         );
         environments[name].consumer = user.consumer ?? (isClient ? 'client' : 'server');
+        // rolldown-vite: build.rollupOptions and build.rolldownOptions are one object.
+        const envBuild = environments[name].build;
+        envBuild.rollupOptions = envBuild.rolldownOptions = { ...envBuild.rollupOptions, ...envBuild.rolldownOptions };
     }
 
     const assetsIncludeList = arraify(config.assetsInclude ?? []);

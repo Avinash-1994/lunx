@@ -6,6 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createResolver, type ModuleResolver } from '../../engines/toolkit.js';
 import { globToRegExp } from '../../lib/watcher.js';
 import { arraify, bareImportRE, cleanUrl, FS_PREFIX, fsPathFromId, isBuiltin, isDataUrl, isExternalUrl } from '../utils.js';
@@ -91,6 +92,11 @@ export function resolvePlugin(config: any): any {
             const isClient = env.config.consumer === 'client';
             const root = config.root;
             const resolver = resolverFor(env);
+            // As Vite: file:// URLs are file paths, not remote URLs.
+            if (id.startsWith('file://')) {
+                const [fileUrl, postfix] = splitQuery(id);
+                id = fileURLToPath(fileUrl) + postfix;
+            }
             const [file, query] = splitQuery(id);
 
             if (isExternalUrl(id)) return { id, external: true };

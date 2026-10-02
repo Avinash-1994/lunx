@@ -8,6 +8,7 @@ import path from 'node:path';
 import { compile } from '../../engines/index.js';
 import { assetPlugin } from './asset.js';
 import { assetBuildPlugin, BuildState, cssBuildPlugins, manifestPlugin } from './build.js';
+import { buildHtmlPlugin } from './html.js';
 import { transformGlobImports } from '../../build/glob-import.js';
 import { cssPlugin, cssPostPlugin } from './css.js';
 import { importAnalysisPlugin } from './import-analysis.js';
@@ -45,6 +46,7 @@ export function corePlugins(config: any, user: { pre: any[]; normal: any[]; post
             globImportPlugin(config),
             ...user.normal,
             cssPost,
+            buildHtmlPlugin(config, getState),
             ...user.post,
             manifestPlugin(getState),
             loadFallbackPlugin(),
@@ -174,6 +176,22 @@ function loadFallbackPlugin(): any {
     };
 }
 
+/**
+ * `import.meta.glob` everywhere Vite applies it, dependencies and virtual
+ * modules included (Waku's page glob). Inside dependencies a failure means
+ * the text was not a call (Astro mentions it in an error message string).
+ */
+export function globImports(code: string, id: string, root: string): string | null {
+    const clean = cleanUrl(id).replace(/^\0/, '');
+    const file = path.isAbsolute(clean) ? clean : path.join(root, 'index.js');
+    try {
+        return transformGlobImports(code, file, root);
+    } catch (err) {
+        if (/[\\/]node_modules[\\/]/.test(file)) return null;
+        throw err;
+    }
+}
+
 /** `import.meta.glob` in builds (dev handles it in import analysis). */
 function globImportPlugin(config: any): any {
     return {
@@ -181,10 +199,7 @@ function globImportPlugin(config: any): any {
         transform: {
             filter: { code: 'import.meta.glob' },
             handler(code: string, id: string) {
-                const file = cleanUrl(id);
-                // Dependencies ship expanded globs; their mentions of import.meta.glob are text.
-                if (!path.isAbsolute(file) || /[\\/]node_modules[\\/]/.test(file)) return null;
-                const out = transformGlobImports(code, file, config.root);
+                const out = globImports(code, id, config.root);
                 return out == null ? null : { code: out, map: null };
             },
         },

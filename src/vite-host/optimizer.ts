@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import { builtinModules, createRequire } from 'node:module';
 import path from 'node:path';
 import { getBundler, parse } from '../engines/index.js';
+import { createResolver } from '../engines/toolkit.js';
 import { arraify, mergeConfig, normalizePath } from './utils.js';
 import { getPackageName } from './plugins/resolve.js';
 
@@ -32,10 +33,33 @@ function isEsm(file: string, source: string): boolean {
     }
 }
 
-function cjsExportNames(file: string, source: string): string[] {
+/**
+ * Evaluate a CommonJS module with `require` resolved under the environment's
+ * conditions (Node's own require ignores them: React's react-server build).
+ */
+function evaluateCjs(file: string, resolveRequire: (spec: string, dir: string) => string | null, cache = new Map<string, { exports: any }>()): any {
+    const cached = cache.get(file);
+    if (cached) return cached.exports;
+    if (file.endsWith('.json')) return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (file.endsWith('.node') || file.endsWith('.mjs')) return require(file);
+    const module = { exports: {} as any };
+    cache.set(file, module);
+    const dir = path.dirname(file);
+    const req: any = (spec: string) => {
+        if (builtinModules.includes(spec.replace(/^node:/, '')) || spec.startsWith('node:')) return require(spec);
+        const target = resolveRequire(spec, dir);
+        if (!target) throw new Error(`Cannot find module '${spec}'`);
+        return evaluateCjs(target, resolveRequire, cache);
+    };
+    req.resolve = (spec: string) => resolveRequire(spec, dir) ?? spec;
+    new Function('exports', 'require', 'module', '__filename', '__dirname', fs.readFileSync(file, 'utf-8'))(module.exports, req, module, file, dir);
+    return module.exports;
+}
+
+function cjsExportNames(file: string, source: string, resolveRequire?: (spec: string, dir: string) => string | null): string[] {
     let keys: string[] = [];
     try {
-        const mod = require(file);
+        const mod = resolveRequire ? evaluateCjs(file, resolveRequire) : require(file);
         if (mod && (typeof mod === 'object' || typeof mod === 'function')) keys = Object.keys(mod);
     } catch {
         for (const m of source.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|Object\.defineProperty\(\s*(?:module\.)?exports\s*,\s*['"]([A-Za-z_$][\w$]*)['"]/g)) keys.push((m[1] ?? m[2])!);
@@ -67,9 +91,18 @@ export class DepsOptimizer {
     /** Top-level optimizeDeps merged with the client environment's (Vite 6). */
     private readonly options: Record<string, any>;
 
-    constructor(private config: any, private resolve: (spec: string, fromDir?: string) => string | null, private onReload: () => void) {
-        this.options = mergeConfig(config.optimizeDeps ?? {}, config.environments?.client?.optimizeDeps ?? {});
-        this.depsDir = path.join(config.cacheDir, 'deps');
+    private readonly envName: string;
+    private readonly isClient: boolean;
+
+    constructor(private config: any, private resolve: (spec: string, fromDir?: string) => string | null, private onReload: () => void, envName = 'client') {
+        this.envName = envName;
+        this.isClient = envName === 'client';
+        // Client: top-level optimizeDeps + the environment's. Server environments (Vite 6): only
+        // their own, and only listed dependencies (no discovery), e.g. React with react-server for RSC.
+        this.options = this.isClient
+            ? mergeConfig(config.optimizeDeps ?? {}, config.environments?.client?.optimizeDeps ?? {})
+            : { ...config.environments?.[envName]?.optimizeDeps, noDiscovery: true };
+        this.depsDir = path.join(config.cacheDir, this.isClient ? 'deps' : `deps_${envName}`);
         const rel = path.relative(config.root, this.depsDir);
         this.depsUrl = rel.startsWith('..') ? `/@fs/${normalizePath(this.depsDir).replace(/^\//, '')}` : '/' + normalizePath(rel);
     }
@@ -82,8 +115,35 @@ export class DepsOptimizer {
     /** Should this bare import be served pre-bundled? */
     shouldOptimize(spec: string, resolved: string): boolean {
         if (this.options.noDiscovery && !this.deps.has(spec)) return false;
+        return this.optimizable(spec, resolved);
+    }
+
+    private optimizable(spec: string, resolved: string): boolean {
         if (!/[\\/]node_modules[\\/]/.test(resolved) || !/\.(m|c)?jsx?$/.test(resolved)) return false;
         return !this.exclude(spec);
+    }
+
+    private _requireResolver?: (spec: string, dir: string) => string | null;
+
+    /** `require()` resolution under this environment's conditions. */
+    private requireResolver(): (spec: string, dir: string) => string | null {
+        if (!this._requireResolver) {
+            const r = this.config.environments[this.envName].resolve;
+            const resolver = createResolver({
+                conditionNames: [...r.conditions.filter((c: string) => c !== 'module' && c !== 'import'), 'require', 'default'],
+                mainFields: ['main'],
+                extensions: ['.js', '.cjs', '.json', '.node'],
+            });
+            this._requireResolver = (spec, dir) => resolver.resolve(dir, spec);
+        }
+        return this._requireResolver;
+    }
+
+    /** The optimized dependency an import lands on: by name, or by resolved file (aliased imports). */
+    lookup(spec: string, resolved: string): string | undefined {
+        if (this.deps.has(spec)) return spec;
+        for (const [name, file] of this.deps) if (file === resolved) return name;
+        return undefined;
     }
 
     isOptimizedFile(file: string): boolean {
@@ -99,7 +159,7 @@ export class DepsOptimizer {
 
     private async init(): Promise<void> {
         for (const spec of arraify(this.options.include ?? [])) this.add(spec);
-        for (const spec of this.scan()) this.add(spec);
+        if (!this.options.noDiscovery) for (const spec of this.scan()) this.add(spec);
         if (this.deps.size) await this.build();
     }
 
@@ -115,7 +175,7 @@ export class DepsOptimizer {
         }
         if (this.deps.has(spec) || builtinModules.includes(spec) || spec.startsWith('node:')) return false;
         const resolved = this.resolve(spec, fromDir);
-        if (!resolved || !this.shouldOptimize(spec, resolved)) return false;
+        if (!resolved || !this.optimizable(spec, resolved)) return false;
         this.deps.set(spec, resolved);
         return true;
     }
@@ -212,19 +272,20 @@ export class DepsOptimizer {
             virtual.set(id, [
                 `import * as __m from ${JSON.stringify(spec)};`,
                 'export default __m.default;',
-                ...cjsExportNames(file, source).map((n) => `export const ${n} = __m.${n};`),
+                ...cjsExportNames(file, source, this.isClient ? undefined : this.requireResolver()).map((n) => `export const ${n} = __m.${n};`),
             ].join('\n'));
             input[name] = id;
         }
         const hash = crypto.createHash('sha256').update(JSON.stringify([...this.deps.keys()].sort())).update(String(started)).digest('hex').slice(0, 8);
         const tmpDir = `${this.depsDir}_temp_${hash}`;
-        const resolve = this.config.environments.client.resolve;
+        const resolve = this.config.environments[this.envName].resolve;
+        const isClient = this.isClient;
         const builtins = new Set(builtinModules);
         await getBundler().bundle(
             {
                 input,
                 cwd: this.config.root,
-                platform: 'browser',
+                platform: isClient ? 'browser' : 'node',
                 quiet: true,
                 define: { 'process.env.NODE_ENV': JSON.stringify(this.config.isProduction ? 'production' : 'development'), global: 'globalThis' },
                 conditions: [...resolve.conditions, 'import', 'default'],
@@ -233,7 +294,7 @@ export class DepsOptimizer {
                     resolveId(id: string) {
                         if (virtual.has(id)) return id;
                         const bare = id.replace(/^node:/, '');
-                        if (builtins.has(bare) || builtins.has(bare.split('/')[0]!)) return BUILTIN + bare;
+                        if (builtins.has(bare) || builtins.has(bare.split('/')[0]!)) return isClient ? BUILTIN + bare : { id, external: true };
                         return null;
                     },
                     load(id: string) {

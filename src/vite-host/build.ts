@@ -187,12 +187,12 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
     const outDir = path.resolve(root, buildOptions.outDir);
     const write = buildOptions.write !== false;
 
-    const ro = buildOptions.rollupOptions ?? buildOptions.rolldownOptions ?? {};
+    // rolldown-vite's name and Rollup's: plugins that detect Rolldown set rolldownOptions.
+    const ro = { ...buildOptions.rollupOptions, ...buildOptions.rolldownOptions };
     let input = ssr && typeof buildOptions.ssr === 'string' ? buildOptions.ssr : ro.input;
     if (!input) {
         if (ssr) throw new Error('rollupOptions.input or build.ssr must be set for an SSR build');
         input = path.join(root, 'index.html');
-        throw new Error('[lunx] HTML entry builds through the Vite host are not supported yet; use lunx build without vite plugins.');
     }
 
     if (write && (buildOptions.emptyOutDir ?? outDir.startsWith(root + path.sep)) && fs.existsSync(outDir)) {

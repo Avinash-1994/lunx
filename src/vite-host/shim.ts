@@ -6,6 +6,7 @@
 
 import path from 'node:path';
 import { oxcTransform } from '../engines/toolkit.js';
+import { parse as parseCode } from '../engines/index.js';
 import { compileCss, isCssModule } from '../build/css.js';
 import { resolveConfig } from './config.js';
 import { createLogger } from './logger.js';
@@ -83,6 +84,32 @@ export async function preprocessCSS(code: string, filename: string, config: any)
         resolveUrl: (_from, url) => url,
     });
     return { code: result.code, modules: result.exports, deps: new Set(result.dependencies.filter((d) => d !== file)) };
+}
+
+/** rolldown-vite's Oxc `parse` / `parseSync`: { program, errors, comments }. */
+export function parseSync(filename: string, code: string, options?: { lang?: 'js' | 'jsx' | 'ts' | 'tsx' }): any {
+    return { program: parseCode(filename, code, options?.lang), errors: [], comments: [], module: { staticImports: [], staticExports: [], dynamicImports: [] } };
+}
+
+export async function parse(filename: string, code: string, options?: { lang?: 'js' | 'jsx' | 'ts' | 'tsx' }): Promise<any> {
+    return parseSync(filename, code, options);
+}
+
+/** Rollup's parseAst: an ESTree program. */
+export function parseAst(code: string, options?: { jsx?: boolean }): any {
+    return parseCode(options?.jsx ? 'module.jsx' : 'module.js', code, options?.jsx ? 'jsx' : 'js');
+}
+
+export async function parseAstAsync(code: string, options?: { jsx?: boolean }): Promise<any> {
+    return parseAst(code, options);
+}
+
+/** Vite 7 `runnerImport`: evaluate a (config) module with its imports bundled. */
+export async function runnerImport(moduleId: string, inlineConfig: any = {}): Promise<{ module: any; dependencies: string[] }> {
+    const { importBundled } = await import('../lib/load-module.js');
+    const root = inlineConfig.root ?? process.cwd();
+    const file = path.resolve(root, moduleId);
+    return { module: await importBundled(file, { root, fresh: true, namespace: true }), dependencies: [file] };
 }
 
 export async function formatPostcssSourceMap(map: any): Promise<any> {

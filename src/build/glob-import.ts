@@ -9,6 +9,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { parse } from '../engines/index.js';
+import { full } from '../lib/ast-walk.js';
 
 interface GlobOptions {
     eager?: boolean;
@@ -19,6 +21,24 @@ interface GlobOptions {
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.lunx']);
 
+/** Start offsets of `import.meta.glob(…)` calls, or null when the code cannot be parsed (TS/JSX before compiling). */
+function callOffsets(code: string, file: string): Set<number> | null {
+    let ast: any;
+    try {
+        ast = parse(file.endsWith('.js') || file.endsWith('.mjs') ? file : 'module.js', code, 'js');
+    } catch {
+        return null;
+    }
+    const offsets = new Set<number>();
+    full(ast, (node: any) => {
+        const callee = node.type === 'CallExpression' ? node.callee : null;
+        if (callee?.type === 'MemberExpression' && /^glob(Eager)?$/.test(callee.property?.name ?? '') && callee.object?.type === 'MetaProperty') {
+            offsets.add(callee.start);
+        }
+    });
+    return offsets;
+}
+
 export function transformGlobImports(code: string, file: string, root: string): string | null {
     if (!code.includes('import.meta.glob')) return null;
     const hoisted: string[] = [];
@@ -26,7 +46,10 @@ export function transformGlobImports(code: string, file: string, root: string): 
     let last = 0;
     let index = 0;
     const re = /import\.meta\.glob(Eager)?\s*(?:<[^>]*>)?\s*\(/g;
+    const calls = callOffsets(code, file);
     for (let m = re.exec(code); m; m = re.exec(code)) {
+        // Only real calls: not text in comments or strings (Waku documents the pattern in a comment).
+        if (calls && !calls.has(m.index)) continue;
         const argsStart = m.index + m[0].length;
         const argsEnd = findClosingParen(code, argsStart);
         if (argsEnd === -1) continue;

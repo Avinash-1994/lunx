@@ -10,7 +10,7 @@ import path from 'node:path';
 import { parse } from '../../engines/index.js';
 import { MagicString } from '../../engines/toolkit.js';
 import { full as walk } from '../../lib/ast-walk.js';
-import { transformGlobImports } from '../../build/glob-import.js';
+import { globImports } from './index.js';
 import {
     CLIENT_PUBLIC_PATH,
     cleanUrl,
@@ -64,6 +64,20 @@ function isHotMember(node: any, method: string): boolean {
     );
 }
 
+/** `define` entries for `import.meta.env.X` belong in the injected env object (as in Vite). */
+function userDefineEnv(config: any, env: any): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries({ ...config.define, ...env.config.define })) {
+        if (!key.startsWith('import.meta.env.')) continue;
+        try {
+            out[key.slice('import.meta.env.'.length)] = typeof value === 'string' ? JSON.parse(value) : value;
+        } catch {
+            out[key.slice('import.meta.env.'.length)] = value;
+        }
+    }
+    return out;
+}
+
 export function importAnalysisPlugin(config: any): any {
     return {
         name: 'vite:import-analysis',
@@ -79,8 +93,8 @@ export function importAnalysisPlugin(config: any): any {
             if (isClient && source.includes('process.env.NODE_ENV')) {
                 source = source.replace(/\bprocess\.env\.NODE_ENV\b(?!\s*=[^=])/g, JSON.stringify(process.env.NODE_ENV || (config.isProduction ? 'production' : 'development')));
             }
-            if (source.includes('import.meta.glob') && path.isAbsolute(file) && !/[\\/]node_modules[\\/]/.test(file)) {
-                source = transformGlobImports(source, file, config.root) ?? source;
+            if (source.includes('import.meta.glob')) {
+                source = globImports(source, importer, config.root) ?? source;
             }
             if (!/\bimport\b|\bexport\b/.test(source)) return source === original ? null : { code: source, map: null };
 
@@ -138,7 +152,8 @@ export function importAnalysisPlugin(config: any): any {
             const graph = env.moduleGraph;
 
             const normalize = async (spec: string): Promise<{ url: string; hmrUrl: string } | null> => {
-                if (isExternalUrl(spec) || isDataUrl(spec)) return null;
+                // file:// imports resolve like paths (plugin-rsc imports its runtime that way); only remote URLs stay.
+                if ((isExternalUrl(spec) && !spec.startsWith('file://')) || isDataUrl(spec)) return null;
                 if (spec === CLIENT_PUBLIC_PATH || spec.startsWith('/@vite/')) return { url: spec, hmrUrl: spec };
                 const resolved = await this.resolve(spec, importer, { skipSelf: false });
                 if (!resolved) {
@@ -150,12 +165,14 @@ export function importAnalysisPlugin(config: any): any {
                     throw err;
                 }
                 if (resolved.external) return null;
-                const optimizer = isClient ? env.depsOptimizer : undefined;
+                const optimizer = env.depsOptimizer;
                 // As Vite: imports inside node_modules never discover new dependencies (an excluded
                 // package's own imports stay raw so framework transforms still run on them).
-                const discoverable = !/[\\/]node_modules[\\/]/.test(file) || optimizer?.deps.has(spec);
-                if (optimizer && discoverable && /^[\w@]/.test(spec) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(spec, resolved.id)) {
-                    const url = await optimizer.urlFor(spec, resolved.id);
+                const known = optimizer?.lookup(spec, resolved.id);
+                const depName = known ?? spec;
+                const discoverable = !!known || !/[\\/]node_modules[\\/]/.test(file);
+                if (optimizer && discoverable && (known || /^[\w@]/.test(spec)) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(depName, resolved.id)) {
+                    const url = await optimizer.urlFor(depName, resolved.id);
                     return { url, hmrUrl: url.replace(/\?.*$/, '') };
                 }
                 let url = idToUrl(config, resolved.id);
@@ -188,7 +205,7 @@ export function importAnalysisPlugin(config: any): any {
             const mod = graph.getModuleById(importer);
             if (isClient) {
                 if (source.includes('import.meta.env')) {
-                    s.prepend(`import.meta.env = ${JSON.stringify({ ...config.env, SSR: false })};`);
+                    s.prepend(`import.meta.env = ${JSON.stringify({ ...config.env, ...userDefineEnv(config, env), SSR: false })};`);
                 }
                 if (source.includes('import.meta.hot')) {
                     const ownUrl = mod?.url ?? idToUrl(config, importer);

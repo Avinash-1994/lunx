@@ -206,6 +206,11 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
             client.moduleGraph.invalidateAll();
             ws.send({ type: 'full-reload' });
         });
+        // Server environments pre-bundle only what they list (Vite 6), e.g. React under react-server for RSC.
+        for (const [name, env] of Object.entries(environments)) {
+            if (name === 'client' || !config.environments[name]?.optimizeDeps?.include?.length) continue;
+            env.depsOptimizer = new DepsOptimizer(config, createEnvResolver(config, name), () => env.moduleGraph.invalidateAll(), name);
+        }
     }
 
     let serverClosed = false;
@@ -267,7 +272,7 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
             const local = `http://${host && host !== '0.0.0.0' ? host : 'localhost'}:${listenPort}${config.base}`;
             server.resolvedUrls = { local: [local], network: host === '0.0.0.0' ? [`http://0.0.0.0:${listenPort}${config.base}`] : [] };
             if (!isRestart && config.server.open) server.openBrowser();
-            client.depsOptimizer?.start();
+            for (const env of Object.values(environments)) env.depsOptimizer?.start();
             return server;
         },
         async close() {

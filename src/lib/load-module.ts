@@ -16,6 +16,8 @@ export interface LoadModuleOptions {
     stubs?: Record<string, string>;
     /** Evaluate a new instance even if this exact config was imported before (Vite loads its config fresh per build). */
     fresh?: boolean;
+    /** Return the module namespace instead of its default export. */
+    namespace?: boolean;
 }
 
 export async function importBundled(file: string, opts: LoadModuleOptions): Promise<any> {
@@ -56,7 +58,7 @@ export async function importBundled(file: string, opts: LoadModuleOptions): Prom
     await fs.writeFile(tmp, code);
     try {
         const mod = await import(pathToFileURL(tmp).href + (opts.fresh ? `?t=${Date.now()}${Math.random().toString(36).slice(2, 6)}` : ''));
-        return mod.default ?? mod;
+        return opts.namespace ? mod : mod.default ?? mod;
     } finally {
         await fs.rm(tmp, { force: true });
     }
