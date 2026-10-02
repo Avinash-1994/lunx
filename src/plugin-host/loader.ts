@@ -10,7 +10,7 @@ let installed = false;
 /** The `vite` package's main entry, however it was reached. */
 const VITE_ENTRY_RE = /\/node_modules\/vite\/dist\/node\/index\.js$/;
 
-export function installViteRedirect(): void {
+export function installRedirects(): void {
     if (installed) return;
     installed = true;
     // Child processes the framework starts get the same redirect.

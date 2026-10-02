@@ -81,7 +81,7 @@ export const rolldownBundler: Bundler = {
 
 /**
  * Rollup-compatible build with the engine's native options and output, for
- * the Vite-compatible host (src/vite-host), whose plugins expect Rollup's
+ * the plugin host (src/plugin-host), whose plugins expect Rollup's
  * full contract (chunk.modules, emitFile, viteMetadata…).
  */
 export async function rollupCompatibleBuild(inputOptions: Record<string, any>, outputOptions: Record<string, any>, write: boolean): Promise<{ output: any[] }> {

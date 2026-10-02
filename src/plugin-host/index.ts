@@ -1,12 +1,13 @@
 /**
- * lunx's Vite-compatible host: run Vite-based frameworks (SvelteKit, Nuxt,
- * Astro, React Router, Qwik City…) on lunx and Rolldown.
+ * lunx's plugin host: runs framework plugins written for the Vite plugin API
+ * (SvelteKit, Nuxt, Astro, React Router, Qwik City…) on lunx's own dev
+ * server and build. No Vite code runs: `import 'vite'` resolves to lunx.
  */
 
-import { installViteRedirect } from './loader.js';
+import { installRedirects } from './loader.js';
 
-export async function startViteHostDev(root: string, options: { port?: number; host?: string; mode?: string } = {}): Promise<any> {
-    installViteRedirect();
+export async function startHostDev(root: string, options: { port?: number; host?: string; mode?: string } = {}): Promise<any> {
+    installRedirects();
     // Frameworks read their own config from the working directory (SvelteKit's svelte.config.js), as under the Vite CLI.
     if (process.cwd() !== root) process.chdir(root);
     const { createServer } = await import('./server.js');
@@ -16,13 +17,13 @@ export async function startViteHostDev(root: string, options: { port?: number; h
         server: { ...(options.port ? { port: options.port } : {}), ...(options.host ? { host: options.host } : {}) },
     });
     await server.listen();
-    server.config.logger.info(`\n  lunx (vite host)  ready\n`);
+    server.config.logger.info(`\n  lunx  ready\n`);
     server.printUrls();
     return server;
 }
 
-export async function runViteHostBuild(root: string, options: { mode?: string } = {}): Promise<void> {
-    installViteRedirect();
+export async function runHostBuild(root: string, options: { mode?: string } = {}): Promise<void> {
+    installRedirects();
     if (process.cwd() !== root) process.chdir(root);
     // As the Vite CLI: a builder; without a `buildApp` it builds the one environment `vite build` would.
     const { createBuilder } = await import('./build.js');
@@ -35,7 +36,7 @@ export async function runViteHostBuild(root: string, options: { mode?: string } 
  * exactly as it does under Vite, on lunx + Rolldown.
  */
 export async function runFrameworkCli(root: string, bin: string, args: string[]): Promise<void> {
-    installViteRedirect();
+    installRedirects();
     if (process.cwd() !== root) process.chdir(root);
     const fs = await import('node:fs');
     const { pathToFileURL } = await import('node:url');

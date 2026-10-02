@@ -1,5 +1,5 @@
 /**
- * Lower-level engine pieces the Vite-compatible host (src/vite-host) builds
+ * Lower-level engine pieces the plugin host (src/plugin-host) builds
  * on: a module resolver, the SSR module transform and a MagicString. Like the
  * rest of src/engines, this is the only place that knows they come from
  * Rolldown/Oxc.

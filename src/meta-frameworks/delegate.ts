@@ -106,7 +106,7 @@ export async function delegate(meta: MetaFramework, command: Command, root: stri
 
 /**
  * Framework commands lunx runs itself through its Vite-compatible host
- * (src/vite-host): 'vite' means lunx acts as the Vite CLI; an argument list
+ * (src/plugin-host): 'vite' means lunx acts as the Vite CLI; an argument list
  * means the framework's own CLI runs in-process with `vite` pointing at lunx.
  */
 const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` | string[]>>> = {
@@ -133,15 +133,15 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
     if (!meta) return false;
     // Framework plugins read their config from the working directory and cache it, so be there before loading anything.
     if (process.cwd() !== root) process.chdir(root);
-    const native = process.env.LUNX_VITE_HOST !== '0' ? NATIVE[meta.name]?.[command] : undefined;
+    const native = process.env.LUNX_PLUGIN_HOST !== '0' ? NATIVE[meta.name]?.[command] : undefined;
     // Before anything imports a framework plugin, so its `import 'vite'` binds to lunx's host.
-    if (native) (await import('../vite-host/loader.js')).installViteRedirect();
+    if (native) (await import('../plugin-host/loader.js')).installRedirects();
     const { loadConfig } = await import('../config/index.js');
     const optOut = await loadConfig(root).then((c: any) => c?.delegate === false).catch(() => false);
     if (optOut) return false;
     if (native) {
-        console.log(`[lunx] ${meta.name} project → lunx vite host (Vite plugins on lunx + Rolldown; LUNX_VITE_HOST=0 to use ${meta.bin})`);
-        const host = await import('../vite-host/index.js');
+        console.log(`[lunx] ${meta.name} project → built by lunx`);
+        const host = await import('../plugin-host/index.js');
         if (Array.isArray(native)) {
             const bin = findBin(root, meta.bin);
             if (!bin) {
@@ -152,13 +152,13 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
             await host.runFrameworkCli(root, bin, [...native, ...(command !== 'build' && port && meta.port ? meta.port(port) : [])]);
         } else if (command === 'build') {
             try {
-                await host.runViteHostBuild(root);
+                await host.runHostBuild(root);
             } catch (err: any) {
                 console.error(`[lunx] build failed: ${err?.stack ?? err}`);
                 process.exitCode = 1;
             }
         } else {
-            await host.startViteHostDev(root, { port, mode: native.startsWith('vite:') ? native.slice(5) : undefined });
+            await host.startHostDev(root, { port, mode: native.startsWith('vite:') ? native.slice(5) : undefined });
         }
         return true;
     }
