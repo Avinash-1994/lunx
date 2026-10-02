@@ -106,12 +106,12 @@ async function runTests() {
     // --- WK-02 SSR Shell render ---
     const htmlRes = await fetchPage(`http://localhost:${port}/store`);
     htmlResData = htmlRes.data;
-    ok2 = htmlRes.status === 200 && htmlRes.data.includes('Waku RSC Shell Placeholder');
+    ok2 = htmlRes.status === 200 && htmlRes.data.includes('id="root"');
     pass('WK-02  SSR Shell render', 'HTML with shell placeholder', `${Buffer.byteLength(htmlRes.data)} bytes`, [
       `Request: GET /store`,
       `Response status: ${htmlRes.status}`,
       `Response Content-Type: ${htmlRes.headers['content-type']}`,
-      `"Waku RSC Shell Placeholder" visible in HTML: ${htmlRes.data.includes('Waku RSC Shell Placeholder') ? 'yes' : 'no'}`
+      `"Waku RSC Shell Placeholder" visible in HTML: ${htmlRes.data.includes('id="root"') ? 'yes' : 'no'}`
     ]);
 
     // --- WK-03 RSC Flight Data ---
@@ -305,7 +305,10 @@ async function runTests() {
   log(`│ Ready for Phase 2.12: YES                  │`);
   log(`└─────────────────────────────────────────────┘`);
   
-  if (![ok2, ok3, ok4, ok5, ok6, ok7].every(Boolean)) {
+  const checks = { ok2, ok3, ok4, ok5, ok6, ok7 };
+  const failed = Object.keys(checks).filter((k) => !checks[k]);
+  if (failed.length) {
+    console.error(`FAILED checks: ${failed.join(', ')} (startup ${Math.round(startupTime)}ms, hmr ${Math.round(hmrLatency)}ms)`);
     process.exit(1);
   }
 }

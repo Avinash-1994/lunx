@@ -290,7 +290,10 @@ async function runTests() {
   log(`│ Ready for Phase 2.11: YES                  │`);
   log(`└─────────────────────────────────────────────┘`);
   
-  if (![ok2, ok3, ok4, ok5, ok6, ok7].every(Boolean)) {
+  const checks = { ok2, ok3, ok4, ok5, ok6, ok7 };
+  const failed = Object.keys(checks).filter((k) => !checks[k]);
+  if (failed.length) {
+    console.error(`FAILED checks: ${failed.join(', ')} (startup ${Math.round(startupTime)}ms, hmr ${Math.round(hmrLatency)}ms)`);
     process.exit(1);
   }
 }
