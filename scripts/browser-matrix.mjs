@@ -17,7 +17,6 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -304,10 +303,8 @@ const FRAMEWORKS = [
         name: 'qwik',
         ecosystem: true,
         deps: { '@builder.io/qwik': '1.17.1' },
+        interactive: true,
         hmrFile: 'src/app.tsx',
-        // Known issue: in client-only render() mode the $-handlers render without
-        // listeners, so clicks do nothing. Rendering, HMR and build are covered.
-        knownIssue: 'client-side render(): event handlers not attached',
         config: `import { defineConfig } from 'lunx';\nexport default defineConfig({ framework: 'qwik' });\n`,
         files: {
             'index.html': html('src/main.tsx'),
@@ -415,34 +412,6 @@ function startProcess(commandArgs, cwd, readyPattern, timeoutMs = 90_000) {
             }
         });
     });
-}
-
-/** Static file server for the production `dist/`, so `build` output is checked too. */
-function serveDist(dir, port) {
-    const types = {
-        '.html': 'text/html',
-        '.js': 'text/javascript',
-        '.mjs': 'text/javascript',
-        '.css': 'text/css',
-        '.json': 'application/json',
-        '.svg': 'image/svg+xml',
-    };
-    const server = http.createServer((req, res) => {
-        const url = decodeURIComponent((req.url || '/').split('?')[0]);
-        let file = path.join(dir, url === '/' ? 'index.html' : url);
-        if (!file.startsWith(dir)) {
-            res.writeHead(403).end();
-            return;
-        }
-        if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(dir, 'index.html');
-        if (!fs.existsSync(file)) {
-            res.writeHead(404).end('not found');
-            return;
-        }
-        res.writeHead(200, { 'content-type': types[path.extname(file)] ?? 'application/octet-stream' });
-        fs.createReadStream(file).pipe(res);
-    });
-    return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
 }
 
 function run(commandArgs, cwd, timeoutMs = 180_000) {
@@ -589,7 +558,8 @@ for (const framework of selected) {
         // 7. the built output renders the same thing
         if (built) {
             const previewPort = await freePort();
-            distServer = await serveDist(distDir, previewPort);
+            // The real `lunx preview`, so its static serving is covered too.
+            distServer = await startProcess([...tsxLoader, CLI, 'preview', '--root', root, '--port', String(previewPort)], REPO, 'Local:');
             const previewErrors = [];
             const previewPage = await browser.newPage();
             previewPage.on('pageerror', (err) => previewErrors.push(err.message.slice(0, 160)));
@@ -627,7 +597,7 @@ for (const framework of selected) {
         }
     } finally {
         devProcess?.child.kill();
-        distServer?.close();
+        distServer?.child.kill();
         await page.close();
         if (!keepTemp) await fsp.rm(root, { recursive: true, force: true }).catch(() => {});
     }

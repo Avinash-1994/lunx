@@ -16,7 +16,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import type { BuildConfig } from '../config/index.js';
-import { getBundler, type OutputItem } from '../engines/index.js';
+import { getBundler, parse, type OutputItem } from '../engines/index.js';
 import { transformGlobImports } from './glob-import.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
@@ -240,6 +240,28 @@ export async function productionBuild(config: BuildConfig, framework: string): P
                     : emitAsset(this, file, data);
                 return { code: `export default ${JSON.stringify(url)};`, moduleType: 'js' };
               },
+            },
+        },
+        {
+            // A dependency file with no imports, exports or CommonJS at all
+            // is a plain script (qwikloader, polyfills) that only exists for
+            // its side effects; its package's `sideEffects: false` must not
+            // tree-shake it away.
+            name: 'lunx:script-side-effects',
+            transform: {
+                filter: { id: /node_modules.*\.[cm]?js$/ },
+                handler(code: string, id: string) {
+                    if (/\b(module|exports|require)\b/.test(code)) return null;
+                    if (/\b(import|export)\b/.test(code)) {
+                        // `import(` alone (lazy chunks) still leaves a script.
+                        try {
+                            if (parse(id, code).body.some((n: any) => /^(Import|Export)/.test(n.type))) return null;
+                        } catch {
+                            return null;
+                        }
+                    }
+                    return { code, moduleSideEffects: true };
+                },
             },
         },
         {
