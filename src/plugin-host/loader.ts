@@ -1,6 +1,6 @@
 /**
- * Point the build tools frameworks import (`vite`, `rollup`, Rollup's
- * resolve/commonjs/json/terser plugins) at lunx's own implementations for the
+ * Point the build tools frameworks import (`vite`, `vite-node`, `rollup`,
+ * Rollup's resolve/commonjs/json/terser plugins) at lunx's own implementations for the
  * rest of the process, so none of their code runs.
  */
 
@@ -16,6 +16,9 @@ const REDIRECTS: Array<{ specifier: string; path: RegExp; to: string }> = [
     { specifier: '@rollup/plugin-commonjs', path: /\/node_modules\/@rollup\/plugin-commonjs\/dist\/(es|cjs)\/index\.(m?js)$/, to: './shims/plugin-commonjs.js' },
     { specifier: '@rollup/plugin-json', path: /\/node_modules\/@rollup\/plugin-json\/dist\/(es|cjs)\/index\.(m?js)$/, to: './shims/plugin-json.js' },
     { specifier: '@rollup/plugin-terser', path: /\/node_modules\/@rollup\/plugin-terser\/dist\/(es|cjs)\/index\.(m?js)$/, to: './shims/plugin-terser.js' },
+    { specifier: 'vite-node/server', path: /\/node_modules\/vite-node\/dist\/server\.(m?js|cjs)$/, to: './shims/vite-node-server.js' },
+    { specifier: 'vite-node/client', path: /\/node_modules\/vite-node\/dist\/client\.(m?js|cjs)$/, to: './shims/vite-node-client.js' },
+    { specifier: 'vite-node/source-map', path: /\/node_modules\/vite-node\/dist\/source-map\.(m?js|cjs)$/, to: './shims/vite-node-source-map.js' },
 ];
 
 export function installRedirects(): void {
