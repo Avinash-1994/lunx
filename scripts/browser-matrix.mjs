@@ -281,6 +281,26 @@ const FRAMEWORKS = [
         interactive: true,
     },
     {
+        // The Angular CLI layout: template and styles in their own files.
+        name: 'angular-files',
+        ecosystem: true,
+        deps: {
+            '@angular/core': '20.3.4', '@angular/common': '20.3.4', '@angular/compiler': '20.3.4',
+            '@angular/platform-browser': '20.3.4', rxjs: '7.8.2', tslib: '2.8.1', typescript: '5.9.3',
+        },
+        hmrFile: 'src/app/app.component.html',
+        interactive: true,
+        config: `import { defineConfig } from 'lunx';\nexport default defineConfig({ framework: 'angular' });\n`,
+        files: {
+            'index.html': `<!DOCTYPE html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><title>lunx matrix</title></head>\n  <body>\n    <div id="root"><app-root></app-root></div>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n`,
+            'src/main.ts': `import '@angular/compiler';\nimport { provideZonelessChangeDetection } from '@angular/core';\nimport { bootstrapApplication } from '@angular/platform-browser';\nimport { AppComponent } from './app/app.component';\nbootstrapApplication(AppComponent, { providers: [provideZonelessChangeDetection()] });\n`,
+            'src/app/app.component.ts': `import { Component, signal } from '@angular/core';\n@Component({\n  selector: 'app-root',\n  templateUrl: './app.component.html',\n  styleUrl: './app.component.css',\n})\nexport class AppComponent {\n  n = signal(0);\n}\n`,
+            'src/app/app.component.html': `<h1 class="marker">${MARKER_BEFORE}</h1><button id="inc" (click)="n.set(n() + 1)">{{ n() }}</button>\n`,
+            'src/app/app.component.css': `.marker { color: rgb(0, 187, 119); font-weight: 700; }\n`,
+            'tsconfig.json': JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ES2022', experimentalDecorators: true, useDefineForClassFields: false, strict: false } }, null, 2),
+        },
+    },
+    {
         name: 'qwik',
         ecosystem: true,
         deps: { '@builder.io/qwik': '1.17.1' },

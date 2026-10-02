@@ -82,7 +82,10 @@ export class UniversalTransformer {
         // Advanced Deterministic Cache (Phase F1)
         // Ensure that identical inputs ALWAYS produce identical outputs
         // This is critical for Tier 2/3 frameworks to be "production ready"
-        if (this.cacheEnabled) {
+        // A component that inlines templateUrl/styleUrl depends on other files;
+        // its own text alone cannot key the cache.
+        const pullsInFiles = /\b(templateUrl|styleUrls?)\s*:/.test(code);
+        if (this.cacheEnabled && !pullsInFiles) {
             const h = canonicalHash(code + frameworkToUse + (isDev ? 'dev' : 'prod')).substring(0, 16);
             const cacheKey = `${filePath}:${h}`;
             const cached = this.transformCache.get(cacheKey);
@@ -174,7 +177,7 @@ export class UniversalTransformer {
         }
 
         // Cache the result (Advanced Determinism)
-        if (this.cacheEnabled) {
+        if (this.cacheEnabled && !pullsInFiles) {
             const h = canonicalHash(code + frameworkToUse + (isDev ? 'dev' : 'prod')).substring(0, 16);
             const cacheKey = `${filePath}:${h}`;
             this.transformCache.set(cacheKey, result);
@@ -466,6 +469,32 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
     /**
      * Angular Transformer - Works with ALL Angular versions (2-17+)
      */
+    /** templateUrl / styleUrl / styleUrls → template / styles, read from disk. */
+    private async inlineAngularResources(code: string, filePath: string, isDev: boolean): Promise<string> {
+        if (!/\b(templateUrl|styleUrls?)\s*:/.test(code)) return code;
+        const dir = path.dirname(filePath);
+        const { compileCss } = await import('../build/css.js');
+        const readCss = async (rel: string) => {
+            const file = path.resolve(dir, rel);
+            const out = await compileCss({ root: this.root, file, source: await fs.readFile(file, 'utf-8'), modules: false, minify: !isDev, resolveUrl: (_from, url) => url });
+            return out.code;
+        };
+        let out = code;
+        for (const m of [...out.matchAll(/\btemplateUrl\s*:\s*(['"`])([^'"`]+)\1/g)]) {
+            const html = await fs.readFile(path.resolve(dir, m[2]!), 'utf-8');
+            out = out.replace(m[0], `template: ${JSON.stringify(html)}`);
+        }
+        for (const m of [...out.matchAll(/\bstyleUrl\s*:\s*(['"`])([^'"`]+)\1/g)]) {
+            out = out.replace(m[0], `styles: [${JSON.stringify(await readCss(m[2]!))}]`);
+        }
+        for (const m of [...out.matchAll(/\bstyleUrls\s*:\s*\[([^\]]*)\]/g)]) {
+            const files = [...m[1]!.matchAll(/(['"`])([^'"`]+)\1/g)].map((x) => x[2]!);
+            const styles = await Promise.all(files.map(readCss));
+            out = out.replace(m[0], `styles: [${styles.map((c) => JSON.stringify(c)).join(', ')}]`);
+        }
+        return out;
+    }
+
     private async transformAngular(code: string, filePath: string, isDev: boolean): Promise<TransformResult> {
         try {
             const ngVersion = await this.getPackageVersion('@angular/core');
@@ -490,6 +519,10 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
                         useDefineForClassFields: majorVersion >= 14 ? false : true,
                     };
 
+                    // Angular CLI keeps templates and styles in their own files.
+                    // The runtime (JIT) compiler would fetch them over HTTP, so
+                    // inline them now, as the Angular CLI and Analog do.
+                    code = await this.inlineAngularResources(code, filePath, isDev);
                     const result = ts.transpileModule(code, {
                         compilerOptions,
                         fileName: filePath
