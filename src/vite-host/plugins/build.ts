@@ -33,6 +33,7 @@ export class BuildState {
     /** module id → asset placeholder ids it references */
     readonly moduleAssets = new Map<string, Set<string>>();
     readonly styles = new Map<string, string>();
+    readonly cssModules = new Map<string, Record<string, string>>();
     readonly chunkMeta = new Map<string, ViteMetadata>();
     globalCss = '';
 
@@ -126,22 +127,32 @@ export function cssBuildPlugins(getState: StateLookup): any[] {
                         },
                     });
                     for (const dep of compiled.dependencies) if (dep !== file && path.isAbsolute(dep)) this.addWatchFile(dep);
-                    const modules = compiled.exports;
-                    const modulesCode = modules
-                        ? [
-                              `const __modules__ = ${JSON.stringify(modules)};`,
-                              'export default __modules__;',
-                              ...Object.keys(modules).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k)).map((k) => `export const ${k} = __modules__[${JSON.stringify(k)}];`),
-                          ].join('\n')
-                        : '';
-                    if (INLINE_RE.test(id)) return { code: `export default ${JSON.stringify(compiled.code)};`, map: null, moduleType: 'js' };
-                    state.styles.set(id, compiled.code);
-                    return { code: modulesCode || 'export default "";', map: null, moduleType: 'js', moduleSideEffects: 'no-treeshake' };
+                    if (compiled.exports) state.cssModules.set(id, compiled.exports);
+                    // CSS stays CSS until vite:css-post, so plugins in between (Vue's scoped styles) see CSS.
+                    return { code: compiled.code, map: null };
                 },
             },
         },
         {
             name: 'vite:css-post',
+            transform: {
+                filter: { id: /\.(css|less|sass|scss|styl|stylus|pcss|postcss|sss)(?:$|\?)/ },
+                handler(this: any, css: string, id: string) {
+                    if (!isCSSRequest(id) || SKIP_RE.test(id)) return null;
+                    const state = getState(this);
+                    if (INLINE_RE.test(id)) return { code: `export default ${JSON.stringify(css)};`, map: null, moduleType: 'js' };
+                    state.styles.set(id, css);
+                    const modules = state.cssModules.get(id);
+                    const code = modules
+                        ? [
+                              `const __modules__ = ${JSON.stringify(modules)};`,
+                              'export default __modules__;',
+                              ...Object.keys(modules).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k)).map((k) => `export const ${k} = __modules__[${JSON.stringify(k)}];`),
+                          ].join('\n')
+                        : 'export default "";';
+                    return { code, map: null, moduleType: 'js', moduleSideEffects: 'no-treeshake' };
+                },
+            },
             // `order: 'pre'`: frameworks read chunk.viteMetadata in their own renderChunk/generateBundle
             // (Astro's CSS links), and Rolldown's generateBundle chunks are new objects.
             renderChunk: { order: 'pre', async handler(this: any, code: string, chunk: any) {

@@ -116,6 +116,7 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
     'Qwik City': { dev: 'vite:ssr', build: 'vite' },
     'TanStack Start': { dev: 'vite', build: 'vite' },
     Astro: { dev: ['dev'], build: ['build'] },
+    VitePress: { dev: ['dev'], build: ['build'] },
 };
 
 /**

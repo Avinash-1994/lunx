@@ -54,6 +54,36 @@ function decorateArgs(hook: string, args: any[], decorate: (chunk: any) => void)
     else if (hook === 'generateBundle' || hook === 'writeBundle') for (const item of Object.values(args[1] ?? {})) decorate(item);
 }
 
+/**
+ * Rollup lets generateBundle add files by assigning into `bundle` (VitePress's
+ * .lean.js pages); Rolldown ignores that. Collect the assignments and emit them.
+ */
+async function generateBundleWithAssignments(ctx: any, handler: (...a: any[]) => any, environment: any, args: any[]): Promise<void> {
+    const bundle = args[1];
+    const added = new Map<string, any>();
+    const proxy = new Proxy(bundle, {
+        get: (target, prop) => (typeof prop === 'string' && added.has(prop) ? added.get(prop) : Reflect.get(target, prop)),
+        set: (target, prop, value) => {
+            if (typeof prop === 'string' && !(prop in target)) {
+                added.set(prop, value);
+                return true;
+            }
+            return Reflect.set(target, prop, value);
+        },
+        has: (target, prop) => (typeof prop === 'string' && added.has(prop)) || Reflect.has(target, prop),
+        deleteProperty: (target, prop) => (typeof prop === 'string' && added.delete(prop)) || Reflect.deleteProperty(target, prop),
+        ownKeys: (target) => [...Reflect.ownKeys(target), ...added.keys()],
+        getOwnPropertyDescriptor: (target, prop) =>
+            typeof prop === 'string' && added.has(prop) ? { value: added.get(prop), enumerable: true, configurable: true, writable: true } : Reflect.getOwnPropertyDescriptor(target, prop),
+    });
+    await handler.apply(contextWithEnvironment(ctx, environment), [args[0], proxy, ...args.slice(2)]);
+    for (const [name, item] of added) {
+        const source = item?.code ?? item?.source;
+        if (source == null) continue;
+        ctx.emitFile({ type: 'asset', fileName: item.fileName ?? name, source });
+    }
+}
+
 function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => void = () => {}): any {
     const out: any = { name: plugin.name };
     for (const key of Object.keys(plugin)) {
@@ -66,6 +96,7 @@ function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => voi
         }
         const wrapped = function (this: any, ...args: any[]) {
             decorateArgs(key, args, decorate);
+            if (key === 'generateBundle') return generateBundleWithAssignments(this, handler, environment, args);
             const result = handler.apply(contextWithEnvironment(this, environment), args);
             if (key !== 'load' && key !== 'transform') return result;
             const id = key === 'load' ? args[0] : args[1];

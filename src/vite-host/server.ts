@@ -422,7 +422,9 @@ export async function createServer(inlineConfig: InlineConfig = {}): Promise<any
     const spa = config.appType === 'spa' || config.appType === 'mpa';
     if (spa) {
         middlewares.use(function viteHtmlFallbackMiddleware(req: any, _res: any, next: any) {
-            if ((req.method !== 'GET' && req.method !== 'HEAD') || !String(req.headers.accept ?? '').includes('text/html')) return next();
+            // As Vite: a missing Accept, text/html or */* all count as a page request.
+            const accept = req.headers.accept;
+            if ((req.method !== 'GET' && req.method !== 'HEAD') || !(accept === undefined || accept === '' || accept.includes('text/html') || accept.includes('*/*'))) return next();
             const pathname = decodeURIComponent(cleanUrl(req.url));
             if (pathname.endsWith('.html') && isFile(path.join(config.root, pathname))) return next();
             const asDir = path.join(config.root, pathname, 'index.html');
