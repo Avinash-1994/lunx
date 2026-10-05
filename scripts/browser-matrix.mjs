@@ -67,8 +67,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.ts', 'app'),
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport { render } from './app';\nrender(document.getElementById('app')!);\n`,
-            'src/app.ts': `export function render(el: HTMLElement) {\n  el.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1>';\n}\n`,
+            'src/app.ts': `export function render(el: HTMLElement) {\n  el.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1><button id="inc">0</button>';\n  const button = el.querySelector<HTMLButtonElement>('#inc')!;\n  let n: number = 0;\n  button.addEventListener('click', () => { button.textContent = String(++n); });\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'react',
@@ -186,8 +187,9 @@ const FRAMEWORKS = [
         files: {
             'index.html': html('src/main.ts'),
             'src/index.css': SHARED_CSS,
-            'src/main.ts': `import './index.css';\nimport $ from 'jquery';\n$('#root').html('<h1 class="marker">${MARKER_BEFORE}</h1>');\n`,
+            'src/main.ts': `import './index.css';\nimport $ from 'jquery';\n$('#root').html('<h1 class="marker">${MARKER_BEFORE}</h1><button id="inc">0</button>');\n$('#inc').on('click', function () { $(this).text(Number($(this).text()) + 1); });\n`,
         },
+        interactive: true,
     },
     {
         name: 'three',
@@ -197,8 +199,9 @@ const FRAMEWORKS = [
         files: {
             'index.html': html('src/main.ts'),
             'src/index.css': SHARED_CSS,
-            'src/main.ts': `import './index.css';\nimport { Vector3, MathUtils } from 'three';\nconst v = new Vector3(1, 2, 2);\ndocument.getElementById('root')!.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1><p>' + v.length() + ' ' + MathUtils.clamp(5, 0, 1) + '</p>';\n`,
+            'src/main.ts': `import './index.css';\nimport { Vector3, MathUtils } from 'three';\nconst v = new Vector3(1, 2, 2);\ndocument.getElementById('root')!.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1><p>' + v.length() + ' ' + MathUtils.clamp(5, 0, 1) + '</p><button id="inc">0</button>';\nconst clicks = new Vector3();\nconst button = document.getElementById('inc')!;\nbutton.addEventListener('click', () => { clicks.addScalar(1); button.textContent = String(clicks.x); });\n`,
         },
+        interactive: true,
     },
     {
         name: 'react-tailwind',
@@ -210,8 +213,9 @@ const FRAMEWORKS = [
             'postcss.config.mjs': `export default { plugins: { '@tailwindcss/postcss': { base: import.meta.dirname } } };\n`,
             'src/index.css': `@import "tailwindcss";\n`,
             'src/main.tsx': `import './index.css';\nimport { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
-            'src/App.tsx': `export default function App() {\n  return <h1 className="marker text-[rgb(0,187,119)] font-bold">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/App.tsx': `import { useState } from 'react';\nexport default function App() {\n  const [n, setN] = useState(0);\n  return <><h1 className="marker text-[rgb(0,187,119)] font-bold">${MARKER_BEFORE}</h1><button id="inc" className="px-2 rounded" onClick={() => setN(n + 1)}>{n}</button></>;\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'react-styled',
@@ -221,8 +225,9 @@ const FRAMEWORKS = [
         files: {
             'index.html': html('src/main.tsx'),
             'src/main.tsx': `import { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);\n`,
-            'src/App.tsx': `import styled from 'styled-components';\nconst Title = styled.h1\`\n  color: rgb(0, 187, 119);\n  font-weight: 700;\n\`;\nexport default function App() {\n  return <Title className="marker">${MARKER_BEFORE}</Title>;\n}\n`,
+            'src/App.tsx': `import { useState } from 'react';\nimport styled from 'styled-components';\nconst Title = styled.h1\`\n  color: rgb(0, 187, 119);\n  font-weight: 700;\n\`;\nconst Button = styled.button\`\n  padding: 4px;\n\`;\nexport default function App() {\n  const [n, setN] = useState(0);\n  return <><Title className="marker">${MARKER_BEFORE}</Title><Button id="inc" onClick={() => setN(n + 1)}>{n}</Button></>;\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'react-router',
@@ -233,8 +238,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.tsx'),
             'src/index.css': SHARED_CSS,
             'src/main.tsx': `import './index.css';\nimport { createRoot } from 'react-dom/client';\nimport { createBrowserRouter, RouterProvider } from 'react-router';\nimport Home from './Home';\nconst router = createBrowserRouter([{ path: '/', element: <Home /> }]);\ncreateRoot(document.getElementById('root')!).render(<RouterProvider router={router} />);\n`,
-            'src/Home.tsx': `export default function Home() {\n  return <h1 className="marker">${MARKER_BEFORE}</h1>;\n}\n`,
+            'src/Home.tsx': `import { useState } from 'react';\nexport default function Home() {\n  const [n, setN] = useState(0);\n  return <><h1 className="marker">${MARKER_BEFORE}</h1><button id="inc" onClick={() => setN(n + 1)}>{n}</button></>;\n}\n`,
         },
+        interactive: true,
     },
     {
         name: 'vue-router',
@@ -246,8 +252,9 @@ const FRAMEWORKS = [
             'src/index.css': SHARED_CSS,
             'src/main.ts': `import './index.css';\nimport { createApp } from 'vue';\nimport { createRouter, createWebHistory } from 'vue-router';\nimport App from './App.vue';\nimport Home from './Home.vue';\nconst router = createRouter({ history: createWebHistory(), routes: [{ path: '/', component: Home }] });\ncreateApp(App).use(router).mount('#root');\n`,
             'src/App.vue': `<template>\n  <RouterView />\n</template>\n`,
-            'src/Home.vue': `<script setup lang="ts">\nconst text: string = '${MARKER_BEFORE}';\n</script>\n<template>\n  <h1 class="marker">{{ text }}</h1>\n</template>\n`,
+            'src/Home.vue': `<script setup lang="ts">\nimport { ref } from 'vue';\nconst text: string = '${MARKER_BEFORE}';\nconst n = ref(0);\n</script>\n<template>\n  <h1 class="marker">{{ text }}</h1>\n  <button id="inc" @click="n++">{{ n }}</button>\n</template>\n`,
         },
+        interactive: true,
     },
     {
         name: 'sass',
@@ -258,8 +265,9 @@ const FRAMEWORKS = [
             'index.html': html('src/main.ts', 'app'),
             'src/_theme.scss': `$brand: rgb(0, 187, 119);\n`,
             'src/styles.scss': `@use 'theme';\n#app {\n  .marker { color: theme.$brand; font-weight: 700; }\n}\n`,
-            'src/main.ts': `import './styles.scss';\ndocument.getElementById('app')!.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1>';\n`,
+            'src/main.ts': `import './styles.scss';\ndocument.getElementById('app')!.innerHTML = '<h1 class="marker">${MARKER_BEFORE}</h1><button id="inc">0</button>';\nlet n = 0;\nconst button = document.getElementById('inc')!;\nbutton.addEventListener('click', () => { button.textContent = String(++n); });\n`,
         },
+        interactive: true,
     },
     {
         name: 'angular',
@@ -631,7 +639,13 @@ console.log(`\n${passed}/${total} checks passed (${failed} failed, ${total - pas
 
 const reportPath = path.join(REPO, 'reports', 'BROWSER_MATRIX.json');
 await fsp.mkdir(path.dirname(reportPath), { recursive: true });
-await fsp.writeFile(reportPath, JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2));
+// A partial run (--only) updates its frameworks' rows and keeps the others.
+let report = results;
+if (only) {
+    const previous = await fsp.readFile(reportPath, 'utf8').then((t) => JSON.parse(t).results).catch(() => []);
+    report = FRAMEWORKS.map((f) => results.find((r) => r.framework === f.name) ?? previous.find((r) => r.framework === f.name)).filter(Boolean);
+}
+await fsp.writeFile(reportPath, JSON.stringify({ generatedAt: new Date().toISOString(), results: report }, null, 2));
 console.log(`report: ${path.relative(REPO, reportPath)}`);
 
 process.exit(failed === 0 ? 0 : 1);
