@@ -107,6 +107,29 @@ export class DepsOptimizer {
         this.depsUrl = rel.startsWith('..') ? `/@fs/${normalizePath(this.depsDir).replace(/^\//, '')}` : '/' + normalizePath(rel);
     }
 
+    /**
+     * `optimizeDeps.rolldownOptions.plugins` (rolldown-vite's name; `rollupOptions` too): e.g.
+     * Analog's Angular linker, which must run on Angular's partially compiled packages.
+     */
+    private userPlugins(): any[] {
+        const plugins = [...arraify(this.options.rolldownOptions?.plugins ?? []), ...arraify(this.options.rollupOptions?.plugins ?? [])].flat(Infinity).filter(Boolean);
+        return plugins.map((plugin: any) => {
+            if (!plugin.load) return plugin;
+            // esbuild-style `loader` in a load result is Rolldown's `moduleType`.
+            const hook = plugin.load;
+            const handler = typeof hook === 'function' ? hook : hook.handler;
+            const wrapped = async function (this: any, ...args: any[]) {
+                const result = await handler.apply(this, args);
+                if (result && typeof result === 'object' && 'loader' in result && !('moduleType' in result)) {
+                    const { loader, ...rest } = result;
+                    return { ...rest, moduleType: loader };
+                }
+                return result;
+            };
+            return { ...plugin, load: typeof hook === 'function' ? wrapped : { ...hook, handler: wrapped } };
+        });
+    }
+
     private exclude(spec: string): boolean {
         const pkg = getPackageName(spec);
         return arraify(this.options.exclude ?? []).some((e: string) => e === pkg || e === spec || spec.startsWith(e + '/'));
@@ -324,7 +347,7 @@ export class DepsOptimizer {
                         const name = JSON.stringify(id.slice(BUILTIN.length));
                         return { code: `module.exports = Object.create(new Proxy({}, { get(_, k) { if (typeof k !== "symbol" && k !== "__esModule" && k !== "__proto__" && k !== "constructor" && k !== "then") console.warn("Module " + ${name} + " has been externalized for browser compatibility. Cannot access " + ${name} + "." + String(k) + " in client code."); } }));`, moduleType: 'js' };
                     },
-                }],
+                }, ...this.userPlugins()],
             },
             { dir: tmpDir, format: 'es', entryFileNames: '[name].js', chunkFileNames: 'chunk-[hash].js', sourcemap: false },
             true,

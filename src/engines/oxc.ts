@@ -7,8 +7,9 @@
  */
 
 import path from 'node:path';
+import { requireEsm } from './require-esm.js';
 
-const oxc: any = await import('rolldown/experimental');
+const oxc: any = requireEsm('rolldown/experimental');
 
 import type { CompileOptions, CompileResult, Compiler, Lang } from './types.js';
 

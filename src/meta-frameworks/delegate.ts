@@ -120,6 +120,9 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
     Waku: { dev: ['dev'], build: ['build'] },
     Nuxt: { dev: ['dev'], build: ['build'] },
     SolidStart: { dev: ['dev'], build: ['build'] },
+    'Marko Run': { dev: ['dev'], build: ['build'] },
+    Remix: { dev: ['vite:dev'], build: ['vite:build'] },
+    Analog: { dev: 'vite', build: 'vite' },
 };
 
 /**

@@ -141,8 +141,11 @@ export class EnvironmentModuleGraph {
         return noLongerImported;
     }
 
-    async ensureEntryFromUrl(rawUrl: string, setIsSelfAccepting = true): Promise<EnvironmentModuleNode> {
-        const [url, resolvedId, meta] = await this.resolveUrl(rawUrl);
+    /** With `resolved` (import analysis already resolved it), the url maps to that id without resolving again. */
+    async ensureEntryFromUrl(rawUrl: string, setIsSelfAccepting = true, resolved?: { id: string; meta?: any }): Promise<EnvironmentModuleNode> {
+        const [url, resolvedId, meta] = resolved
+            ? [unwrapId(removeImportQuery(removeTimestampQuery(rawUrl))), resolved.id, resolved.meta]
+            : await this.resolveUrl(rawUrl);
         let mod = this.idToModuleMap.get(resolvedId);
         if (!mod) {
             mod = new EnvironmentModuleNode(url, this.environment, setIsSelfAccepting);

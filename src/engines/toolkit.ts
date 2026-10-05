@@ -5,8 +5,10 @@
  * Rolldown/Oxc.
  */
 
-const experimental: any = await import('rolldown/experimental');
-const rolldown: any = await import('rolldown');
+import { requireEsm } from './require-esm.js';
+
+const experimental: any = requireEsm('rolldown/experimental');
+const rolldown: any = requireEsm('rolldown');
 
 export interface ResolveOptions {
     conditionNames?: string[];

@@ -88,12 +88,16 @@ export function buildHtmlPlugin(config: any, getState: StateLookup): any {
                 const relative = normalizePath(path.relative(config.root, file));
                 const html = await applyHooks(hooksOf(config, 'pre'), code, { path: '/' + relative, filename: file });
                 const imports: string[] = [];
+                // `/x` is root-relative, unless it is already a path inside the
+                // root (plugins write virtual entries' absolute paths into pages).
+                const fromHtml = (src: string) =>
+                    !src.startsWith('/') ? path.resolve(path.dirname(file), src) : src.startsWith(normalizePath(config.root) + '/') ? src : path.join(config.root, src);
                 let index = 0;
                 let stripped = html.replace(SCRIPT_RE, (match, attrs: string, body: string) => {
                     if (ATTR(attrs, 'type') !== 'module') return match;
                     const src = ATTR(attrs, 'src');
                     if (src && /^(https?:)?\/\//.test(src)) return match;
-                    if (src) imports.push(src.startsWith('/') ? path.join(config.root, src) : path.resolve(path.dirname(file), src));
+                    if (src) imports.push(fromHtml(src));
                     else {
                         const proxyId = `${file}${PROXY}${index++}.js`;
                         inlineScripts.set(proxyId, body);
@@ -104,7 +108,7 @@ export function buildHtmlPlugin(config: any, getState: StateLookup): any {
                 stripped = stripped.replace(STYLESHEET_RE, (match, attrs: string) => {
                     const href = ATTR(attrs, 'href');
                     if (!href || /^(https?:)?\/\//.test(href) || (config.publicDir && href.startsWith('/') && !href.startsWith('/src/'))) return match;
-                    imports.push(href.startsWith('/') ? path.join(config.root, href) : path.resolve(path.dirname(file), href));
+                    imports.push(fromHtml(href));
                     return '';
                 });
                 pages.set(file, stripped);

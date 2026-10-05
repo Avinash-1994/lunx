@@ -7,7 +7,9 @@
  * Rollup code runs.
  */
 
-const engine: any = await import('rolldown');
+import { requireEsm } from './require-esm.js';
+
+const engine: any = requireEsm('rolldown');
 
 export const VERSION = '4.40.0';
 

@@ -88,7 +88,7 @@ function createWsHotChannel(config: ResolvedConfig): HotChannel & { attach(serve
             socket.send(JSON.stringify(payload));
         },
     });
-    wss.on('connection', (socket) => {
+    wss.on('connection', (socket, req) => {
         const client = wrapClient(socket);
         clients.add(client);
         socket.send(JSON.stringify({ type: 'connected' }));
@@ -103,7 +103,8 @@ function createWsHotChannel(config: ResolvedConfig): HotChannel & { attach(serve
             for (const fn of listeners.get(parsed.event) ?? []) fn(parsed.data, client);
         });
         socket.on('close', () => clients.delete(client));
-        for (const fn of listeners.get('connection') ?? []) fn(client);
+        // As Vite's `ws.on('connection')`: the raw socket and the upgrade request.
+        for (const fn of listeners.get('connection') ?? []) fn(socket, req);
     });
     return {
         clients,

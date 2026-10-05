@@ -1,6 +1,6 @@
 /**
  * Meta-framework check: real Next.js, Nuxt, Astro, SvelteKit, React Router,
- * VitePress, SolidStart, Docusaurus, Waku, TanStack Start and Qwik City projects run through
+ * VitePress, SolidStart, Docusaurus, Waku, TanStack Start, Qwik City, Marko Run, Remix and Analog projects run through
  * `lunx dev` and `lunx build` (which delegate to each framework's own CLI).
  * Asserts the dev server serves the page and the production build succeeds.
  *
@@ -21,6 +21,7 @@ const CLI = process.env.LUNX_CLI ? path.resolve(REPO, process.env.LUNX_CLI) : pa
 const LOADER = process.env.LUNX_CLI ? [] : ['--import', 'tsx'];
 const only = process.argv.find((a) => a.startsWith('--only='))?.split('=')[1]?.split(',');
 const MARKER = 'LUNX-META-OK';
+const NG = '21.2.25';
 
 const PROJECTS = [
     {
@@ -131,6 +132,46 @@ const PROJECTS = [
             'src/routes/index.tsx': `import { component$ } from '@builder.io/qwik';\nexport default component$(() => <h1>${MARKER}</h1>);\n`,
         },
     },
+    {
+        name: 'marko-run',
+        deps: { '@marko/run': '0.11.13', marko: '6.4.1' },
+        files: {
+            'src/routes/+page.marko': `<h1>${MARKER}</h1>\n`,
+        },
+    },
+    {
+        name: 'remix',
+        deps: {
+            '@remix-run/dev': '2.17.5', '@remix-run/react': '2.17.5', '@remix-run/node': '2.17.5', '@remix-run/serve': '2.17.5',
+            react: '18.3.1', 'react-dom': '18.3.1', isbot: '5.1.31', vite: '6.3.6',
+        },
+        files: {
+            'vite.config.js': `import { vitePlugin as remix } from '@remix-run/dev';\nexport default { plugins: [remix()] };\n`,
+            'app/root.jsx': `import { Links, Meta, Outlet, Scripts } from '@remix-run/react';\nexport default function App() {\n  return <html lang="en"><head><Meta /><Links /></head><body><Outlet /><Scripts /></body></html>;\n}\n`,
+            'app/routes/_index.jsx': `export default function Index() {\n  return <h1>${MARKER}</h1>;\n}\n`,
+        },
+    },
+    {
+        name: 'analog',
+        deps: {
+            '@analogjs/platform': '2.8.0', '@analogjs/router': '2.8.0', '@analogjs/content': '2.8.0',
+            '@angular/core': NG, '@angular/common': NG, '@angular/compiler': NG, '@angular/compiler-cli': NG,
+            '@angular/platform-browser': NG, '@angular/platform-server': NG, '@angular/router': NG, '@angular/build': NG,
+            rxjs: '7.8.2', tslib: '2.8.1', typescript: '5.9.3', vite: '7.1.9',
+        },
+        files: {
+            'vite.config.ts': `import { defineConfig } from 'vite';\nimport analog from '@analogjs/platform';\nexport default defineConfig({ resolve: { mainFields: ['module'] }, plugins: [analog({ ssr: true, prerender: { routes: [] } })] });\n`,
+            'index.html': `<!doctype html>\n<html lang="en"><head><meta charset="utf-8" /><base href="/" /></head><body><app-root></app-root><script type="module" src="/src/main.ts"></script></body></html>\n`,
+            'src/main.ts': `import { bootstrapApplication } from '@angular/platform-browser';\nimport { AppComponent } from './app/app.component';\nimport { appConfig } from './app/app.config';\nbootstrapApplication(AppComponent, appConfig);\n`,
+            'src/main.server.ts': `import '@angular/platform-server/init';\nimport { render } from '@analogjs/router/server';\nimport { AppComponent } from './app/app.component';\nimport { config } from './app/app.config.server';\nexport default render(AppComponent, config);\n`,
+            'src/app/app.config.ts': `import { ApplicationConfig, provideZonelessChangeDetection } from '@angular/core';\nimport { provideClientHydration } from '@angular/platform-browser';\nimport { provideFileRouter } from '@analogjs/router';\nexport const appConfig: ApplicationConfig = { providers: [provideZonelessChangeDetection(), provideFileRouter(), provideClientHydration()] };\n`,
+            'src/app/app.config.server.ts': `import { mergeApplicationConfig, ApplicationConfig } from '@angular/core';\nimport { provideServerRendering } from '@angular/platform-server';\nimport { appConfig } from './app.config';\nexport const config: ApplicationConfig = mergeApplicationConfig(appConfig, { providers: [provideServerRendering()] });\n`,
+            'src/app/app.component.ts': `import { Component } from '@angular/core';\nimport { RouterOutlet } from '@angular/router';\n@Component({ selector: 'app-root', imports: [RouterOutlet], template: '<router-outlet />' })\nexport class AppComponent {}\n`,
+            'src/app/pages/index.page.ts': `import { Component } from '@angular/core';\n@Component({ selector: 'app-home', template: '<h1>${MARKER}</h1>' })\nexport default class HomeComponent {}\n`,
+            'tsconfig.json': JSON.stringify({ compilerOptions: { strict: true, experimentalDecorators: true, moduleResolution: 'bundler', importHelpers: true, target: 'ES2022', module: 'ES2022', lib: ['ES2022', 'dom'], useDefineForClassFields: false, skipLibCheck: true } }),
+            'tsconfig.app.json': JSON.stringify({ extends: './tsconfig.json', compilerOptions: { types: [] }, files: ['src/main.ts', 'src/main.server.ts'], include: ['src/**/*.d.ts', 'src/app/pages/**/*.page.ts'] }),
+        },
+    },
 ];
 
 function freePort() {
@@ -222,5 +263,12 @@ for (const project of PROJECTS.filter((p) => !only || only.includes(p.name))) {
 
 const passed = results.reduce((n, r) => n + (r.dev === 'pass') + (r.build === 'pass'), 0);
 console.log(`\n${passed}/${results.length * 2} meta-framework checks passed`);
-await fsp.writeFile(path.join(REPO, 'reports', 'META_MATRIX.json'), JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2));
+// A partial run (--only) updates its projects' rows and keeps the others.
+const reportFile = path.join(REPO, 'reports', 'META_MATRIX.json');
+let report = results;
+if (only) {
+    const previous = await fsp.readFile(reportFile, 'utf8').then((t) => JSON.parse(t).results).catch(() => []);
+    report = PROJECTS.map((p) => results.find((r) => r.name === p.name) ?? previous.find((r) => r.name === p.name)).filter(Boolean);
+}
+await fsp.writeFile(reportFile, JSON.stringify({ generatedAt: new Date().toISOString(), results: report }, null, 2));
 process.exit(passed === results.length * 2 ? 0 : 1);

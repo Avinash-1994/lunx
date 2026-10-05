@@ -84,8 +84,12 @@ async function generateBundleWithAssignments(ctx: any, handler: (...a: any[]) =>
     }
 }
 
+/** Hook argument that carries Vite's options object (`{ ssr }` for resolveId / load / transform). */
+const OPTIONS_ARG: Record<string, number> = { resolveId: 2, load: 1, transform: 2 };
+
 function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => void = () => {}): any {
     const out: any = { name: plugin.name };
+    const ssr = environment.config?.consumer === 'server';
     for (const key of Object.keys(plugin)) {
         if (!ROLLUP_HOOKS.has(key)) continue;
         const hook = plugin[key];
@@ -96,6 +100,8 @@ function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => voi
         }
         const wrapped = function (this: any, ...args: any[]) {
             decorateArgs(key, args, decorate);
+            const optionsAt = OPTIONS_ARG[key];
+            if (optionsAt !== undefined) args[optionsAt] = { ...args[optionsAt], ssr };
             if (key === 'generateBundle') return generateBundleWithAssignments(this, handler, environment, args);
             const result = handler.apply(contextWithEnvironment(this, environment), args);
             if (key !== 'load' && key !== 'transform') return result;

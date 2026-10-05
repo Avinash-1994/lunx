@@ -110,7 +110,9 @@ interface Entry {
 
 export class FSWatcher extends EventEmitter {
     private readonly options: Required<Pick<WatchOptions, 'ignoreInitial' | 'persistent' | 'debounce' | 'depth'>>;
-    private readonly isIgnored: (p: string) => boolean;
+    private readonly ignoredByOptions: (p: string) => boolean;
+    /** Paths given to `unwatch()`. */
+    private readonly unwatched: Array<(p: string) => boolean> = [];
     private readonly watchers = new Map<string, fs.FSWatcher>();
     /** Known state of every file we have seen, for classifying add vs change vs unlink. */
     private readonly known = new Map<string, Entry>();
@@ -130,7 +132,7 @@ export class FSWatcher extends EventEmitter {
             debounce: options.debounce ?? 20,
             depth: options.depth ?? Infinity,
         };
-        this.isIgnored = compileIgnored(options.ignored);
+        this.ignoredByOptions = compileIgnored(options.ignored);
         void this.start();
     }
 
@@ -308,11 +310,24 @@ export class FSWatcher extends EventEmitter {
         this.emit('all', event, fullPath);
     }
 
-    /** Adds more paths to an existing watcher, like chokidar's `add`. */
-    async add(paths: string | string[]): Promise<void> {
+    private isIgnored(p: string): boolean {
+        return this.ignoredByOptions(p) || this.unwatched.some((fn) => fn(p));
+    }
+
+    /** Adds more paths to an existing watcher; chainable, like chokidar's `add`. */
+    add(paths: string | string[]): this {
+        void (async () => {
+            for (const p of Array.isArray(paths) ? paths : [paths]) await this.addRoot(path.resolve(p));
+        })().catch((err) => this.emit('error', err));
+        return this;
+    }
+
+    /** Stops reporting events for these paths or globs, like chokidar's `unwatch`. */
+    unwatch(paths: string | string[]): this {
         for (const p of Array.isArray(paths) ? paths : [paths]) {
-            await this.addRoot(path.resolve(p));
+            this.unwatched.push(compileIgnored([path.isAbsolute(p) || /^[*?{]/.test(p) ? p : path.resolve(p)]));
         }
+        return this;
     }
 
     getWatched(): Record<string, string[]> {

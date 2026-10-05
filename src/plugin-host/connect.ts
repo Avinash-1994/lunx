@@ -4,7 +4,7 @@
  * `req.originalUrl` — what Vite's `server.middlewares` exposes to plugins.
  */
 
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 
 export type NextFunction = (err?: any) => void;
 export type Handle = ((req: any, res: any, next: NextFunction) => void) | ((err: any, req: any, res: any, next: NextFunction) => void);
@@ -14,6 +14,8 @@ export interface Connect {
     stack: Array<{ route: string; handle: Handle }>;
     use(route: string | Handle, handle?: Handle): Connect;
     handle(req: IncomingMessage, res: ServerResponse, out?: NextFunction): void;
+    /** connect's `app.listen(...)`: an HTTP server running this stack. */
+    listen(...args: any[]): http.Server;
 }
 
 export function createConnect(): Connect {
@@ -61,6 +63,8 @@ export function createConnect(): Connect {
         };
         next();
     };
+
+    app.listen = (...args: any[]) => http.createServer(app).listen(...args);
 
     return app;
 }

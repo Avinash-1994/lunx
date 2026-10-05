@@ -170,19 +170,24 @@ export function importAnalysisPlugin(config: any): any {
                 }
                 if (resolved.external) return null;
                 // Dev SSR externalization (Vite's rule): plain-JS dependencies run natively in Node.
-                if (!isClient && /^[\w@]/.test(spec) && !spec.startsWith('#') && shouldExternalize(env.config, spec, resolved.id)) return null;
+                // Only specifiers Node can resolve: a plugin's `virtual:x` that maps to a package file is inlined.
+                const nodeResolvable = !/^[\w-]+:/.test(spec) || spec.startsWith('node:');
+                if (!isClient && nodeResolvable && /^[\w@]/.test(spec) && !spec.startsWith('#') && shouldExternalize(env.config, spec, resolved.id)) return null;
                 const optimizer = env.depsOptimizer;
                 // As Vite: imports inside node_modules never discover new dependencies (an excluded
                 // package's own imports stay raw so framework transforms still run on them).
                 const known = optimizer?.lookup(spec, resolved.id);
                 const depName = known ?? spec;
                 const discoverable = !!known || !/[\\/]node_modules[\\/]/.test(file);
-                if (optimizer && discoverable && (known || /^[\w@]/.test(spec)) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(depName, resolved.id)) {
+                if (optimizer && discoverable && (known || (nodeResolvable && /^[\w@]/.test(spec))) && !optimizer.isOptimizedFile(file) && optimizer.shouldOptimize(depName, resolved.id)) {
                     const url = await optimizer.urlFor(depName, resolved.id);
                     return { url: isClient ? withBase(url) : url, hmrUrl: url.replace(/\?.*$/, '') };
                 }
                 let url = idToUrl(config, resolved.id);
                 const hmrUrl = unwrapId(removeImportQuery(removeTimestampQuery(url)));
+                // As Vite: the graph remembers what this url resolved to, so requesting it later
+                // finds plugin-virtual files (e.g. Marko's `x.marko-virtual.css`) that are not on disk.
+                await graph.ensureEntryFromUrl(hmrUrl, true, resolved);
                 // Imports between pre-bundled files carry the same ?v= as imports into them, or one
                 // dependency loads twice (Rolldown links sibling entries directly: ./solid-js.js).
                 if (optimizer?.version && optimizer.isOptimizedFile(cleanUrl(resolved.id)) && !/[?&]v=/.test(url)) url = injectQuery(url, `v=${optimizer.version}`);

@@ -250,7 +250,8 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
                           noExternal: ssr.noExternal === true || userResolve.noExternal === true ? true : [...arraify(ssr.noExternal ?? []), ...arraify(userResolve.noExternal ?? [])],
                           external: ssr.external === true || userResolve.external === true ? true : [...arraify(ssr.external ?? []), ...arraify(userResolve.external ?? [])],
                       },
-                build: { ...build, ssr: !isClient },
+                // `build.ssr: 'entry'` (`vite build --ssr entry`) names the server environment's input.
+                build: { ...build, ssr: isClient ? false : build.ssr || true },
                 // Vite 6: server environments run modules through the module runner.
                 dev: { ...environmentDefaults.dev, moduleRunnerTransform: !isClient },
             },
