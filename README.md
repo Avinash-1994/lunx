@@ -20,10 +20,11 @@
   - [Svelte 5 / Svelte 4](#3-svelte)
   - [SolidJS](#4-solidjs)
   - [Angular (v2–v18+)](#5-angular)
-  - [SSR / meta-frameworks (compat proxies)](#6-ssr-meta-frameworks)
+  - [SSR / meta-frameworks](#6-ssr--meta-frameworks)
   - [Desktop Apps (Electron & Tauri)](#7-desktop-apps-electron--tauri)
 - [Configuration & Auto-Detection](#-configuration--auto-detection)
 - [Module Federation Tutorial](#-module-federation-tutorial)
+- [Library Mode](#-library-mode)
 - [Built-in Security CLI Suite](#-built-in-security-cli-suite)
 - [Official Plugins](#-official-plugins)
 - [Performance Benchmarks](#-performance-benchmarks)
@@ -201,18 +202,16 @@ export default defineConfig({
 
 ---
 
-### 6. SSR / meta-frameworks (compat, not a replacement)
+### 6. SSR / meta-frameworks
 
-Lunx is an **SPA + Module Federation** build tool. It does **not** replace Next.js, Nuxt, SvelteKit, Remix, or similar SSR engines.
+`lunx dev` and `lunx build` in a meta-framework project build it with lunx's own engine: its plugin host runs the framework's Vite plugins on Rolldown/Oxc, with no Vite, Rollup or vite-node code (each framework's own compiler, such as Svelte's or Angular's, still compiles its components).
 
-When those frameworks are detected, Lunx adapters **delegate to the upstream CLI** (for example spawning `next dev`) or apply limited Pages-router loader hooks. Treat them as compatibility shims:
-
-| Framework | What Lunx does |
+| Framework | `lunx dev` / `lunx build` |
 |---|---|
-| **Next.js** | App Router: proxies `next dev`. Pages Router: optional SWC loader hook. Not a Next replacement. |
-| **Nuxt / SvelteKit / Remix / SolidStart / …** | Detected and labeled as upstream adapters. Use each framework's own `dev`/`build`. |
+| SvelteKit, React Router (framework), Remix, TanStack Start, Qwik City, Astro, Nuxt, SolidStart, VitePress, Waku, Marko Run, Analog | **Built by lunx** (`[lunx] X project → built by lunx`) |
+| Next.js, Docusaurus, Gatsby, RedwoodJS, Stencil | Run on the framework's own CLI and bundler, labelled as such in the output (`[lunx] X project → next build`) |
 
-For production speed, use Lunx on **React / Vue / Svelte / Solid / Preact SPAs** and federated remotes.
+Set `LUNX_PLUGIN_HOST=0` to use a framework's own CLI instead. `npm run test:meta` checks every framework above in dev and build (reports/META_MATRIX.json).
 
 ---
 
@@ -351,8 +350,8 @@ export default defineConfig({
 
 ```tsx
 import React, { lazy, Suspense } from 'react';
+import { formatPrice } from 'navRemote/utils';      // static imports work too
 
-// @ts-ignore
 const RemoteHeader = lazy(() => import('navRemote/Header'));
 
 export function App() {
@@ -361,11 +360,45 @@ export function App() {
       <Suspense fallback={<div>Loading Header...</div>}>
         <RemoteHeader />
       </Suspense>
-      <main>Host Application Body</main>
+      <main>Host Application Body {formatPrice(10)}</main>
     </div>
   );
 }
 ```
+
+### How it works
+
+- `remoteEntry.js` is an ES module exporting the webpack 5 container API (`init`, `get`); `mf-manifest.json` lists exposes, shared versions and CSS. Remotes can be lunx ES module containers or webpack containers (`name@url` with a global).
+- **Shared** packages go through a webpack-format share scope: `singleton`, `requiredVersion` (defaults to your package.json range), `strictVersion` and `eager`. Each app's own copy is a separate chunk, downloaded only if the scope picks it, so a remote using the host's React never fetches its own.
+- **Dev and build mix freely**: a dev host can load a built remote and the other way round. In dev, a remote's modules fast-refresh inside the host page, state kept.
+- `npm run test:federation-e2e` runs all four dev/build pairings in Chromium.
+
+---
+
+## 📦 Library Mode
+
+`lunx build --lib` builds a package for npm instead of an app:
+
+```bash
+npx lunx build --lib src/index.ts                 # ES + CommonJS + .d.ts
+npx lunx build --lib --formats es,umd --name MyLib # adds a <script> global build
+```
+
+or in `lunx.config.ts` (a `vite.config` `build.lib` is read the same way):
+
+```typescript
+export default defineConfig({
+  lib: {
+    entry: { index: 'src/index.ts', utils: 'src/utils/index.ts' },
+    formats: ['es', 'cjs'],
+  },
+});
+```
+
+- `dependencies`, `peerDependencies` and Node built-ins stay imports; devDependencies and your sources are bundled (`external` / `noExternal` adjust it).
+- Vue and Svelte components and Solid / Preact JSX compile as in app builds; CSS, Sass, Less and CSS modules are extracted to `style.css`; assets are inlined.
+- `.d.ts` files come from Oxc's isolated declarations in milliseconds, or from `tsc` when an export has no explicit type.
+- The build checks that package.json `main`, `module`, `types` and `exports` point at files it wrote, and suggests an `exports` map when they do not.
 
 ---
 

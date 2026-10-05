@@ -52,6 +52,8 @@ export const rolldownBundler: Bundler = {
             assetFileNames: output.assetFileNames,
             minify: output.minify,
             sourcemap: output.sourcemap,
+            globals: output.globals,
+            exports: output.exports,
             ...(output.inlineDynamicImports ? { codeSplitting: false } : {}),
             ...(output.chunkGroups?.length ? { advancedChunks: { groups: output.chunkGroups } } : {}),
         };

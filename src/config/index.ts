@@ -32,6 +32,8 @@ export const BuildConfigSchema = z.object({
   esbuildPlugins: z.array(z.any()).optional(),
   platform: z.enum(['browser', 'node', 'edge']).default('browser'),
   preset: z.enum(['spa', 'ssr', 'ssg']).default('spa'),
+  // Library mode (src/build/library.ts): `lunx build` writes a package instead of an app.
+  lib: z.any().optional(),
   federation: z.object({
     name: z.string(),
     filename: z.string().optional(),
@@ -135,6 +137,7 @@ export type BuildConfig = {
   esbuildPlugins?: any[];
   platform: 'browser' | 'node' | 'edge';
   preset: 'spa' | 'ssr' | 'ssg';
+  lib?: import('../build/library.js').LibraryOptions;
   federation?: {
     name: string;
     filename?: string;
@@ -219,7 +222,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'entry', 'outDir', 'framework', 'preset', 'mode', 'platform', 'port',
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
-  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate'
+  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib'
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {

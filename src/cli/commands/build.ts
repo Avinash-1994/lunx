@@ -62,6 +62,29 @@ function printProfileReport(result: any) {
   }
 }
 
+async function runLibraryBuild(root: string, lib: any, config: any) {
+  if (!lib.entry) {
+    lib.entry = ['src/index.ts', 'src/index.tsx', 'src/index.js', 'src/index.jsx', 'src/main.ts', 'src/main.js', 'index.ts', 'index.js']
+      .find((f) => fs.existsSync(path.join(root, f)));
+    if (!lib.entry) throw new Error('Library mode needs an entry: `lunx build --lib src/index.ts`, or `lib.entry` in lunx.config');
+  }
+  const { detectFramework } = await import('../../core/framework-detector.js');
+  const framework = config.framework || (await detectFramework(root));
+  const { buildLibrary, suggestExports } = await import('../../build/library.js');
+  const result = await buildLibrary(root, lib, framework);
+  const outDir = path.resolve(root, lib.outDir);
+  console.log();
+  for (const f of result.files) {
+    console.log(`  ${path.relative(root, path.join(outDir, f.file)).padEnd(48)} ${f.format.padEnd(4)} ${(f.size / 1024).toFixed(2).padStart(8)} kB`);
+  }
+  console.log(`\n  ✓ library built in ${Math.round(result.durationMs)}ms\n`);
+  if (result.problems.length) {
+    console.warn('  ⚠ package.json points at files the build did not write:');
+    for (const p of result.problems) console.warn(`    • ${p}`);
+    console.warn(`\n  Suggested "exports":\n${JSON.stringify(suggestExports(result, path.relative(root, outDir) || '.'), null, 2).split('\n').map((l) => '    ' + l).join('\n')}\n`);
+  }
+}
+
 export default {
   options: (yargs: any) => {
     return yargs
@@ -88,6 +111,21 @@ export default {
         type: 'boolean',
         description: 'Byte-identical Vite/Rollup output format',
         default: false
+      })
+      .option('lib', {
+        description: 'Library mode: build a package (optionally give the entry: --lib src/index.ts)',
+      })
+      .option('formats', {
+        type: 'string',
+        description: 'Library formats, comma-separated: es,cjs,umd,iife',
+      })
+      .option('name', {
+        type: 'string',
+        description: 'Library mode: global variable name for the umd / iife formats',
+      })
+      .option('dts', {
+        type: 'boolean',
+        description: 'Library mode: emit .d.ts files (default: when tsconfig.json exists)',
       })
       .option('watch', {
         alias: 'w',
@@ -123,6 +161,19 @@ export default {
 
       if (args['compat-rollup']) {
         (config as any).compatRollup = true;
+      }
+
+      // Library mode: a package for npm instead of an app.
+      const libOption = (config as any).lib || args.lib ? { ...(config as any).lib } : null;
+      if (libOption) {
+        if (typeof args.lib === 'string') libOption.entry = args.lib;
+        if (args.formats) libOption.formats = String(args.formats).split(',').map((f: string) => f.trim()).filter(Boolean);
+        if (args.dts !== undefined) libOption.dts = args.dts;
+        if (args.name) libOption.name = args.name;
+        libOption.outDir ??= (config as any).outDir || 'dist';
+        await runLibraryBuild(root, libOption, config);
+        await telemetry.stop(true);
+        return;
       }
 
       // Module Federation validation
