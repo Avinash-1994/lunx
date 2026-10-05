@@ -73,8 +73,9 @@ export class DevWatcher extends EventEmitter {
             } catch (err: any) {
                 console.warn(`[lunx] WARN: native watcher failed to load, falling back to chokidar (`, err?.message ?? err, `)`);
             }
-        } else {
-            console.warn(`[lunx] WARN: native watcher failed to load, falling back to chokidar`);
+        } else if (process.env.LUNX_DEBUG) {
+            // The native helpers are optional; lunx's JS watcher does the same job.
+            console.warn(`[lunx] native watcher not installed for this platform; using the JS watcher`);
         }
 
         // Chokidar fallback

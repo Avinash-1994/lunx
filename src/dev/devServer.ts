@@ -1930,8 +1930,11 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       log.warn('Restarting server due to config change...', { category: 'server' });
       broadcast(JSON.stringify({ type: 'restarting' }));
       await new Promise(r => setTimeout(r, 500)); // Give clients time to receive message
-      server.close();
-      wss?.close();
+      // Drop keep-alive connections so the port is free for the restarted server.
+      (server as any).closeAllConnections?.();
+      await Promise.race([new Promise<void>((r) => server.close(() => r())), new Promise((r) => setTimeout(r, 1000))]);
+      // The ws server may be one that only closes with the HTTP server.
+      if (typeof (wss as any)?.close === 'function') wss!.close();
       await configWatcher.close();
       federationDev.stop();
       // Re-run startDevServer (recursive)

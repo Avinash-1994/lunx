@@ -322,9 +322,9 @@ function wrapNativeWorker(Orig: any) {
 
 function getJSFallback() {
     const crypto = _require('crypto');
-    console.warn("[lunx] engine: js-fallback");
-    console.warn("⚠️  [LUNX EXECUTOR] Native Rust binary not found/loadable. Falling back to JavaScript engine (@swc/core + LightningCSS).");
-    console.warn("⚠️  [LUNX EXECUTOR] Performance will be degraded vs native. Rebuild with cargo + `npm run build:native`, or reinstall lunx-dev.");
+    // The optional native helpers (file watcher, build cache) are not installed for
+    // this platform. Everything works without them; say so only when asked.
+    if (process.env.LUNX_DEBUG) console.warn("[lunx] engine: js-fallback (optional native helpers not installed for this platform)");
     return {
         GraphAnalyzer: JSGraphAnalyzer,
         BuildOrchestrator: JSBuildOrchestrator,

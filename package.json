@@ -129,7 +129,7 @@
     "url": "https://github.com/Avinash-1994/lunx/issues"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "dependencies": {
     "@lunx/adapter-core": "file:packages/lunx-adapter-core",

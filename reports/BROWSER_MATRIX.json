@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-05T11:07:22.856Z",
+  "generatedAt": "2026-10-05T11:52:24.603Z",
   "results": [
     {
       "framework": "vanilla-ts",
@@ -24,9 +24,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 191,
-      "paintMs": 759,
-      "buildMs": 352,
+      "bootMs": 274,
+      "paintMs": 807,
+      "buildMs": 366,
       "notes": []
     },
     {
@@ -52,9 +52,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 216,
-      "paintMs": 534,
-      "buildMs": 519,
+      "bootMs": 220,
+      "paintMs": 425,
+      "buildMs": 635,
       "notes": []
     },
     {
@@ -66,9 +66,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 210,
-      "paintMs": 431,
-      "buildMs": 643,
+      "bootMs": 174,
+      "paintMs": 601,
+      "buildMs": 491,
       "notes": []
     },
     {
