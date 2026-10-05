@@ -1,70 +1,70 @@
 {
   "lunx": {
     "kind": "module server",
-    "devBootMs": 291,
-    "devAppCodeMs": 302,
-    "buildColdMs": 462,
-    "buildWarmMs": 457,
-    "jsBytes": 219626,
+    "devBootMs": 307,
+    "devAppCodeMs": 334,
+    "buildColdMs": 527,
+    "buildWarmMs": 418,
+    "jsBytes": 221449,
     "cssBytes": 29
   },
   "vite": {
     "kind": "module server",
-    "devBootMs": 381,
-    "devAppCodeMs": 485,
-    "buildColdMs": 792,
-    "buildWarmMs": 431,
+    "devBootMs": 379,
+    "devAppCodeMs": 460,
+    "buildColdMs": 497,
+    "buildWarmMs": 450,
     "jsBytes": 220248,
     "cssBytes": 30
   },
   "rspack": {
     "kind": "bundler",
-    "devBootMs": 339,
-    "devAppCodeMs": 373,
-    "buildColdMs": 304,
-    "buildWarmMs": 324,
+    "devBootMs": 381,
+    "devAppCodeMs": 422,
+    "buildColdMs": 353,
+    "buildWarmMs": 343,
     "jsBytes": 219460,
     "cssBytes": 29
   },
   "webpack": {
     "kind": "bundler",
-    "devBootMs": 1368,
-    "devAppCodeMs": 1461,
-    "buildColdMs": 3392,
-    "buildWarmMs": 3571,
+    "devBootMs": 1573,
+    "devAppCodeMs": 1656,
+    "buildColdMs": 4185,
+    "buildWarmMs": 3794,
     "jsBytes": 224696,
     "cssBytes": 0
   },
   "parcel": {
     "kind": "bundler",
-    "devBootMs": 1315,
-    "devAppCodeMs": 1324,
-    "buildColdMs": 1420,
-    "buildWarmMs": 1546,
+    "devBootMs": 1242,
+    "devAppCodeMs": 1249,
+    "buildColdMs": 1457,
+    "buildWarmMs": 1462,
     "jsBytes": 221951,
     "cssBytes": 96
   },
   "esbuild": {
     "kind": "bundler",
     "devBootMs": null,
-    "buildColdMs": 65,
-    "buildWarmMs": 60,
+    "buildColdMs": 55,
+    "buildWarmMs": 51,
     "jsBytes": 222973,
     "cssBytes": 30
   },
   "bun": {
     "kind": "bundler",
     "devBootMs": null,
-    "buildColdMs": 39,
-    "buildWarmMs": 37,
+    "buildColdMs": 31,
+    "buildWarmMs": 30,
     "jsBytes": 211811,
     "cssBytes": 30
   },
   "rolldown": {
     "kind": "bundler (JS only)",
     "devBootMs": null,
-    "buildColdMs": 404,
-    "buildWarmMs": 269,
+    "buildColdMs": 297,
+    "buildWarmMs": 206,
     "jsBytes": 221449,
     "cssBytes": 0
   }

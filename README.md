@@ -454,14 +454,19 @@ lunx security report
 
 ## 📊 Performance Benchmarks
 
-Numbers below are **only valid when the native binary is loaded** (`[lunx] engine: rust-native` at startup). If you see `engine: js-fallback`, transforms run on `@swc/core` in Node and will be slower.
+One React + TypeScript app, every tool installed from npm, median of 3 runs (`npx tsx scripts/bench-arena.mjs`, results in reports/BENCH_ARENA.json). Measured on a Linux cloud container; compare ratios, not absolute times.
 
-Reproduce locally via `cd benchmarks/public && node run-all.mjs` after `npm run build` on this repo.
+| Tool | Dev boot | App code ready | Build (cold) | Build (warm) | JS out |
+|---|---|---|---|---|---|
+| **lunx** | **307 ms** | **334 ms** | 527 ms | 418 ms | 221 KB |
+| Vite 7 | 379 ms | 460 ms | 497 ms | 450 ms | 220 KB |
+| Rspack | 381 ms | 422 ms | 353 ms | 343 ms | 219 KB |
+| Parcel | 1242 ms | 1249 ms | 1457 ms | 1462 ms | 222 KB |
+| webpack | 1573 ms | 1656 ms | 4185 ms | 3794 ms | 225 KB |
+| esbuild (bundler only) | – | – | 55 ms | 51 ms | 223 KB |
+| Bun (bundler only) | – | – | 31 ms | 30 ms | 212 KB |
 
-| Benchmark Metric | Notes |
-|---|---|
-| **HMR** | Rust `notify` watcher + SWC transform when native is loaded. Published packages without `lunx_native*.node` fall back to chokidar + JS. Do not treat synthetic sub-millisecond lab numbers as a product claim. |
-| **Cold / warm build** | Dominated by native SWC + LightningCSS on SPA graphs. Compare against Vite/Rspack on the same fixture; do not use unpublished internal benches as marketing. |
+`lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the other tools do not. esbuild and Bun have no dev server or HMR here and only bundle.
 
 ---
 
