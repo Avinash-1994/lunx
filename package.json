@@ -79,7 +79,8 @@
     "bench:arena": "tsx scripts/bench-arena.mjs",
     "test:cli-surface": "tsx scripts/verify-cli-surface.mjs",
     "test:conformance": "tsx scripts/library-conformance.mjs",
-    "test:meta": "tsx scripts/meta-matrix.mjs"
+    "test:meta": "tsx scripts/meta-matrix.mjs",
+    "test:federation-e2e": "node scripts/federation-e2e.mjs"
   },
   "keywords": [
     "build-tool",

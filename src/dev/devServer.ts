@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { DevFederation } from '../federation/dev.js';
 import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
@@ -43,7 +44,7 @@ import { LiveConfigManager } from '../config/live-config.js';
  * Rewrite bare module imports to node_modules paths
  * Production-grade AST-based rewriting (Phase C1 Honest)
  */
-async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federationRemotes?: Set<string>, singletonRedirects?: Map<string, string>, aliases?: AliasEntry[]): Promise<string> {
+async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federation?: DevFederation | null, aliases?: AliasEntry[]): Promise<string> {
   try {
     const ast = parseModule('module.js', code);
 
@@ -76,26 +77,13 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
           return;
         }
 
-        if (federationRemotes) {
-          const [remoteName] = specifier.split('/');
-          if (remoteName && federationRemotes.has(remoteName) && specifier.includes('/')) {
-            return;
-          }
+        if (federation?.isRemote(specifier)) {
+          replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.remoteUrl(specifier)) });
+          return;
         }
-
-        // Singleton redirect: if this is a singleton package managed by the shell host,
-        // point directly to the shell's pre-bundled copy to enforce one instance.
-        if (singletonRedirects && singletonRedirects.size > 0) {
-          const pkgRoot = specifier.startsWith('@')
-            ? specifier.split('/').slice(0, 2).join('/')
-            : specifier.split('/')[0];
-          if (singletonRedirects.has(pkgRoot)) {
-            const safeName = specifier.replace(/[/@]/g, '_');
-            const hostBase = singletonRedirects.get(pkgRoot)!;
-            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js`;
-            replacements.push({ start: node.start, end: node.end, replacement: `'${singletonUrl}'` });
-            return;
-          }
+        if (federation?.isShared(specifier)) {
+          replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.sharedUrl(specifier)) });
+          return;
         }
 
         let replacement = `/node_modules/${specifier}`;
@@ -131,7 +119,10 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
 
     // Walk AST
     for (const node of ast.body) {
-      if (node.type === 'ImportDeclaration') {
+      if (node.type === 'ImportDeclaration' && federation?.isRemote(node.source.value)) {
+        // A remote's exports are only known at runtime: bind them from its module.
+        replacements.push({ start: node.start, end: node.end, replacement: federation.rewriteImportDeclaration(node) });
+      } else if (node.type === 'ImportDeclaration') {
         addReplacement(node.source);
       } else if (node.type === 'ExportNamedDeclaration' && node.source) {
         addReplacement(node.source);
@@ -380,16 +371,13 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // Sass / Less / Stylus / PostCSS are compiled by the shared CSS compiler
   // (build/css.ts), the same one production uses.
 
+  // Module federation: the same runtime and container API as production builds.
+  let devFederation: DevFederation | null = null;
   if (cfg.federation?.remotes && Object.keys(cfg.federation.remotes).length > 0) {
-    const remoteNames = Object.keys(cfg.federation.remotes).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
     pluginManager.register({
       name: 'lunx-federation-dev',
-      transform(code, id) {
-        const regex = new RegExp('\\bimport\\s*\\(\\s*["\'](' + remoteNames + ')\\/([^"\']+)["\']\\s*\\)', 'g');
-        if (!regex.test(code)) return code;
-        return code.replace(regex, (_, remote, modulePath) => {
-          return `globalThis.__lunx_import__("${remote}/${modulePath}")`;
-        });
+      transform(code) {
+        return devFederation ? devFederation.rewriteDynamic(code) : code;
       }
     });
   }
@@ -415,6 +403,17 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // HMR client are served at once, and only module requests (whose imports
   // must point at the bundled deps) wait for it.
   let prebundleReady: Promise<void> = Promise.resolve();
+  if (cfg.federation?.name) {
+    const { DevFederation } = await import('../federation/dev.js');
+    devFederation = new DevFederation(cfg.federation as any, {
+      root: cfg.root,
+      depsDir: resolvedCacheDir,
+      deps: async () => {
+        await prebundleReady.catch(() => {});
+        return preBundledDeps;
+      },
+    });
+  }
 
   try {
     // 1. Load package.json dependencies
@@ -846,49 +845,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     }
     statusHandler.trackRequest();
     if (await statusHandler.handleRequest(req, res)) return;
+    if (devFederation && await devFederation.handle(req, res)) return;
     if (federationDev.handleRequest(req, res)) return;
-
-    // ── Bug Class B fix: Singleton dep proxy for remote apps ────────────────────
-    // When this app is a REMOTE (has `exposes`) with singleton shared deps,
-    // proxy pre-bundled dep requests (/@lunx-deps/react, etc.) to the shell
-    // so there is exactly one React instance across all federation boundaries.
-    if (cfg.federation?.exposes && cfg.federation.shared && req.url?.startsWith('/@lunx-deps/')) {
-      const singletonPkgs = Object.entries(cfg.federation.shared)
-        .filter(([, v]) => typeof v === 'object' && (v as any).singleton)
-        .map(([k]) => k);
-      // Strip query string then .js extension: "react.js?v=123" → "react", "react-dom_client.js" → "react-dom"
-      const rawDepPath = req.url.slice('/@lunx-deps/'.length).split('?')[0];
-      // Convert lunx safe-name back to pkg name: "react-dom_client.js" → check both "react-dom" and "react"
-      const withoutExt = rawDepPath.replace(/\.js$/, '');
-      // rootPkg: take portion before first underscore (for subpath like react_jsx-dev-runtime → react)
-      const rootPkgRaw = withoutExt.startsWith('@')
-        ? withoutExt.split('_').slice(0, 2).join('/')  // scoped pkg
-        : withoutExt.split('_')[0];                     // react-dom_client → react-dom
-      // Only proxy if this dep belongs to a singleton package
-      const matchedSingleton = singletonPkgs.find(pkg =>
-        pkg === rootPkgRaw || withoutExt === pkg.replace(/[/@]/g, '_') || withoutExt.startsWith(pkg.replace(/[/@]/g, '_'))
-      );
-      if (matchedSingleton) {
-        const singletonHost = (cfg.federation as any).singletonHost || 'http://localhost:5173';
-        const proxyUrl = `${singletonHost}/@lunx-deps/${rawDepPath}${req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
-        try {
-          const { getFetch } = await import('../utils/fetch.js');
-          const fetch = await getFetch();
-          const upstream = await fetch(proxyUrl);
-          const body = await upstream.text();
-          res.writeHead(upstream.status, {
-            'Content-Type': upstream.headers.get('content-type') || 'application/javascript',
-            'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'no-store',
-          });
-          res.end(body);
-          return;
-        } catch {
-          // proxy failed — fall through to serve own copy (graceful degradation)
-        }
-      }
-    }
-
 
     // Security Scan (Day 41)
     if (!anomalyDetector.scanRequest({ url: req.url || '', headers: req.headers, method: req.method || 'GET' })) {
@@ -1151,32 +1109,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     <script type="module" src="/@lunx/hmr-client"></script>
         `;
 
-        // Federation runtime injection for host apps
-        let federationRuntime = '';
-        if (cfg.federation?.remotes && Object.keys(cfg.federation.remotes).length > 0) {
-          const { generateFederationRuntime } = await import('../federation/index.js');
-          federationRuntime = `<script>${generateFederationRuntime(cfg.federation.remotes)}</script>`;
-
-          // Bug Class B fix: inject an importmap that redirects shared singleton packages
-          // (react, react-dom, etc.) from any remote origin to the host's pre-bundled copy.
-          // This ensures only ONE React instance exists across all federation boundaries.
-          if (cfg.federation.shared) {
-            const singletonEntries: string[] = [];
-            for (const [pkg, sharedCfg] of Object.entries(cfg.federation.shared)) {
-              const isSingleton = typeof sharedCfg === 'object' && (sharedCfg as any).singleton;
-              if (isSingleton) {
-                // Map the bare specifier to the host's pre-bundled chunk
-                const hostOrigin = `http://localhost:${cfg.server?.port || cfg.port || 5173}`;
-                singletonEntries.push(`    "${pkg}": "${hostOrigin}/@lunx-deps/${pkg}"`);
-                // Also cover scoped variants (e.g. react-dom/client)
-                singletonEntries.push(`    "${pkg}/": "${hostOrigin}/@lunx-deps/${pkg}/"`);
-              }
-            }
-            if (singletonEntries.length > 0) {
-              federationRuntime = `<script type="importmap">{\n  "imports": {\n${singletonEntries.join(',\n')}\n  }\n}</script>\n` + federationRuntime;
-            }
-          }
-        }
+        // Module federation needs nothing in the page: its runtime is imported by the modules that use it.
+        const federationRuntime = '';
 
         // Always inject basic shims in dev mode to prevent ReferenceErrors from any React-ish modules
         let preamble = `
@@ -1717,25 +1651,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             define: devDefines
           });
 
-          // Rewrite imports after transformation
-          const federationRemotes = cfg.federation?.remotes ? new Set(Object.keys(cfg.federation.remotes)) : undefined;
-
-          // Build singleton redirect map for remote apps (Bug Class B fix).
-          // Maps each singleton pkg name → shell host base URL.
-          // rewriteImports will redirect bare 'react' imports to the shell's pre-bundled copy.
-          let singletonRedirects: Map<string, string> | undefined;
-          if (cfg.federation?.exposes && cfg.federation.shared) {
-            const hostBase = (cfg.federation as any).singletonHost || 'http://localhost:5173';
-            singletonRedirects = new Map<string, string>();
-            for (const [pkg, sharedCfg] of Object.entries(cfg.federation.shared)) {
-              if (typeof sharedCfg === 'object' && (sharedCfg as any).singleton) {
-                singletonRedirects.set(pkg, hostBase);
-              }
-            }
-          }
-
           const globbed = transformGlobImports(transformResult.code, filePath, cfg.root);
-          let code = await rewriteImports(globbed ?? transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects, aliases);
+          let code = await rewriteImports(globbed ?? transformResult.code, cfg.root, preBundledDeps, devFederation, aliases);
 
           res.writeHead(200, {
             'Content-Type': 'application/javascript',

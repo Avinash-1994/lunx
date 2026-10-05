@@ -13,9 +13,18 @@ export interface RuntimeShared {
     eager: boolean;
 }
 
-export function runtimeSource(name: string, shared: Record<string, RuntimeShared>, remotes: Record<string, string>): string {
+/**
+ * `getter` is the code of each shared package's provider: a function
+ * returning a promise of its factory. By default the bundled copy.
+ */
+export function runtimeSource(
+    name: string,
+    shared: Record<string, RuntimeShared>,
+    remotes: Record<string, string>,
+    getter: (pkg: string) => string = (pkg) => `() => import(${JSON.stringify(`lunx-mf-real:${pkg}`)}).then((m) => m.default)`,
+): string {
     const getters = Object.keys(shared)
-        .map((pkg) => `${JSON.stringify(pkg)}: () => import(${JSON.stringify(`lunx-mf-real:${pkg}`)}).then((m) => m.default)`)
+        .map((pkg) => `${JSON.stringify(pkg)}: ${getter(pkg)}`)
         .join(',\n    ');
     return `
 const NAME = ${JSON.stringify(name)};
