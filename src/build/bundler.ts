@@ -169,12 +169,11 @@ export async function build(rawConfig: BuildConfig) {
   })();
   securityGate.catch(() => {}); // observed below; avoid an unhandled rejection meanwhile
 
-  // The engine bundler (src/engines; Rolldown by default) builds for production. The legacy engine
-  // still owns module federation, SSR/node targets, and `build.bundler: 'legacy'`.
+  // The engine bundler (src/engines; Rolldown by default) builds for production, module federation
+  // included. The legacy engine still owns SSR/node targets and `build.bundler: 'legacy'`.
   const { bundlerAvailable, productionBuild } = await import('./production.js');
   const useEngine =
     (config.build as any)?.bundler !== 'legacy' &&
-    !config.federation &&
     config.preset !== 'ssr' &&
     (config.platform ?? 'browser') === 'browser' &&
     (await bundlerAvailable());

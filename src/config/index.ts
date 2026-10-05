@@ -38,10 +38,16 @@ export const BuildConfigSchema = z.object({
     singletonHost: z.string().optional(),
     exposes: z.record(z.string(), z.string()).optional(),
     remotes: z.record(z.string(), z.string()).optional(),
-    shared: z.record(z.string(), z.object({
-      singleton: z.boolean().optional(),
-      requiredVersion: z.string().optional(),
-    })).optional(),
+    shared: z.union([
+      z.array(z.string()),
+      z.record(z.string(), z.union([z.boolean(), z.string(), z.object({
+        singleton: z.boolean().optional(),
+        requiredVersion: z.union([z.string(), z.literal(false)]).optional(),
+        strictVersion: z.boolean().optional(),
+        eager: z.boolean().optional(),
+        version: z.string().optional(),
+      })])),
+    ]).optional(),
     prefetch: z.array(z.string()).optional(),
     fallback: z.string().optional(),
     mock: z.boolean().optional(),
@@ -135,7 +141,7 @@ export type BuildConfig = {
     singletonHost?: string;
     exposes?: Record<string, string>;
     remotes?: Record<string, string>;
-    shared?: Record<string, { singleton?: boolean; requiredVersion?: string }>;
+    shared?: string[] | Record<string, boolean | string | { singleton?: boolean; requiredVersion?: string | false; strictVersion?: boolean; eager?: boolean; version?: string }>;
     prefetch?: string[];
     fallback?: string;
     mock?: boolean;

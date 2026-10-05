@@ -18,6 +18,7 @@ import zlib from 'node:zlib';
 import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
 import { transformGlobImports } from './glob-import.js';
+import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 
@@ -85,8 +86,11 @@ export async function productionBuild(config: BuildConfig, framework: string): P
 
     // Script-only entries still get a page: the project's index.html when it
     // has one (it already references the script), otherwise a minimal page.
+    const federation = (config as any).federation as FederationOptions | undefined;
+    const exposesOnly = !!federation?.exposes && Object.keys(federation.exposes).length > 0 && !config.entry?.length;
+    if (exposesOnly && !fs.existsSync(path.join(root, 'index.html'))) entries.length = 0;
     let syntheticHtml: string | null = null;
-    if (!entries.some((e) => e.endsWith('.html'))) {
+    if (entries.length && !entries.some((e) => e.endsWith('.html'))) {
         const rootHtml = path.join(root, 'index.html');
         if (fs.existsSync(rootHtml)) {
             const html = fs.readFileSync(rootHtml, 'utf8');
@@ -132,6 +136,8 @@ export async function productionBuild(config: BuildConfig, framework: string): P
             styles: [],
         });
     }
+    const appEntries = new Set(Object.values(input));
+    if (federation) Object.assign(input, federationInputs(federation, root));
     if (Object.keys(input).length === 0 && htmlEntries.every((h) => h.styles.length === 0)) {
         throw new Error('No module scripts found in the HTML entry. Add <script type="module" src="/src/main.ts"></script>.');
     }
@@ -345,6 +351,8 @@ export async function productionBuild(config: BuildConfig, framework: string): P
         },
     ];
 
+    if (federation) plugins.push(federationEnginePlugin(federation, root, appEntries));
+
     // ── Rolldown ─────────────────────────────────────────────────────────────
     const envDefines: Record<string, string> = { ...((config as any).__envDefines ?? {}) };
     const metaEnv: Record<string, unknown> = {
@@ -447,6 +455,14 @@ export async function productionBuild(config: BuildConfig, framework: string): P
         await fsp.mkdir(path.dirname(target), { recursive: true });
         await fsp.writeFile(target, page);
         emittedAssets.push({ fileName: toPosix(path.relative(outDir, target)), type: 'asset', source: page });
+    }
+
+    // ── Module federation container ──────────────────────────────────────────
+    if (federation) {
+        const entryFiles = new Map<string, string>();
+        for (const item of output) if (item.type === 'chunk' && item.isEntry) entryFiles.set(item.name, item.fileName);
+        const remoteEntry = await writeRemoteEntry(federation, root, outDir, entryFiles, cssFile ? [cssFile] : []);
+        if (remoteEntry) emittedAssets.push({ fileName: remoteEntry.fileName, type: 'asset', source: remoteEntry.code });
     }
 
     // ── public/ ──────────────────────────────────────────────────────────────
