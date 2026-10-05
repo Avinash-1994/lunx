@@ -173,6 +173,32 @@ export default {
         libOption.outDir ??= (config as any).outDir || 'dist';
         await runLibraryBuild(root, libOption, config);
         await telemetry.stop(true);
+        if (args.watch) {
+          const { watch } = await import('../../lib/watcher.js');
+          const outDir = path.resolve(root, libOption.outDir);
+          const watcher = watch(root, { ignoreInitial: true, ignored: ['**/node_modules/**', '**/.git/**', `${outDir}/**`, '**/.lunx/**'] });
+          let timer: NodeJS.Timeout | null = null;
+          let running: Promise<void> = Promise.resolve();
+          // Sources and the files that configure them; not logs or other output written in the project.
+          const relevant = /\.([mc]?[jt]sx?|vue|svelte|css|pcss|postcss|scss|sass|less|styl|stylus|json|svg|png|jpe?g|gif|webp|avif|woff2?|ttf|otf)$/i;
+          const rebuild = (file: string) => {
+            if (!relevant.test(file)) return;
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+              running = running.then(async () => {
+                console.log(`  [lunx] changed: ${path.relative(root, file)}`);
+                try {
+                  await runLibraryBuild(root, libOption, config);
+                } catch (e: any) {
+                  console.error(`  ✗ ${e.message}`);
+                }
+              });
+            }, 50);
+          };
+          watcher.on('change', rebuild).on('add', rebuild).on('unlink', rebuild);
+          console.log('  Watching for changes... (Ctrl+C to stop)\n');
+          await new Promise(() => {});
+        }
         return;
       }
 

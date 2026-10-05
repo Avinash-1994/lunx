@@ -198,6 +198,9 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
         },
     ];
 
+    // Emptied first, so never the project itself or a directory above it.
+    const rel = path.relative(outDir, root);
+    if (outDir === root || !rel.startsWith('..')) throw new Error(`[lunx lib] outDir ${outDir} contains the project; choose a subdirectory such as dist`);
     await fsp.rm(outDir, { recursive: true, force: true });
     const files: LibraryResult['files'] = [];
     const sourceModules = new Set<string>();
