@@ -516,6 +516,7 @@ keep working.
 |---|---|
 | `lunx dev` | Start development server with HMR |
 | `lunx build` | Create minified production build with security scan |
+| `lunx build --lib [entry]` | Build a library: ES/CJS (`--formats es,cjs,umd,iife`, `--name`), `.d.ts`, `--watch` |
 | `lunx preview` | Serve production build locally for verification |
 | `lunx create` | Interactive project scaffolding |
 | `lunx migrate` | Auto-migrate project configuration |
