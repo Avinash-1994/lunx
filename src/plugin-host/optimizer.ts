@@ -15,6 +15,7 @@ import { getBundler, parse } from '../engines/index.js';
 import { createResolver } from '../engines/toolkit.js';
 import { arraify, mergeConfig, normalizePath } from './utils.js';
 import { getPackageName } from './plugins/resolve.js';
+import { esbuildPluginsToRolldown } from './esbuild-plugins.js';
 
 const require = createRequire(import.meta.url);
 const RESERVED = new Set(['default', '__esModule', 'arguments', 'eval', 'await', 'yield', 'let', 'static', 'enum', 'implements', 'interface', 'package', 'private', 'protected', 'public', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'delete', 'do', 'else', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with']);
@@ -108,12 +109,22 @@ export class DepsOptimizer {
     }
 
     /**
-     * `optimizeDeps.rolldownOptions.plugins` (rolldown-vite's name; `rollupOptions` too): e.g.
-     * Analog's Angular linker, which must run on Angular's partially compiled packages.
+     * `optimizeDeps.rolldownOptions.plugins` (rolldown-vite's name; `rollupOptions` too), e.g.
+     * Analog's Angular linker, which must run on Angular's partially compiled packages, and
+     * `optimizeDeps.esbuildOptions.plugins` from Vite 5-7 plugins.
      */
     private userPlugins(): any[] {
         const plugins = [...arraify(this.options.rolldownOptions?.plugins ?? []), ...arraify(this.options.rollupOptions?.plugins ?? [])].flat(Infinity).filter(Boolean);
-        return plugins.map((plugin: any) => {
+        // Vite 5-7 plugins pass esbuild plugins instead: replayed as Rolldown hooks.
+        const esbuildPlugins = arraify(this.options.esbuildOptions?.plugins ?? []).flat(Infinity).filter(Boolean);
+        const adapted = esbuildPlugins.length
+            ? esbuildPluginsToRolldown(esbuildPlugins, {
+                  root: this.config.root,
+                  platform: this.isClient ? 'browser' : 'node',
+                  conditions: this.config.environments[this.envName].resolve.conditions,
+              })
+            : [];
+        return [...plugins.map((plugin: any) => {
             if (!plugin.load) return plugin;
             // esbuild-style `loader` in a load result is Rolldown's `moduleType`.
             const hook = plugin.load;
@@ -127,7 +138,7 @@ export class DepsOptimizer {
                 return result;
             };
             return { ...plugin, load: typeof hook === 'function' ? wrapped : { ...hook, handler: wrapped } };
-        });
+        }), ...adapted];
     }
 
     private exclude(spec: string): boolean {
