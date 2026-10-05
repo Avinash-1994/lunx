@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-05T10:38:19.412Z",
+  "generatedAt": "2026-10-05T11:11:35.550Z",
   "results": [
     {
       "name": "next",
@@ -69,21 +69,21 @@
     },
     {
       "name": "marko-run",
-      "notes": [],
       "dev": "pass",
-      "build": "pass"
+      "build": "pass",
+      "notes": []
     },
     {
       "name": "remix",
-      "notes": [],
       "dev": "pass",
-      "build": "pass"
+      "build": "pass",
+      "notes": []
     },
     {
       "name": "analog",
-      "notes": [],
       "dev": "pass",
-      "build": "pass"
+      "build": "pass",
+      "notes": []
     }
   ]
 }
