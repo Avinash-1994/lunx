@@ -119,9 +119,13 @@ export async function build(rawConfig: BuildConfig) {
         }));
         
         const cacheDir = path.join(config.root, '.lunx', 'security');
+        // Strict projects wait for fresh OSV data; others build from the cache while a
+        // detached process refreshes it, so a build never waits on the network.
+        const strict = (config as any).security?.vulnSeverity !== undefined || process.env.LUNX_SECURITY_STRICT === '1';
         const cveResult = await security.scanCVE(packagesToScan, {
           cacheDir,
           distDir: path.resolve(config.root, config.outDir || 'dist'),
+          network: strict ? 'wait' : 'background',
         });
         if (!cveResult.clean) {
           // A CVE in a transitive dependency is not a reason to refuse to
