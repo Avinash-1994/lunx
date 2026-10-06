@@ -6,7 +6,8 @@ export const spaPreset: Preset = {
     apply(config: Partial<BuildConfig>): Partial<BuildConfig> {
         return {
             ...config,
-            platform: 'browser',
+            // A platform the project chose (node, edge) is kept: only the default is browser.
+            platform: config.platform || 'browser',
             // In a real implementation, we would add specific SPA plugins here
             // e.g., history API fallback, specific chunking strategies
             esbuildPlugins: [

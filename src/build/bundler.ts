@@ -173,14 +173,12 @@ export async function build(rawConfig: BuildConfig) {
   })();
   securityGate.catch(() => {}); // observed below; avoid an unhandled rejection meanwhile
 
-  // The engine bundler (src/engines; Rolldown by default) builds for production, module federation
-  // included. The legacy engine still owns SSR/node targets and `build.bundler: 'legacy'`.
+  // The engine bundler (src/engines; Rolldown by default) builds for production: browser apps,
+  // module federation, and node / edge / SSR targets. The legacy engine runs only for
+  // `build.bundler: 'legacy'`.
   const { bundlerAvailable, productionBuild } = await import('./production.js');
-  const useEngine =
-    (config.build as any)?.bundler !== 'legacy' &&
-    config.preset !== 'ssr' &&
-    (config.platform ?? 'browser') === 'browser' &&
-    (await bundlerAvailable());
+  const useEngine = (config.build as any)?.bundler !== 'legacy' && (await bundlerAvailable());
+  const serverTarget = config.preset === 'ssr' || (config.platform ?? 'browser') !== 'browser';
 
   let pipeline: any = null;
   try {
@@ -188,7 +186,9 @@ export async function build(rawConfig: BuildConfig) {
     if (useEngine) {
       const { detectFramework } = await import('../core/framework-detector.js');
       const framework = config.framework || (await detectFramework(config.root));
-      result = await productionBuild(config, framework);
+      result = serverTarget
+        ? await (await import('./server-build.js')).serverBuild(config, framework)
+        : await productionBuild(config, framework);
       console.log(`[lunx] bundled ${result.modules.length} modules with ${result.engine} in ${Math.round(result.durationMs)}ms`);
     } else {
       const { FrameworkPipeline } = await import('../core/pipeline/framework-pipeline.js');

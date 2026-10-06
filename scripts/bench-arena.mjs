@@ -2,7 +2,7 @@
  * Benchmarks lunx against every build tool that can be installed from npm, on
  * one identical React + TypeScript app.
  *
- *   npx tsx scripts/bench-arena.mjs [--app <dir>] [--runs 3] [--only lunx,vite]
+ *   npx tsx scripts/bench-arena.mjs [--app <dir>] [--runs 3] [--only lunx,vite] [--scale 2000] [--hmr]
  *
  * Without --app it scaffolds the app and installs ~500 MB of toolchains, so
  * pass --app to reuse a prepared directory.
@@ -17,6 +17,10 @@
  *               way: when can the app start executing?
  *   build       production build, cold (no cache) and warm
  *   output      JS + CSS bytes emitted
+ *   hmr         (--hmr) save a change to App.tsx → Chromium shows it
+ *
+ * --scale N renders a tree of N generated components (plus a shared sheet) from
+ * App, in a copy of the app that shares its node_modules.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -207,7 +211,74 @@ function writeConfigs(dir) {
     ].join('\n'));
 }
 
-const app = flag('--app') ? path.resolve(flag('--app')) : scaffold();
+const baseApp = flag('--app') ? path.resolve(flag('--app')) : scaffold();
+const SCALE = Number(flag('--scale') ?? 0);
+const HMR = process.argv.includes('--hmr');
+const app = SCALE ? scaleApp(baseApp, SCALE) : baseApp;
+
+/**
+ * --scale N: a copy of the app (sharing its node_modules) whose App renders a
+ * tree of N generated components, each with a CSS class from shared sheets.
+ */
+function scaleApp(src, n) {
+    const dir = `${src}-scale-${n}`;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(path.join(dir, 'src', 'gen'), { recursive: true });
+    for (const e of fs.readdirSync(src)) {
+        if (e === 'node_modules' || e.startsWith('out-') || e.startsWith('.')) continue;
+        fs.cpSync(path.join(src, e), path.join(dir, e), { recursive: true });
+    }
+    fs.symlinkSync(path.join(src, 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+    for (let i = 0; i < n; i++) {
+        const kids = [2 * i + 1, 2 * i + 2].filter((k) => k < n);
+        fs.writeFileSync(path.join(dir, 'src', 'gen', `C${i}.tsx`), [
+            ...kids.map((k) => `import C${k} from './C${k}';`),
+            `export default function C${i}({ depth = 0 }: { depth?: number }) {`,
+            `  const label: string = 'node ${i} ' + depth;`,
+            `  return <div className="c${i % 50}">{label}${kids.map((k) => `<C${k} depth={depth + 1} />`).join('')}</div>;`,
+            '}',
+            '',
+        ].join('\n'));
+    }
+    // Styles enter through main.tsx only: the JS-only rolldown entry stays CSS-free.
+    fs.writeFileSync(path.join(dir, 'src', 'gen', 'all.css'), Array.from({ length: 50 }, (_, j) => `.c${j} { margin: ${j % 7}px; }`).join('\n'));
+    const main = path.join(dir, 'src', 'main.tsx');
+    fs.writeFileSync(main, "import './gen/all.css';\n" + fs.readFileSync(main, 'utf8'));
+    const app = fs.readFileSync(path.join(dir, 'src', 'App.tsx'), 'utf8');
+    fs.writeFileSync(path.join(dir, 'src', 'App.tsx'), "import C0 from './gen/C0';\n" + app.replace('</div>;', '<C0 /></div>;'));
+    console.log(`scaled app: ${dir} (${n} components)`);
+    return dir;
+}
+
+let browserPromise = null;
+async function browser() {
+    if (!browserPromise) {
+        browserPromise = import(path.join(REPO, 'node_modules', 'playwright', 'index.mjs')).then(({ chromium }) =>
+            chromium.launch({ executablePath: process.env.CHROMIUM_PATH || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined), args: ['--no-proxy-server'] }));
+    }
+    return browserPromise;
+}
+
+/** Save a change to App.tsx and time until the page shows it. */
+async function hmrRun(port) {
+    const file = path.join(app, 'src', 'App.tsx');
+    const original = fs.readFileSync(file, 'utf8');
+    const page = await (await browser()).newPage();
+    try {
+        await page.goto(`http://127.0.0.1:${port}/`, { timeout: 120_000 });
+        await page.waitForFunction(() => document.querySelector('#t')?.textContent === 'arena', null, { timeout: 120_000 });
+        await sleep(500);
+        const t0 = Date.now();
+        fs.writeFileSync(file, original.replace('>arena<', '>arena-hmr<'));
+        await page.waitForFunction(() => document.querySelector('#t')?.textContent === 'arena-hmr', null, { timeout: 60_000, polling: 'raf' });
+        return Date.now() - t0;
+    } catch {
+        return null;
+    } finally {
+        fs.writeFileSync(file, original);
+        await page.close();
+    }
+}
 const bin = (name) => path.join(app, 'node_modules', '.bin', name + (process.platform === 'win32' ? '.cmd' : ''));
 const PROD = { NODE_ENV: 'production' };
 const DEV = { NODE_ENV: 'development' };
@@ -341,9 +412,10 @@ async function devRun(tool) {
         if (body !== null) appCodeMs = Date.now() - t0;
     }
 
+    const hmrMs = HMR ? await hmrRun(port) : null;
     child.kill('SIGKILL');
     await sleep(300);
-    return { bootMs, appCodeMs };
+    return { bootMs, appCodeMs, hmrMs };
 }
 
 function buildRun(tool) {
@@ -380,6 +452,7 @@ for (const [name, tool] of Object.entries(TOOLS)) {
     if (tool.dev) {
         const boots = [];
         const codes = [];
+        const hmrs = [];
         for (let i = 0; i < RUNS; i++) {
             clearCaches(tool);
             const d = await devRun(tool);
@@ -390,10 +463,12 @@ for (const [name, tool] of Object.entries(TOOLS)) {
             }
             boots.push(d.bootMs);
             if (d.appCodeMs !== null) codes.push(d.appCodeMs);
-            console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms`);
+            if (d.hmrMs !== null && d.hmrMs !== undefined) hmrs.push(d.hmrMs);
+            console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms${HMR ? `, hmr ${d.hmrMs ?? 'failed'}ms` : ''}`);
         }
         if (boots.length) r.devBootMs = median(boots);
         if (codes.length) r.devAppCodeMs = median(codes);
+        if (hmrs.length) r.hmrMs = median(hmrs);
     } else {
         r.devBootMs = null;
     }
@@ -420,6 +495,7 @@ const cols = [
     ['kind', (k) => results[k].kind, 20],
     ['dev boot', (k) => fmt(results[k].devBootMs, 'ms'), 10],
     ['app code', (k) => fmt(results[k].devAppCodeMs, 'ms'), 10],
+    ...(HMR ? [['hmr', (k) => fmt(results[k].hmrMs, 'ms'), 9]] : []),
     ['build cold', (k) => fmt(results[k].buildColdMs, 'ms'), 11],
     ['build warm', (k) => fmt(results[k].buildWarmMs, 'ms'), 11],
     ['JS', (k) => fmt(results[k].jsBytes, 'B'), 10],
@@ -435,5 +511,7 @@ for (const k of Object.keys(results)) {
 }
 
 fs.mkdirSync(path.join(REPO, 'reports'), { recursive: true });
-fs.writeFileSync(path.join(REPO, 'reports', 'BENCH_ARENA.json'), JSON.stringify(results, null, 2));
-console.log(`\nreport: reports${path.sep}BENCH_ARENA.json`);
+const reportName = SCALE ? `BENCH_ARENA_SCALE_${SCALE}.json` : 'BENCH_ARENA.json';
+fs.writeFileSync(path.join(REPO, 'reports', reportName), JSON.stringify({ scale: SCALE || null, runs: RUNS, results }, null, 2));
+console.log(`\nreport: reports${path.sep}${reportName}`);
+if (browserPromise) await (await browserPromise).close();

@@ -49,6 +49,13 @@ export interface LibraryOptions {
     outDir?: string;
     /** Global names of external imports, for UMD / IIFE (`{ react: 'React' }`). */
     globals?: Record<string, string>;
+    /**
+     * Runtime the output targets. Default: Node for CommonJS, browsers otherwise.
+     * 'edge' (workers): bundles every dependency, as there is no node_modules there.
+     */
+    platform?: 'browser' | 'node' | 'edge';
+    /** Check package.json fields against the output (default: true; app server builds turn it off). */
+    checkPackage?: boolean;
 }
 
 export interface LibraryResult {
@@ -56,6 +63,8 @@ export interface LibraryResult {
     durationMs: number;
     /** package.json fields pointing at files that do not exist after the build. */
     problems: string[];
+    /** Source files bundled. */
+    modules: string[];
 }
 
 const ASSET_RE = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|wasm|txt)$/i;
@@ -129,6 +138,7 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
         // A <script> build has no module loader for `react/jsx-runtime`: bundle the (tiny) runtime.
         if (single && /^(react|preact|vue|solid-js)\/jsx(-dev)?-runtime$/.test(id)) return false;
         if (id.startsWith('node:') || builtins.has(id) || builtins.has(id.split('/')[0]!)) return true;
+        if (options.platform === 'edge') return matches(options.external, id);
         return declared.some((d) => id === d || id.startsWith(d + '/')) || matches(options.external, id);
     };
 
@@ -212,13 +222,13 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
         const output: OutputItem[] = await getBundler().bundle({
             input: entries,
             cwd: root,
-            platform: format === 'cjs' ? 'node' : 'browser',
+            platform: options.platform === 'node' ? 'node' : options.platform === 'edge' ? 'browser' : format === 'cjs' ? 'node' : 'browser',
             plugins,
             external: (id: string) => isExternal(id, single),
             quiet: true,
             define: { 'import.meta.env.MODE': JSON.stringify('production'), 'import.meta.env.PROD': 'true', 'import.meta.env.DEV': 'false', 'import.meta.env.SSR': 'false' },
             extensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.vue', '.svelte', '.json'],
-            conditions: ['import', 'module', 'default'],
+            conditions: options.platform === 'edge' ? ['workerd', 'worker', 'edge-light', 'import', 'module', 'default'] : options.platform === 'node' ? ['node', 'import', 'module', 'default'] : ['import', 'module', 'default'],
             jsx: framework === 'preact' ? { runtime: 'automatic', importSource: 'preact' } : undefined,
         }, {
             dir: outDir,
@@ -254,7 +264,7 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
         for (const f of written) files.push({ file: f, format: 'dts', size: fs.statSync(path.join(outDir, f)).size });
     }
 
-    return { files, durationMs: performance.now() - started, problems: checkPackageJson(root, pkg) };
+    return { files, durationMs: performance.now() - started, problems: options.checkPackage === false ? [] : checkPackageJson(root, pkg), modules: [...sourceModules] };
 }
 
 /**

@@ -34,7 +34,7 @@
     "@lunx/native-linux-x64-gnu": "1.1.0"
   },
   "scripts": {
-    "build": "rimraf dist && npm run build:native && npm run build:workspaces && tsc -p tsconfig.build.json && node ./scripts/postbuild.js && node ./scripts/verify-native.mjs && node ./scripts/verify-pack-size.mjs",
+    "build": "rimraf dist && npm run build:native && npm run build:workspaces && tsc -p tsconfig.build.json && node ./scripts/postbuild.js && node ./scripts/minify-dist.mjs && node ./scripts/verify-native.mjs && node ./scripts/verify-pack-size.mjs",
     "build:native": "node ./scripts/build_native.js",
     "dev": "bun src/cli.ts dev",
     "dev:bun": "bun src/cli.ts dev",
@@ -208,26 +208,19 @@
   },
   "peerDependencies": {
     "@babel/core": "^7.28.5",
-    "@babel/plugin-transform-modules-commonjs": "^7.27.1",
     "@babel/preset-react": "^7.28.5",
     "@babel/preset-typescript": "^7.28.5",
     "@tauri-apps/api": "^2.11.0",
     "@vue/compiler-sfc": "^3.5.26",
     "@vue/server-renderer": "^3.5.26",
-    "axe-core": "^4.11.1",
     "babel-preset-solid": "^1.8.0",
-    "esbuild-svelte": "^0.9.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "svelte-preprocess": "^6.0.3",
     "vue": "^3.5.26",
     "@swc/core": ">=1.15.24"
   },
   "peerDependenciesMeta": {
     "@babel/core": {
-      "optional": true
-    },
-    "@babel/plugin-transform-modules-commonjs": {
       "optional": true
     },
     "@babel/preset-react": {
@@ -245,22 +238,13 @@
     "@vue/server-renderer": {
       "optional": true
     },
-    "axe-core": {
-      "optional": true
-    },
     "babel-preset-solid": {
-      "optional": true
-    },
-    "esbuild-svelte": {
       "optional": true
     },
     "react": {
       "optional": true
     },
     "react-dom": {
-      "optional": true
-    },
-    "svelte-preprocess": {
       "optional": true
     },
     "vue": {

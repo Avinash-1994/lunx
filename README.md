@@ -25,6 +25,7 @@
 - [Configuration & Auto-Detection](#-configuration--auto-detection)
 - [Module Federation Tutorial](#-module-federation-tutorial)
 - [Library Mode](#-library-mode)
+- [Server, Edge and SSR Builds](#%EF%B8%8F-server-edge-and-ssr-builds)
 - [Built-in Security CLI Suite](#-built-in-security-cli-suite)
 - [Official Plugins](#-official-plugins)
 - [Performance Benchmarks](#-performance-benchmarks)
@@ -399,6 +400,21 @@ export default defineConfig({
 - Vue and Svelte components and Solid / Preact JSX compile as in app builds; CSS, Sass, Less and CSS modules are extracted to `style.css`; assets are inlined.
 - `.d.ts` files come from Oxc's isolated declarations in milliseconds, or from `tsc` when an export has no explicit type.
 - The build checks that package.json `main`, `module`, `types` and `exports` point at files it wrote, and suggests an `exports` map when they do not.
+
+---
+
+## 🖥️ Server, Edge and SSR Builds
+
+```typescript
+export default defineConfig({ platform: 'node' });   // or 'edge'
+export default defineConfig({ preset: 'ssr', entry: ['src/entry-server.tsx'] });
+```
+
+- `platform: 'node'` bundles the server entry (`entry`, or `src/server.ts`, `src/entry-server.tsx`, `src/index.ts`…) as an ES module; `dependencies` stay in `node_modules`.
+- `platform: 'edge'` bundles every dependency too, for Workers-style runtimes with no `node_modules`, resolving `workerd` / `worker` / `edge-light` exports.
+- `preset: 'ssr'` builds the page into `dist/browser` and the server entry into `dist/node`.
+
+All three run on the same Rolldown engine as app builds.
 
 ---
 
