@@ -3,49 +3,49 @@
     "stage": "init",
     "decision": "initialize",
     "reason": "Starting build initialization",
-    "timestamp": 1791290375908
+    "timestamp": 1791291504481
   },
   {
     "stage": "plugins",
     "decision": "load",
     "reason": "Loaded plugin: lunx:json@1.0.0 (js)",
-    "timestamp": 1791290375908
+    "timestamp": 1791291504481
   },
   {
     "stage": "plugins",
     "decision": "load",
     "reason": "Loaded plugin: lunx:asset@1.0.0 (js)",
-    "timestamp": 1791290375908
+    "timestamp": 1791291504481
   },
   {
     "stage": "plugins",
     "decision": "load",
     "reason": "Loaded plugin: lunx:js-transform@1.0.0 (js)",
-    "timestamp": 1791290375908
+    "timestamp": 1791291504481
   },
   {
     "stage": "plugins",
     "decision": "load",
     "reason": "Loaded plugin: lunx:postcss@1.0.0 (js)",
-    "timestamp": 1791290375909
+    "timestamp": 1791291504481
   },
   {
     "stage": "plugins",
     "decision": "load",
     "reason": "Loaded plugin: lunx:linker@1.0.0 (js)",
-    "timestamp": 1791290375909
+    "timestamp": 1791291504481
   },
   {
     "stage": "plugins",
     "decision": "load",
     "reason": "Loaded plugin: lunx:html@1.0.0 (js)",
-    "timestamp": 1791290375909
+    "timestamp": 1791291504481
   },
   {
     "stage": "plugins",
     "decision": "load",
     "reason": "Loaded plugin: lunx:static@1.0.0 (js)",
-    "timestamp": 1791290375909
+    "timestamp": 1791291504481
   },
   {
     "stage": "init",
@@ -68,22 +68,22 @@
         "cssModules": false
       }
     },
-    "timestamp": 1791290375909
+    "timestamp": 1791291504481
   },
   {
     "stage": "init",
     "decision": "performance",
-    "reason": "Initialization took 0.13ms",
+    "reason": "Initialization took 0.23ms",
     "data": {
-      "duration": 0.13359000000036758
+      "duration": 0.23475200000029872
     },
-    "timestamp": 1791290375909
+    "timestamp": 1791291504481
   },
   {
     "stage": "fingerprint",
     "decision": "start",
     "reason": "Computing input fingerprint",
-    "timestamp": 1791290375909
+    "timestamp": 1791291504481
   },
   {
     "stage": "fingerprint",
@@ -92,61 +92,61 @@
     "data": {
       "inputHash": "a52bbc12c9cba3a5"
     },
-    "timestamp": 1791290375909
+    "timestamp": 1791291504482
   },
   {
     "stage": "fingerprint",
     "decision": "performance",
-    "reason": "Fingerprinting took 0.80ms",
+    "reason": "Fingerprinting took 0.98ms",
     "data": {
-      "duration": 0.8034699999998338
+      "duration": 0.9812920000003942
     },
-    "timestamp": 1791290375909
+    "timestamp": 1791291504482
   },
   {
     "stage": "plugins",
     "decision": "hook",
-    "reason": "Executed lunx:asset:load (1791290368345.50ms)",
-    "timestamp": 1791290375909
+    "reason": "Executed lunx:asset:load (1791291498242.25ms)",
+    "timestamp": 1791291504482
   },
   {
     "stage": "plugins",
     "decision": "hook",
-    "reason": "Executed lunx:json:load (1791290368345.48ms)",
-    "timestamp": 1791290375909
+    "reason": "Executed lunx:json:load (1791291498242.23ms)",
+    "timestamp": 1791291504482
   },
   {
     "stage": "plugins",
     "decision": "hook",
-    "reason": "Executed lunx:asset:load (1791290368346.19ms)",
-    "timestamp": 1791290375910
+    "reason": "Executed lunx:asset:load (1791291498242.75ms)",
+    "timestamp": 1791291504483
   },
   {
     "stage": "plugins",
     "decision": "hook",
-    "reason": "Executed lunx:json:load (1791290368346.17ms)",
-    "timestamp": 1791290375910
+    "reason": "Executed lunx:json:load (1791291498242.73ms)",
+    "timestamp": 1791291504483
   },
   {
     "stage": "graph",
     "decision": "attached",
     "reason": "Dependency graph attached",
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "graph",
     "decision": "performance",
-    "reason": "Dependency Graph took 0.93ms",
+    "reason": "Dependency Graph took 1.37ms",
     "data": {
-      "duration": 0.9329779999998209
+      "duration": 1.3671830000002956
     },
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "plan",
     "decision": "start",
     "reason": "Starting build planning",
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "plan",
@@ -156,22 +156,22 @@
       "planId": "49e0927c0a712a06",
       "chunkCount": 1
     },
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "plan",
     "decision": "performance",
     "reason": "Build Planning took 0.11ms",
     "data": {
-      "duration": 0.10657900000023801
+      "duration": 0.11150100000031671
     },
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "parallel_plan",
     "decision": "start",
     "reason": "Planning parallel execution",
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "parallel_plan",
@@ -180,108 +180,108 @@
     "data": {
       "groups": 1
     },
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "parallel_plan",
     "decision": "performance",
     "reason": "Parallel Planning took 0.00ms",
     "data": {
-      "duration": 0.0034529999993537785
+      "duration": 0.003403000000616885
     },
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "determinism",
     "decision": "check",
     "reason": "Checking determinism for mode: production",
-    "timestamp": 1791290375910
+    "timestamp": 1791291504483
   },
   {
     "stage": "determinism",
     "decision": "pass",
     "reason": "Determinism checks passed",
-    "timestamp": 1791290375910
+    "timestamp": 1791291504484
   },
   {
     "stage": "determinism",
     "decision": "performance",
     "reason": "Determinism Check took 0.01ms",
     "data": {
-      "duration": 0.006086999999752152
+      "duration": 0.006879999999910069
     },
-    "timestamp": 1791290375910
+    "timestamp": 1791291504484
   },
   {
     "stage": "execute",
     "decision": "start",
     "reason": "Starting optimized execution",
-    "timestamp": 1791290375910
+    "timestamp": 1791291504484
   },
   {
     "stage": "optimize",
     "decision": "start",
     "reason": "Starting Global Native Optimization",
-    "timestamp": 1791290375913
+    "timestamp": 1791291504486
   },
   {
     "stage": "optimize",
     "decision": "complete",
     "reason": "Optimized assets/entry2.30501056.bundle.js: 783 -> 497 bytes (36.53% savings)",
-    "timestamp": 1791290375915
+    "timestamp": 1791291504489
   },
   {
     "stage": "execute",
     "decision": "performance",
-    "reason": "Execution took 4.53ms",
+    "reason": "Execution took 5.73ms",
     "data": {
-      "duration": 4.528072999999495
+      "duration": 5.731505000000652
     },
-    "timestamp": 1791290375915
+    "timestamp": 1791291504489
   },
   {
     "stage": "optimize",
     "decision": "start",
     "reason": "Starting parallel optimization passes",
-    "timestamp": 1791290375915
+    "timestamp": 1791291504489
   },
   {
     "stage": "optimize",
     "decision": "minify",
     "reason": "Minifying assets/entry2.30501056.bundle.js",
-    "timestamp": 1791290375915
+    "timestamp": 1791291504489
   },
   {
     "stage": "optimize",
     "decision": "complete",
     "reason": "Optimization finished. 1 artifacts generated.",
-    "timestamp": 1791290375916
+    "timestamp": 1791291504490
   },
   {
     "stage": "optimize",
     "decision": "performance",
-    "reason": "Optimization took 0.62ms",
+    "reason": "Optimization took 0.90ms",
     "data": {
-      "duration": 0.6163060000008045
+      "duration": 0.8996349999997619
     },
-    "timestamp": 1791290375916
+    "timestamp": 1791291504490
   },
   {
     "stage": "emit",
     "decision": "start",
     "reason": "Starting emit phase",
-    "timestamp": 1791290375916
+    "timestamp": 1791291504491
   },
   {
     "stage": "emit",
     "decision": "writing",
     "reason": "Writing artifact: /home/user/lunx/tests/fixtures/cache/cache-consistency/dist2/assets/entry2.30501056.bundle.js",
-    "timestamp": 1791290375916
+    "timestamp": 1791291504492
   },
   {
     "stage": "emit",
     "decision": "writing",
     "reason": "Writing artifact: /home/user/lunx/tests/fixtures/cache/cache-consistency/dist2/index.html",
-    "timestamp": 1791290375917
+    "timestamp": 1791291504493
   }
 ]
