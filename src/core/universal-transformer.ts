@@ -5,6 +5,7 @@
  */
 
 import path from 'path';
+import { createHash } from 'crypto';
 import { looksLikeJsx } from './jsx-detect.js';
 import fs from 'fs/promises';
 import os from 'os';
@@ -302,7 +303,10 @@ if (import.meta.hot && __lunx_refresh) {
             if (!compiler.parse) return { code };
 
             const { descriptor } = compiler.parse(code, { filename: filePath });
-            const scopeId = `data-v-${Math.random().toString(36).substring(2, 9)}`;
+            // Deterministic, as in Vite: the same file builds to the same output (reproducible
+            // builds, stable cache keys). Dev keys on the path alone so an edit keeps its scope.
+            const relative = path.relative(this.root, filePath).split(path.sep).join('/');
+            const scopeId = `data-v-${createHash('sha256').update(relative + (isDev ? '' : code)).digest('hex').slice(0, 8)}`;
             const hasTemplate = !!descriptor.template;
 
             let scriptContent = 'const _sfc_main = {};';

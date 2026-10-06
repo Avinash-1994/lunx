@@ -127,6 +127,11 @@ export default {
         type: 'boolean',
         description: 'Library mode: emit .d.ts files (default: when tsconfig.json exists)',
       })
+      .option('force', {
+        type: 'boolean',
+        description: 'Rebuild even if nothing changed since the last build',
+        default: false
+      })
       .option('watch', {
         alias: 'w',
         type: 'boolean',
@@ -143,18 +148,34 @@ export default {
     }
 
     const root = args.root ? path.resolve(process.cwd(), args.root) : process.cwd();
+    const mark = (name: string) => { if (process.env.LUNX_TIMINGS) console.log(`  [lunx:timings] @${name.padEnd(31)} ${(process.uptime() * 1000).toFixed(1).padStart(7)} ms`); };
+    mark('handler');
 
     // Meta-frameworks run their own toolchain (see meta-frameworks/delegate.ts).
     const { maybeDelegate } = await import('../../meta-frameworks/delegate.js');
     if (await maybeDelegate('build', root, undefined)) return;
+    mark('meta-framework check');
+
+    // Nothing changed since the last build with these options: its output stands.
+    const buildCache = await import('../../build/build-cache.js');
+    const cacheOptions = { lib: args.lib ?? null, formats: args.formats ?? null, dts: args.dts ?? null, name: args.name ?? null, outDir: args.outDir ?? null, prod: args.prod, compatRollup: !!args['compat-rollup'] };
+    // --force rebuilds but still records the result for the next build.
+    const cached = buildCache.cacheEnabled() && !args.watch ? buildCache.checkBuild(root, cacheOptions) : null;
+    mark('build cache check');
+    if (cached?.hit && !args.force) {
+      console.log(`\n  ✓ Up to date: nothing changed since the last build (${path.relative(process.cwd(), cached.outDir!) || '.'}, ${Math.round(process.uptime() * 1000)} ms). Use --force to rebuild.\n`);
+      return;
+    }
 
     const telemetry = new Telemetry(root);
     await telemetry.init();
     telemetry.start();
+    mark('telemetry');
 
     try {
       const { loadConfig } = await import('../../config/index.js');
       const config = await loadConfig(root);
+      mark('config');
       config.root = root;
       config.mode = args.prod !== false ? 'production' : config.mode || 'development';
       if (args.outDir) (config as any).outDir = args.outDir;
@@ -172,6 +193,7 @@ export default {
         if (args.name) libOption.name = args.name;
         libOption.outDir ??= (config as any).outDir || 'dist';
         await runLibraryBuild(root, libOption, config);
+        if (cached) buildCache.recordBuild(root, cached.pending, path.resolve(root, libOption.outDir), (config as any).build?.cache !== false);
         await telemetry.stop(true);
         if (args.watch) {
           const { watch } = await import('../../lib/watcher.js');
@@ -221,11 +243,15 @@ export default {
 
       const { build: runBuild } = await import('../../build/bundler.js');
       const t0 = performance.now();
+      if (process.env.LUNX_TIMINGS) console.log(`  [lunx:timings] ${'cli start, config, env'.padEnd(32)} ${(process.uptime() * 1000).toFixed(1).padStart(7)} ms`);
       const result = await runBuild(config);
       const elapsed = Math.round(performance.now() - t0);
 
       const outDir = path.resolve(root, (config as any).outDir || 'dist');
+      if (cached) buildCache.recordBuild(root, cached.pending, outDir, (config as any).build?.cache !== false);
+      const tSummary = performance.now();
       await printBuildSummary(outDir, elapsed);
+      if (process.env.LUNX_TIMINGS) console.log(`  [lunx:timings] ${'size summary'.padEnd(32)} ${(performance.now() - tSummary).toFixed(1).padStart(7)} ms`);
 
       if (args.profile) {
         printProfileReport(result);

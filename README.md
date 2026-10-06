@@ -552,6 +552,7 @@ keep working.
 | `lunx dev` | Start development server with HMR |
 | `lunx build` | Create minified production build with security scan |
 | `lunx build --lib [entry]` | Build a library: ES/CJS (`--formats es,cjs,umd,iife`, `--name`), `.d.ts`, `--watch` |
+| `lunx build --force` | Rebuild even when nothing changed (builds are cached in `.lunx/`) |
 | `lunx preview` | Serve production build locally for verification |
 | `lunx create` | Interactive project scaffolding |
 | `lunx migrate` | Auto-migrate project configuration |
@@ -560,6 +561,8 @@ keep working.
 | `lunx security` | Execute the 8-command security audit suite |
 | `lunx why <module>` | Print import chain leading to a specific module |
 | `lunx info` | Print system & environment info for bug reports |
+
+**Build cache.** `lunx build` skips the build when no project file, installed package, env var or option changed since the last one and the output is untouched, and caches framework compiler output (Vue, Svelte, Solid, JSX) so a rebuild recompiles only changed components. `--force` or `LUNX_BUILD_CACHE=0` bypass it; `build: { cache: false }` turns it off. `LUNX_TIMINGS=1` prints where build time goes.
 
 ---
 

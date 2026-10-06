@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Meta-frameworks built by lunx**: SvelteKit, React Router, Remix, TanStack Start, Qwik City, Astro, Nuxt, SolidStart, VitePress, Waku, Marko Run and Analog run in `lunx dev` / `lunx build` on lunx's plugin host (Rolldown + Oxc), with no Vite, Rollup or vite-node code. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil run on their own CLIs, labelled as such. `LUNX_PLUGIN_HOST=0` opts out.
 - **Module federation on lunx's engine**: ES module `remoteEntry.js` with the webpack 5 container API, `mf-manifest.json`, a webpack-format share scope (`singleton`, `requiredVersion`, `strictVersion`, `eager`), static and lazy remote imports. Dev and built apps mix freely, and a remote fast-refreshes inside the host page.
 - **Library mode**: `lunx build --lib [entry]` (or `lib` in lunx.config, or a vite.config `build.lib`) builds ES / CommonJS / UMD / IIFE outputs with automatic externals, CSS extraction, `.d.ts` via Oxc isolated declarations (tsc fallback), package.json `exports` checks and `--watch`.
+- **Build cache** (`.lunx/`): an unchanged project skips `lunx build` (~150 ms instead of ~700 ms on a 2,000-component app), and framework compiler output is cached per file (1,000 Vue SFCs: 3.5 s cold, 0.7 s warm). `--force`, `LUNX_BUILD_CACHE=0` or `build.cache: false` bypass it. `LUNX_TIMINGS=1` prints build phase timings.
 - esbuild plugins from `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
 - `npm run test:federation-e2e`; the browser matrix now clicks through every fixture (133/133).
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `engines.node` is `^20.19.0 || >=22.12.0`, as Rolldown requires.
 
 ### Fixed
+- Vue scoped-style ids are derived from the file path and source, so builds are reproducible.
 - Dev server no longer restarts in a loop when files change next to a missing config file (JS watcher).
 - No warning about a missing native binary: the optional native helpers are not required.
 
