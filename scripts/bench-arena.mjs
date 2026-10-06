@@ -15,7 +15,7 @@
  *               is the whole bundle, because that is what they must produce
  *               before the browser can run anything. Same question either
  *               way: when can the app start executing?
- *   build       production build, cold (no cache) and warm
+ *   build       production build, cold (no cache) and warm, medians of --runs
  *   output      JS + CSS bytes emitted
  *   hmr         (--hmr) save a change to App.tsx → Chromium shows it
  *
@@ -473,19 +473,27 @@ for (const [name, tool] of Object.entries(TOOLS)) {
         r.devBootMs = null;
     }
 
-    clearCaches(tool);
-    const cold = buildRun(tool);
+    // Cold builds swing 2x on a shared machine (page cache, CPU steal), so one
+    // sample says little: take the median of RUNS cache-cleared builds.
+    const colds = [];
+    let cold;
+    for (let i = 0; i < RUNS; i++) {
+        clearCaches(tool);
+        cold = buildRun(tool);
+        if (cold.status !== 0) break;
+        colds.push(cold.ms);
+    }
     if (cold.status !== 0) {
         r.buildError = cold.log;
         console.log(`${name} build FAILED (exit ${cold.status})`);
     } else {
         const warm = [];
         for (let i = 0; i < RUNS; i++) warm.push(buildRun(tool).ms);
-        r.buildColdMs = cold.ms;
+        r.buildColdMs = median(colds);
         r.buildWarmMs = median(warm);
         r.jsBytes = cold.js;
         r.cssBytes = cold.css;
-        console.log(`${name} build: cold ${cold.ms}ms, warm ${median(warm)}ms, js ${cold.js}B, css ${cold.css}B`);
+        console.log(`${name} build: cold ${median(colds)}ms (${colds.join('/')}), warm ${median(warm)}ms, js ${cold.js}B, css ${cold.css}B`);
     }
     results[name] = r;
 }
