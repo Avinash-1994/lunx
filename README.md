@@ -470,19 +470,33 @@ lunx security report
 
 ## 📊 Performance Benchmarks
 
-One React + TypeScript app, every tool installed from npm, median of 3 runs (`npx tsx scripts/bench-arena.mjs`, results in reports/BENCH_ARENA.json). Measured on a Linux cloud container; compare ratios, not absolute times.
+Every tool installed from npm, same React + TypeScript app, median of 3 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
 
-| Tool | Dev boot | App code ready | Build (cold) | Build (warm) | JS out |
-|---|---|---|---|---|---|
-| **lunx** | **307 ms** | **334 ms** | 527 ms | 418 ms | 221 KB |
-| Vite 7 | 379 ms | 460 ms | 497 ms | 450 ms | 220 KB |
-| Rspack | 381 ms | 422 ms | 353 ms | 343 ms | 219 KB |
-| Parcel | 1242 ms | 1249 ms | 1457 ms | 1462 ms | 222 KB |
-| webpack | 1573 ms | 1656 ms | 4185 ms | 3794 ms | 225 KB |
-| esbuild (bundler only) | – | – | 55 ms | 51 ms | 223 KB |
-| Bun (bundler only) | – | – | 31 ms | 30 ms | 212 KB |
+**Small app**
 
-`lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the other tools do not. esbuild and Bun have no dev server or HMR here and only bundle.
+| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
+|---|---|---|---|---|---|---|
+| **lunx** | **338 ms** | **341 ms** | 53 ms | 416 ms | 425 ms | 221 KB |
+| Vite 8 | 416 ms | 530 ms | 46 ms | 444 ms | 459 ms | 220 KB |
+| Rspack | 376 ms | 408 ms | 217 ms | 323 ms | 327 ms | 219 KB |
+| Parcel | 1406 ms | 1419 ms | 30 ms | 1673 ms | 1515 ms | 222 KB |
+| webpack | 1451 ms | 1557 ms | 264 ms | 3992 ms | 3972 ms | 225 KB |
+| esbuild (bundler only) | – | – | – | 57 ms | 57 ms | 223 KB |
+| Bun (bundler only) | – | – | – | 37 ms | 43 ms | 212 KB |
+
+**Large app: 2,000 components** (`--scale 2000`)
+
+| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
+|---|---|---|---|---|---|---|
+| **lunx** | **315 ms** | **320 ms** | **183 ms** | 947 ms | **692 ms** | 470 KB |
+| Vite 8 | 367 ms | 653 ms | 183 ms | 742 ms | 720 ms | 470 KB |
+| Rspack | 612 ms | 739 ms | 627 ms | 739 ms | 794 ms | 493 KB |
+| Parcel | 5194 ms | 5227 ms | 198 ms | 5524 ms | 5606 ms | 455 KB |
+| webpack | 4077 ms | 4333 ms | 1007 ms | 8260 ms | 8864 ms | 516 KB |
+| esbuild (bundler only) | – | – | – | 163 ms | 150 ms | 493 KB |
+| Bun (bundler only) | – | – | – | 96 ms | 96 ms | 430 KB |
+
+Where lunx is behind: cold builds (the first build after a cache clear) trail Vite and Rspack, and esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the others do not.
 
 ---
 

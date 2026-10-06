@@ -4,13 +4,77 @@
   "results": {
     "lunx": {
       "kind": "module server",
-      "devBootMs": 347,
-      "devAppCodeMs": 352,
-      "hmrMs": 157,
-      "buildColdMs": 896,
-      "buildWarmMs": 619,
+      "devBootMs": 315,
+      "devAppCodeMs": 320,
+      "hmrMs": 183,
+      "buildColdMs": 947,
+      "buildWarmMs": 692,
       "jsBytes": 470161,
       "cssBytes": 804
+    },
+    "vite": {
+      "kind": "module server",
+      "devBootMs": 367,
+      "devAppCodeMs": 653,
+      "hmrMs": 183,
+      "buildColdMs": 742,
+      "buildWarmMs": 720,
+      "jsBytes": 469664,
+      "cssBytes": 804
+    },
+    "rspack": {
+      "kind": "bundler",
+      "devBootMs": 612,
+      "devAppCodeMs": 739,
+      "hmrMs": 627,
+      "buildColdMs": 739,
+      "buildWarmMs": 794,
+      "jsBytes": 492852,
+      "cssBytes": 803
+    },
+    "webpack": {
+      "kind": "bundler",
+      "devBootMs": 4077,
+      "devAppCodeMs": 4333,
+      "hmrMs": 1007,
+      "buildColdMs": 8260,
+      "buildWarmMs": 8864,
+      "jsBytes": 515573,
+      "cssBytes": 0
+    },
+    "parcel": {
+      "kind": "bundler",
+      "devBootMs": 5194,
+      "devAppCodeMs": 5227,
+      "hmrMs": 198,
+      "buildColdMs": 5524,
+      "buildWarmMs": 5606,
+      "jsBytes": 455353,
+      "cssBytes": 881
+    },
+    "esbuild": {
+      "kind": "bundler",
+      "devBootMs": null,
+      "buildColdMs": 163,
+      "buildWarmMs": 150,
+      "jsBytes": 493461,
+      "cssBytes": 804
+    },
+    "bun": {
+      "kind": "bundler",
+      "devBootMs": null,
+      "buildColdMs": 96,
+      "buildWarmMs": 96,
+      "jsBytes": 430328,
+      "cssBytes": 804
+    },
+    "rolldown": {
+      "kind": "bundler (JS only)",
+      "devBootMs": null,
+      "buildColdMs": 958,
+      "buildWarmMs": 464,
+      "jsBytes": 534865,
+      "cssBytes": 0
     }
   }
 }
