@@ -29,7 +29,7 @@ export class DevWatcher extends EventEmitter {
     private timer: NodeJS.Timeout | null = null;
     private engine: 'rust-notify' | 'chokidar' | 'unknown' = 'unknown';
 
-    constructor(private rootDir: string, private debounceMs: number = 50) {
+    constructor(private rootDir: string, private debounceMs: number = 10) {
         super();
         this.start();
     }

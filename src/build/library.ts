@@ -238,6 +238,7 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
             entryFileNames: (chunk: any) => `${name(chunk.name)}${ext}`,
             chunkFileNames: `chunks/[name]-[hash]${ext}`,
             minify: options.minify ?? single,
+            keepAnnotations: !single,
             sourcemap: options.sourcemap ?? false,
             inlineDynamicImports: single,
             exports: 'named',

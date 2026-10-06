@@ -129,7 +129,7 @@ export class FSWatcher extends EventEmitter {
         this.options = {
             ignoreInitial: options.ignoreInitial ?? true,
             persistent: options.persistent ?? true,
-            debounce: options.debounce ?? 20,
+            debounce: options.debounce ?? 10,
             depth: options.depth ?? Infinity,
         };
         this.ignoredByOptions = compileIgnored(options.ignored);

@@ -479,111 +479,116 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
     const defaultDeps = frameworkDeps[primaryFramework] || [];
 
-    // Auto-discover from package.json
-    let pkgDepsList: string[] = [];
-    try {
-      const pkgJsonRaw = await fs.readFile(path.join(cfg.root, 'package.json'), 'utf-8');
-      const pkgJson = JSON.parse(pkgJsonRaw);
-      pkgDepsList = Object.keys({ ...pkgJson.dependencies, ...pkgJson.peerDependencies });
-    } catch { }
+    // Scanning the sources for imports and pre-bundling run in the background, as in
+    // Vite: the server answers at once, and module requests wait for prebundleReady.
+    // (Awaiting the scan made boot grow with the app: ~0.5s at 2,000 modules.)
+    prebundleReady = (async () => {
+      // Auto-discover from package.json
+      let pkgDepsList: string[] = [];
+      try {
+        const pkgJsonRaw = await fs.readFile(path.join(cfg.root, 'package.json'), 'utf-8');
+        const pkgJson = JSON.parse(pkgJsonRaw);
+        pkgDepsList = Object.keys({ ...pkgJson.dependencies, ...pkgJson.peerDependencies });
+      } catch { }
 
-    // Pre-bundle what the app imports, not everything it lists: a crawl of
-    // the sources from the entry is a few ms; bundling unused dependencies
-    // cost ~1s per boot. Anything missed is still bundled on first request.
-    try {
-      const { scanDeps } = await import('./dep-scan.js');
-      const scan = await scanDeps(cfg.root, cfg.entry?.length ? cfg.entry : ['index.html'], aliases);
-      if (scan.files > 0) pkgDepsList = [...scan.deps];
-      _mark(`scanned ${scan.files} files, ${scan.deps.size} deps`);
-    } catch (e: any) {
-      log.debug(`dependency scan failed, pre-bundling package.json deps: ${e.message}`);
-    }
+      // Pre-bundle what the app imports, not everything it lists: a crawl of
+      // the sources from the entry is a few ms; bundling unused dependencies
+      // cost ~1s per boot. Anything missed is still bundled on first request.
+      try {
+        const { scanDeps } = await import('./dep-scan.js');
+        const scan = await scanDeps(cfg.root, cfg.entry?.length ? cfg.entry : ['index.html'], aliases);
+        if (scan.files > 0) pkgDepsList = [...scan.deps];
+        _mark(`scanned ${scan.files} files, ${scan.deps.size} deps`);
+      } catch (e: any) {
+        log.debug(`dependency scan failed, pre-bundling package.json deps: ${e.message}`);
+      }
 
-    // 3. User Config (prebundle)
-    const prebundleConfig = cfg.prebundle || { enabled: true, include: [], exclude: [] };
+      // 3. User Config (prebundle)
+      const prebundleConfig = cfg.prebundle || { enabled: true, include: [], exclude: [] };
 
-    if (prebundleConfig.enabled !== false) {
-      _mark('prebundle start');
-      // Merge sources
-      let depsToBundle = new Set([
-        ...defaultDeps,
-        ...pkgDepsList,
-        ...(prebundleConfig.include || [])
-      ]);
+      if (prebundleConfig.enabled !== false) {
+        _mark('prebundle start');
+        // Merge sources
+        let depsToBundle = new Set([
+          ...defaultDeps,
+          ...pkgDepsList,
+          ...(prebundleConfig.include || [])
+        ]);
 
-      // ── Server-only packages that must NEVER be pre-bundled as browser ESM ──
-      // These packages use Node.js built-ins (node:fs, node:url, etc.) and are
-      // only used in the server/build pipeline, not in browser code.
-      // Lunx understands the SSR boundary better than any other build tool.
-      const SERVER_ONLY_PACKAGES = new Set([
-        // Meta-framework cores (all Node.js SSR engines)
-        'astro', '@astrojs/compiler', '@astrojs/prism',
-        '@sveltejs/kit', '@sveltejs/vite-plugin-svelte',
-        'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
-        'next', '@next/env', '@next/swc',
-        'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
-        // (@angular/core and @builder.io/qwik are browser runtimes: excluding
-        // them made other packages bundle private copies of them.)
-        '@angular/cli', '@angular/compiler-cli', '@angular/build',
-        '@analogjs/platform', '@analogjs/vite-plugin-angular',
-        '@builder.io/qwik-city',
-        'waku', '@waku/dev-server',
-        'vitepress', 'vite',
-        '@solidjs/start',
-        '@tanstack/start', '@tanstack/router-vite-plugin',
-        'electron', 'electron-builder',
-        '@tauri-apps/cli', '@tauri-apps/api',
-        // Build tools (never browser code)
-        'esbuild', 'rollup', 'webpack', 'parcel',
-        'typescript', 'ts-node', 'tsx',
-        // Node-only utilities
-        'chokidar', 'better-sqlite3', 'ws',
-        'express', 'koa', 'fastify', 'hono',
-      ]);
+        // ── Server-only packages that must NEVER be pre-bundled as browser ESM ──
+        // These packages use Node.js built-ins (node:fs, node:url, etc.) and are
+        // only used in the server/build pipeline, not in browser code.
+        // Lunx understands the SSR boundary better than any other build tool.
+        const SERVER_ONLY_PACKAGES = new Set([
+          // Meta-framework cores (all Node.js SSR engines)
+          'astro', '@astrojs/compiler', '@astrojs/prism',
+          '@sveltejs/kit', '@sveltejs/vite-plugin-svelte',
+          'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
+          'next', '@next/env', '@next/swc',
+          'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
+          // (@angular/core and @builder.io/qwik are browser runtimes: excluding
+          // them made other packages bundle private copies of them.)
+          '@angular/cli', '@angular/compiler-cli', '@angular/build',
+          '@analogjs/platform', '@analogjs/vite-plugin-angular',
+          '@builder.io/qwik-city',
+          'waku', '@waku/dev-server',
+          'vitepress', 'vite',
+          '@solidjs/start',
+          '@tanstack/start', '@tanstack/router-vite-plugin',
+          'electron', 'electron-builder',
+          '@tauri-apps/cli', '@tauri-apps/api',
+          // Build tools (never browser code)
+          'esbuild', 'rollup', 'webpack', 'parcel',
+          'typescript', 'ts-node', 'tsx',
+          // Node-only utilities
+          'chokidar', 'better-sqlite3', 'ws',
+          'express', 'koa', 'fastify', 'hono',
+        ]);
 
-      // Filter 1: Must verify existence in node_modules (Avoid resolve errors)
-      const validDeps = new Set<string>();
-      for (const dep of depsToBundle) {
-        // Exclude user-specified overrides
-        if (prebundleConfig.exclude?.includes(dep)) continue;
+        // Filter 1: Must verify existence in node_modules (Avoid resolve errors)
+        const validDeps = new Set<string>();
+        for (const dep of depsToBundle) {
+          // Exclude user-specified overrides
+          if (prebundleConfig.exclude?.includes(dep)) continue;
 
-        // Exclude server-only / Node.js-only packages from browser bundling
-        const rootPkg = dep.startsWith('@') ? dep.split('/').slice(0, 2).join('/') : dep.split('/')[0];
-        if (SERVER_ONLY_PACKAGES.has(rootPkg) || SERVER_ONLY_PACKAGES.has(dep)) continue;
+          // Exclude server-only / Node.js-only packages from browser bundling
+          const rootPkg = dep.startsWith('@') ? dep.split('/').slice(0, 2).join('/') : dep.split('/')[0];
+          if (SERVER_ONLY_PACKAGES.has(rootPkg) || SERVER_ONLY_PACKAGES.has(dep)) continue;
 
-        try {
-          const isDirectDep = pkgDeps.includes(rootPkg);
-          if (isDirectDep) {
-            validDeps.add(dep);
-          } else {
-            try {
-              require.resolve(dep, { paths: [cfg.root] });
+          try {
+            const isDirectDep = pkgDeps.includes(rootPkg);
+            if (isDirectDep) {
               validDeps.add(dep);
-            } catch (e) {
+            } else {
               try {
-                const pkgJsonPath = path.join(cfg.root, 'node_modules', rootPkg, 'package.json');
-                await fs.access(pkgJsonPath);
+                require.resolve(dep, { paths: [cfg.root] });
                 validDeps.add(dep);
-              } catch { }
+              } catch (e) {
+                try {
+                  const pkgJsonPath = path.join(cfg.root, 'node_modules', rootPkg, 'package.json');
+                  await fs.access(pkgJsonPath);
+                  validDeps.add(dep);
+                } catch { }
+              }
             }
+          } catch (e) {
+            // Skip missing dep
           }
-        } catch (e) {
-          // Skip missing dep
+        }
+
+        if (validDeps.size > 0) {
+          // 4. Pass to PreBundler
+          await preBundler.preBundleDependencies(Array.from(validDeps)).then(
+            (deps) => {
+              preBundledDeps = deps;
+              _mark('prebundle done');
+              log.debug('Dependencies pre-bundled successfully', { count: deps.size });
+            },
+            (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
+          );
         }
       }
-
-      if (validDeps.size > 0) {
-        // 4. Pass to PreBundler
-        prebundleReady = preBundler.preBundleDependencies(Array.from(validDeps)).then(
-          (deps) => {
-            preBundledDeps = deps;
-            _mark('prebundle done');
-            log.debug('Dependencies pre-bundled successfully', { count: deps.size });
-          },
-          (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
-        );
-      }
-    }
+    })().catch((e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`));
 
     if (process.env.LUNX_DEV_WARMUP === '1') await prebundleReady;
     // A full build before serving cost ~0.75s of every boot. Modules are
@@ -1952,7 +1957,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   const filesWithErrors = new Set<string>();
 
   const { DevWatcher } = await import('./watcher.js');
-  const watcher = new DevWatcher(cfg.root, 50);
+  // A short batch: editors write a save as one or two events, and each ms is HMR latency.
+  const watcher = new DevWatcher(cfg.root, 10);
   watcher.on('change', async (files: string[]) => {
     for (const file of files) {
       try {
@@ -1965,15 +1971,16 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           const hadError = filesWithErrors.has(file);
 
           try {
-            const code = await fs.readFile(file, 'utf-8');
-
-            // Attempt transformation to catch errors immediately
+            // Compile now to catch errors at once, with the same input and options as the
+            // request path, so the browser's request for the update hits this result.
+            const code = await pluginManager.transform(await fs.readFile(file, 'utf-8'), file);
             await universalTransformer.transform({
               filePath: file,
               code,
               framework: primaryFramework,
               root: cfg.root,
-              isDev: true
+              isDev: true,
+              define: devDefines
             });
 
             // If transformation succeeds and there was a previous error, show success
@@ -2037,7 +2044,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
           affected.forEach((affectedFile: string) => {
             // Clear cache for affected files too
-            universalTransformer.clearCache(affectedFile);
+            // The changed file was just compiled from its new contents; importers re-compile.
+            if (affectedFile !== file) universalTransformer.clearCache(affectedFile);
 
             // Determine message type
             let type = 'update';

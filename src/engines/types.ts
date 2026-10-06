@@ -90,6 +90,8 @@ export interface BundleOutputOptions {
     chunkFileNames?: string;
     assetFileNames?: string;
     minify?: boolean;
+    /** Keep `@__PURE__` annotations in minified output (libraries: downstream bundlers tree-shake with them). */
+    keepAnnotations?: boolean;
     sourcemap?: boolean | 'inline' | 'hidden';
     inlineDynamicImports?: boolean;
     /** Named chunks: modules whose id matches go into that chunk. */

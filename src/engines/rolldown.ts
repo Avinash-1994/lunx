@@ -51,6 +51,8 @@ export const rolldownBundler: Bundler = {
             chunkFileNames: output.chunkFileNames,
             assetFileNames: output.assetFileNames,
             minify: output.minify,
+            // Minified apps drop @__PURE__ annotations (they were for this bundler); licences stay.
+            ...(output.minify && !output.keepAnnotations ? { comments: { legal: true, annotation: false, jsdoc: false } } : {}),
             sourcemap: output.sourcemap,
             globals: output.globals,
             exports: output.exports,

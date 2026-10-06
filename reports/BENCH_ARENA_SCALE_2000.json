@@ -1,0 +1,16 @@
+{
+  "scale": 2000,
+  "runs": 3,
+  "results": {
+    "lunx": {
+      "kind": "module server",
+      "devBootMs": 347,
+      "devAppCodeMs": 352,
+      "hmrMs": 157,
+      "buildColdMs": 896,
+      "buildWarmMs": 619,
+      "jsBytes": 470161,
+      "cssBytes": 804
+    }
+  }
+}

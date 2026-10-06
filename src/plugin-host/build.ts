@@ -257,6 +257,7 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
             chunkFileNames: ssr ? '[name]-[hash].js' : `${assetsDir}/[name]-[hash].js`,
             assetFileNames: `${assetsDir}/[name]-[hash][extname]`,
             minify: !ssr && buildOptions.minify !== false,
+            ...(!ssr && buildOptions.minify !== false ? { comments: { legal: true, annotation: false, jsdoc: false } } : {}),
             sourcemap: buildOptions.sourcemap === true ? true : buildOptions.sourcemap || false,
             ...output,
             ...(inline ? { codeSplitting: false } : {}),

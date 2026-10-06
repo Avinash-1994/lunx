@@ -93,7 +93,7 @@ function scheduleReactRefresh(): void {
     refreshTimer = setTimeout(() => {
         refreshTimer = null;
         runtime.performReactRefresh();
-    }, 16);
+    }, 0);
 }
 
 async function handleUpdate(modules: string[]): Promise<void> {
