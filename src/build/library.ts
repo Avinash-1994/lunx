@@ -277,7 +277,7 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
 async function emitDeclarations(root: string, outDir: string, entries: Record<string, string>, modules: string[]): Promise<string[]> {
     const sources = modules.filter((f) => SOURCE_RE.test(f) && !f.endsWith('.d.ts') && fs.existsSync(f));
     if (!sources.length) return [];
-    const base = commonDir([...Object.values(entries), ...sources].map((f) => path.dirname(f)));
+    const base = commonDir([...Object.values(entries).map(realpath), ...sources].map((f) => path.dirname(f)));
     const experimental = requireEsm('rolldown/experimental');
     const declarations: Array<[string, string]> = [];
     let isolated = true;
@@ -305,11 +305,11 @@ async function emitDeclarations(root: string, outDir: string, entries: Record<st
  */
 async function entryDeclarations(outDir: string, entries: Record<string, string>, written: string[], outputName: (entryName: string) => string): Promise<string[]> {
     if (!written.length) return [];
-    const base = commonDir(Object.values(entries).map((f) => path.dirname(f)));
+    const base = commonDir(Object.values(entries).map((f) => path.dirname(realpath(f))));
     const out: string[] = [];
     for (const [entryName, file] of Object.entries(entries)) {
         const name = outputName(entryName);
-        const source = path.relative(base, file).replace(/\.(m|c)?tsx?$/, '').split(path.sep).join('/');
+        const source = path.relative(base, realpath(file)).replace(/\.(m|c)?tsx?$/, '').split(path.sep).join('/');
         const declared = written.find((w) => w.replace(/\.d\.[mc]?ts$/, '') === source);
         if (!declared || source === name) continue;
         const target = `${name}.d.ts`;
@@ -355,6 +355,15 @@ function emitWithTsc(root: string, outDir: string, base: string, sources: string
 function listFiles(dir: string): string[] {
     if (!fs.existsSync(dir)) return [];
     return (fs.readdirSync(dir, { recursive: true }) as string[]).map((f) => f.split(path.sep).join('/')).filter((f) => fs.statSync(path.join(dir, f)).isFile());
+}
+
+/** Rolldown reports modules by their real path (macOS: /var → /private/var); compare entries the same way. */
+function realpath(file: string): string {
+    try {
+        return fs.realpathSync(file);
+    } catch {
+        return file;
+    }
 }
 
 function commonDir(dirs: string[]): string {
