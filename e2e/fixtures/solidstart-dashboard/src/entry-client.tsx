@@ -12,6 +12,6 @@ declare global {
 
 // Hydrate the server-rendered root
 hydrate(
-  () => import('./app/routes/page.tsx').then(m => m.default),
+  () => import('../app/routes/page.tsx').then(m => m.default),
   document.getElementById('root')!
 );

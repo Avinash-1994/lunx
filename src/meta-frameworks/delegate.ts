@@ -134,6 +134,11 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
 export async function maybeDelegate(command: Command, root: string, port?: number): Promise<boolean> {
     const meta = detectMetaFramework(root);
     if (!meta) return false;
+    const bin = findBin(root, meta.bin);
+    if (!bin) {
+        console.warn(`[lunx] ${meta.name} project, but its CLI (${meta.bin}) is not installed; using lunx's built-in ${meta.name} support. Install dependencies to run the full framework.`);
+        return false;
+    }
     // Framework plugins read their config from the working directory and cache it, so be there before loading anything.
     if (process.cwd() !== root) process.chdir(root);
     const native = process.env.LUNX_PLUGIN_HOST !== '0' ? NATIVE[meta.name]?.[command] : undefined;
@@ -146,12 +151,6 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
         console.log(`[lunx] ${meta.name} project → built by lunx`);
         const host = await import('../plugin-host/index.js');
         if (Array.isArray(native)) {
-            const bin = findBin(root, meta.bin);
-            if (!bin) {
-                console.error(`[lunx] ${meta.name}: its CLI (${meta.bin}) is not installed. Run your package manager's install first.`);
-                process.exitCode = 1;
-                return true;
-            }
             await host.runFrameworkCli(root, bin, [...native, ...(command !== 'build' && port && meta.port ? meta.port(port) : [])]);
         } else if (command === 'build') {
             try {
@@ -164,10 +163,6 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
             await host.startHostDev(root, { port, mode: native.startsWith('vite:') ? native.slice(5) : undefined });
         }
         return true;
-    }
-    if (!findBin(root, meta.bin)) {
-        console.warn(`[lunx] ${meta.name} project, but its CLI (${meta.bin}) is not installed; using lunx's built-in ${meta.name} support. Install dependencies to run the full framework.`);
-        return false;
     }
     process.exitCode = await delegate(meta, command, root, { port });
     return true;

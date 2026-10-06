@@ -35,9 +35,13 @@ export async function serverBuild(config: BuildConfig, framework: string): Promi
 
     if (isSsr) {
         // The browser half is the page (index.html and its scripts), not the server entries.
-        const pages = (config.entry ?? []).filter((e) => e.endsWith('.html'));
-        const client = await productionBuild({ ...config, entry: pages, platform: 'browser', outDir: path.join(outDir, 'browser') } as BuildConfig, framework);
-        for (const m of client.modules) modules.add(m);
+        // Projects that render every page on the server have none; they get only the server half.
+        const listed = (config.entry ?? []).filter((e) => e.endsWith('.html'));
+        const pages = listed.length ? listed : fs.existsSync(path.join(root, 'index.html')) ? ['index.html'] : [];
+        if (pages.length) {
+            const client = await productionBuild({ ...config, entry: pages, platform: 'browser', outDir: path.join(outDir, 'browser') } as BuildConfig, framework);
+            for (const m of client.modules) modules.add(m);
+        }
     }
 
     const entries = serverEntries(config, root);
