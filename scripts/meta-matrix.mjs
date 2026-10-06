@@ -17,8 +17,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CLI = process.env.LUNX_CLI ? path.resolve(REPO, process.env.LUNX_CLI) : path.join(REPO, 'src', 'cli.ts');
-const LOADER = process.env.LUNX_CLI ? [] : ['--import', 'tsx'];
+// The built CLI by default: the plugin host redirects vite/rollup imports to its
+// compiled shims (dist/plugin-host/*.js), which a source checkout does not have.
+const BUILT = path.join(REPO, 'dist', 'cli.js');
+const CLI = process.env.LUNX_CLI ? path.resolve(REPO, process.env.LUNX_CLI) : fs.existsSync(BUILT) ? BUILT : path.join(REPO, 'src', 'cli.ts');
+const LOADER = CLI.endsWith('.ts') ? ['--import', 'tsx'] : [];
 const only = process.argv.find((a) => a.startsWith('--only='))?.split('=')[1]?.split(',');
 const MARKER = 'LUNX-META-OK';
 const NG = '21.2.25';
