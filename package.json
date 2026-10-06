@@ -1,6 +1,6 @@
 {
   "name": "lunx-dev",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "\u26a1 Lunx \u2014 a modern JavaScript build tool powered by SWC and LightningCSS. Fast HMR, module federation, tree shaking, and multi-framework support (React, Vue, Svelte, Solid). A fast, Rust-native build pipeline.",
   "homepage": "https://lunx.dev",
   "type": "module",
@@ -31,7 +31,7 @@
     "packages/lunx-security/dist"
   ],
   "optionalDependencies": {
-    "@lunx/native-linux-x64-gnu": "1.0.3"
+    "@lunx/native-linux-x64-gnu": "1.1.0"
   },
   "scripts": {
     "build": "rimraf dist && npm run build:native && npm run build:workspaces && tsc -p tsconfig.build.json && node ./scripts/postbuild.js && node ./scripts/verify-native.mjs && node ./scripts/verify-pack-size.mjs",

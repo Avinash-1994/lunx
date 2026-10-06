@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-06
+
+### Added
+- **Meta-frameworks built by lunx**: SvelteKit, React Router, Remix, TanStack Start, Qwik City, Astro, Nuxt, SolidStart, VitePress, Waku, Marko Run and Analog run in `lunx dev` / `lunx build` on lunx's plugin host (Rolldown + Oxc), with no Vite, Rollup or vite-node code. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil run on their own CLIs, labelled as such. `LUNX_PLUGIN_HOST=0` opts out.
+- **Module federation on lunx's engine**: ES module `remoteEntry.js` with the webpack 5 container API, `mf-manifest.json`, a webpack-format share scope (`singleton`, `requiredVersion`, `strictVersion`, `eager`), static and lazy remote imports. Dev and built apps mix freely, and a remote fast-refreshes inside the host page.
+- **Library mode**: `lunx build --lib [entry]` (or `lib` in lunx.config, or a vite.config `build.lib`) builds ES / CommonJS / UMD / IIFE outputs with automatic externals, CSS extraction, `.d.ts` via Oxc isolated declarations (tsc fallback), package.json `exports` checks and `--watch`.
+- esbuild plugins from `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
+- `npm run test:federation-e2e`; the browser matrix now clicks through every fixture (133/133).
+
+### Changed
+- Production builds no longer wait on the OSV vulnerability API: findings come from the cache and a background process refreshes it (strict projects still wait).
+- Rollup's and vite-node's APIs, used by Nitro, React Router and Nuxt, are served by lunx's engine.
+- `engines.node` is `^20.19.0 || >=22.12.0`, as Rolldown requires.
+
+### Fixed
+- Dev server no longer restarts in a loop when files change next to a missing config file (JS watcher).
+- No warning about a missing native binary: the optional native helpers are not required.
+
+---
+
 ## [1.0.0] - 2026-01-07
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@lunx/native-linux-x64-gnu",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Optional Rust N-API binary for lunx-dev on linux-x64 (glibc). Same pattern as @swc/core / esbuild platform packages.",
   "os": ["linux"],
   "cpu": ["x64"],
