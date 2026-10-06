@@ -9,7 +9,10 @@
 import path from 'node:path';
 import { requireEsm } from './require-esm.js';
 
-const oxc: any = requireEsm('rolldown/experimental');
+// Loaded on first use: Rolldown's native binding costs ~150 ms to load, and
+// many commands (and every import of the compiler registry) never compile.
+let oxcModule: any;
+const oxc = (): any => (oxcModule ??= requireEsm('rolldown/experimental'));
 
 import type { CompileOptions, CompileResult, Compiler, Lang } from './types.js';
 
@@ -29,7 +32,7 @@ export function langOf(file: string): Lang {
 
 /** Strip types, compile JSX, apply defines. Output stays ES modules. */
 function compile(file: string, code: string, opts: CompileOptions = {}): CompileResult {
-    const result = oxc.transformSync(file, code, {
+    const result = oxc().transformSync(file, code, {
         lang: opts.lang ?? langOf(file),
         sourceType: 'module',
         sourcemap: !!opts.sourcemap,
@@ -69,13 +72,13 @@ function compile(file: string, code: string, opts: CompileOptions = {}): Compile
 }
 
 function minify(file: string, code: string, opts: { mangle?: boolean; compress?: boolean } = {}): CompileResult {
-    const result = oxc.minifySync(file, code, { mangle: opts.mangle ?? true, compress: opts.compress ?? true });
+    const result = oxc().minifySync(file, code, { mangle: opts.mangle ?? true, compress: opts.compress ?? true });
     return { code: result.code, map: result.map ? JSON.stringify(result.map) : undefined };
 }
 
 /** ESTree-compatible AST (node.start / node.end offsets, like acorn). */
 function parse(file: string, code: string, lang?: Lang, sourceType: 'module' | 'script' = 'module'): any {
-    const result = oxc.parseSync(file, code, { lang: lang ?? langOf(file), sourceType });
+    const result = oxc().parseSync(file, code, { lang: lang ?? langOf(file), sourceType });
     const errors = (result.errors ?? []).filter((e: any) => e.severity !== 'Warning');
     if (errors.length) throw new CompileError(file, errors.map((e: any) => ({ message: e.message })));
     return result.program;
