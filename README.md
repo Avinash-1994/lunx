@@ -476,27 +476,27 @@ Every tool installed from npm, same React + TypeScript app, median of 3 runs, al
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | **338 ms** | **341 ms** | 53 ms | 416 ms | 425 ms | 221 KB |
-| Vite 8 | 416 ms | 530 ms | 46 ms | 444 ms | 459 ms | 220 KB |
-| Rspack | 376 ms | 408 ms | 217 ms | 323 ms | 327 ms | 219 KB |
-| Parcel | 1406 ms | 1419 ms | 30 ms | 1673 ms | 1515 ms | 222 KB |
-| webpack | 1451 ms | 1557 ms | 264 ms | 3992 ms | 3972 ms | 225 KB |
-| esbuild (bundler only) | – | – | – | 57 ms | 57 ms | 223 KB |
-| Bun (bundler only) | – | – | – | 37 ms | 43 ms | 212 KB |
+| **lunx** | 365 ms | 371 ms | 36 ms | 390 ms | 353 ms | 221 KB |
+| Vite 8 | 366 ms | 429 ms | 46 ms | 423 ms | 446 ms | 220 KB |
+| Rspack | 378 ms | 407 ms | 204 ms | 357 ms | 352 ms | 225 KB |
+| Parcel | 1421 ms | 1435 ms | 35 ms | 1782 ms | 1626 ms | 222 KB |
+| webpack | 1499 ms | 1616 ms | 280 ms | 4140 ms | 4060 ms | 219 KB |
+| esbuild (bundler only) | – | – | – | 60 ms | 60 ms | 223 KB |
+| Bun (bundler only) | – | – | – | 44 ms | 44 ms | 212 KB |
 
 **Large app: 2,000 components** (`--scale 2000`)
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | **315 ms** | **320 ms** | **183 ms** | 947 ms | **692 ms** | 470 KB |
-| Vite 8 | 367 ms | 653 ms | 183 ms | 742 ms | 720 ms | 470 KB |
-| Rspack | 612 ms | 739 ms | 627 ms | 739 ms | 794 ms | 493 KB |
-| Parcel | 5194 ms | 5227 ms | 198 ms | 5524 ms | 5606 ms | 455 KB |
-| webpack | 4077 ms | 4333 ms | 1007 ms | 8260 ms | 8864 ms | 516 KB |
-| esbuild (bundler only) | – | – | – | 163 ms | 150 ms | 493 KB |
-| Bun (bundler only) | – | – | – | 96 ms | 96 ms | 430 KB |
+| **lunx** | 348 ms | 352 ms | 168 ms | 807 ms | 617 ms | 470 KB |
+| Vite 8 | 364 ms | 683 ms | 168 ms | 871 ms | 678 ms | 470 KB |
+| Rspack | 704 ms | 856 ms | 733 ms | 829 ms | 863 ms | 493 KB |
+| Parcel | 4893 ms | 4925 ms | 189 ms | 5245 ms | 5400 ms | 455 KB |
+| webpack | 4095 ms | 4321 ms | 1129 ms | 9274 ms | 9318 ms | 516 KB |
+| esbuild (bundler only) | – | – | – | 132 ms | 146 ms | 493 KB |
+| Bun (bundler only) | – | – | – | 87 ms | 93 ms | 430 KB |
 
-Where lunx is behind: cold builds (the first build after a cache clear) trail Vite and Rspack, and esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the others do not.
+Where lunx is behind: Rspack's cold build of the small app is ~30 ms faster (startup of Node and Rolldown dominates there), and esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the others do not. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
 
 ---
 

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Parallel component compilation**: production builds of projects with 100+ Vue / Svelte / compiled-JSX components compile them on worker threads, starting before Rolldown asks for them. 1,000 Vue SFCs build cold in ~1.6–2.0 s instead of ~3.1 s on 4 cores; output is identical. `LUNX_COMPILE_WORKERS=0` turns it off, `=N` sets the pool size.
+- Vue compiles in production mode without unused source maps, and the compiler loads with `require()`.
+- **Faster HMR**: a save reaches the browser without stacked debounces (small app: 53 → 36 ms; Vite 46 ms).
+- Faster cold builds: the compile cache is one file per build, first builds read the build-cache inputs in the background, brotli precompression defaults to quality 6 (≈1% larger than 9, 3× faster), and the OSV cache refresh starts after the build.
+
+### Fixed
+- Production Vue bundles no longer embed each component's absolute path.
+- The adapter log no longer calls frameworks lunx builds "upstream, not a Lunx SSR engine".
+
 ## [1.1.0] - 2026-10-06
 
 ### Added
