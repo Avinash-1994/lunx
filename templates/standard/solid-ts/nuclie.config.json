@@ -1,9 +1,0 @@
-{
-  "entry": [
-    "src/index.tsx"
-  ],
-  "mode": "development",
-  "preset": "spa",
-  "platform": "browser",
-  "adapter": "solid"
-}

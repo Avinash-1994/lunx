@@ -20,10 +20,12 @@
   - [Svelte 5 / Svelte 4](#3-svelte)
   - [SolidJS](#4-solidjs)
   - [Angular (v2–v18+)](#5-angular)
-  - [SSR / meta-frameworks (compat proxies)](#6-ssr-meta-frameworks)
+  - [SSR / meta-frameworks](#6-ssr--meta-frameworks)
   - [Desktop Apps (Electron & Tauri)](#7-desktop-apps-electron--tauri)
 - [Configuration & Auto-Detection](#-configuration--auto-detection)
 - [Module Federation Tutorial](#-module-federation-tutorial)
+- [Library Mode](#-library-mode)
+- [Server, Edge and SSR Builds](#%EF%B8%8F-server-edge-and-ssr-builds)
 - [Built-in Security CLI Suite](#-built-in-security-cli-suite)
 - [Official Plugins](#-official-plugins)
 - [Performance Benchmarks](#-performance-benchmarks)
@@ -201,18 +203,16 @@ export default defineConfig({
 
 ---
 
-### 6. SSR / meta-frameworks (compat, not a replacement)
+### 6. SSR / meta-frameworks
 
-Lunx is an **SPA + Module Federation** build tool. It does **not** replace Next.js, Nuxt, SvelteKit, Remix, or similar SSR engines.
+`lunx dev` and `lunx build` in a meta-framework project build it with lunx's own engine: its plugin host runs the framework's Vite plugins on Rolldown/Oxc, with no Vite, Rollup or vite-node code (each framework's own compiler, such as Svelte's or Angular's, still compiles its components).
 
-When those frameworks are detected, Lunx adapters **delegate to the upstream CLI** (for example spawning `next dev`) or apply limited Pages-router loader hooks. Treat them as compatibility shims:
-
-| Framework | What Lunx does |
+| Framework | `lunx dev` / `lunx build` |
 |---|---|
-| **Next.js** | App Router: proxies `next dev`. Pages Router: optional SWC loader hook. Not a Next replacement. |
-| **Nuxt / SvelteKit / Remix / SolidStart / …** | Detected and labeled as upstream adapters. Use each framework's own `dev`/`build`. |
+| SvelteKit, React Router (framework), Remix, TanStack Start, Qwik City, Astro, Nuxt, SolidStart, VitePress, Waku, Marko Run, Analog | **Built by lunx** (`[lunx] X project → built by lunx`) |
+| Next.js, Docusaurus, Gatsby, RedwoodJS, Stencil | Run on the framework's own CLI and bundler, labelled as such in the output (`[lunx] X project → next build`) |
 
-For production speed, use Lunx on **React / Vue / Svelte / Solid / Preact SPAs** and federated remotes.
+Set `LUNX_PLUGIN_HOST=0` to use a framework's own CLI instead. `npm run test:meta` checks every framework above in dev and build (reports/META_MATRIX.json).
 
 ---
 
@@ -351,8 +351,8 @@ export default defineConfig({
 
 ```tsx
 import React, { lazy, Suspense } from 'react';
+import { formatPrice } from 'navRemote/utils';      // static imports work too
 
-// @ts-ignore
 const RemoteHeader = lazy(() => import('navRemote/Header'));
 
 export function App() {
@@ -361,11 +361,60 @@ export function App() {
       <Suspense fallback={<div>Loading Header...</div>}>
         <RemoteHeader />
       </Suspense>
-      <main>Host Application Body</main>
+      <main>Host Application Body {formatPrice(10)}</main>
     </div>
   );
 }
 ```
+
+### How it works
+
+- `remoteEntry.js` is an ES module exporting the webpack 5 container API (`init`, `get`); `mf-manifest.json` lists exposes, shared versions and CSS. Remotes can be lunx ES module containers or webpack containers (`name@url` with a global).
+- **Shared** packages go through a webpack-format share scope: `singleton`, `requiredVersion` (defaults to your package.json range), `strictVersion` and `eager`. Each app's own copy is a separate chunk, downloaded only if the scope picks it, so a remote using the host's React never fetches its own.
+- **Dev and build mix freely**: a dev host can load a built remote and the other way round. In dev, a remote's modules fast-refresh inside the host page, state kept.
+- `npm run test:federation-e2e` runs all four dev/build pairings in Chromium.
+
+---
+
+## 📦 Library Mode
+
+`lunx build --lib` builds a package for npm instead of an app:
+
+```bash
+npx lunx build --lib src/index.ts                 # ES + CommonJS + .d.ts
+npx lunx build --lib --formats es,umd --name MyLib # adds a <script> global build
+```
+
+or in `lunx.config.ts` (a `vite.config` `build.lib` is read the same way):
+
+```typescript
+export default defineConfig({
+  lib: {
+    entry: { index: 'src/index.ts', utils: 'src/utils/index.ts' },
+    formats: ['es', 'cjs'],
+  },
+});
+```
+
+- `dependencies`, `peerDependencies` and Node built-ins stay imports; devDependencies and your sources are bundled (`external` / `noExternal` adjust it).
+- Vue and Svelte components and Solid / Preact JSX compile as in app builds; CSS, Sass, Less and CSS modules are extracted to `style.css`; assets are inlined.
+- `.d.ts` files come from Oxc's isolated declarations in milliseconds, or from `tsc` when an export has no explicit type.
+- The build checks that package.json `main`, `module`, `types` and `exports` point at files it wrote, and suggests an `exports` map when they do not.
+
+---
+
+## 🖥️ Server, Edge and SSR Builds
+
+```typescript
+export default defineConfig({ platform: 'node' });   // or 'edge'
+export default defineConfig({ preset: 'ssr', entry: ['src/entry-server.tsx'] });
+```
+
+- `platform: 'node'` bundles the server entry (`entry`, or `src/server.ts`, `src/entry-server.tsx`, `src/index.ts`…) as an ES module; `dependencies` stay in `node_modules`.
+- `platform: 'edge'` bundles every dependency too, for Workers-style runtimes with no `node_modules`, resolving `workerd` / `worker` / `edge-light` exports.
+- `preset: 'ssr'` builds the page into `dist/browser` and the server entry into `dist/node`.
+
+All three run on the same Rolldown engine as app builds.
 
 ---
 
@@ -421,14 +470,33 @@ lunx security report
 
 ## 📊 Performance Benchmarks
 
-Numbers below are **only valid when the native binary is loaded** (`[lunx] engine: rust-native` at startup). If you see `engine: js-fallback`, transforms run on `@swc/core` in Node and will be slower.
+Every tool installed from npm, same React + TypeScript app, median of 3 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
 
-Reproduce locally via `cd benchmarks/public && node run-all.mjs` after `npm run build` on this repo.
+**Small app**
 
-| Benchmark Metric | Notes |
-|---|---|
-| **HMR** | Rust `notify` watcher + SWC transform when native is loaded. Published packages without `lunx_native*.node` fall back to chokidar + JS. Do not treat synthetic sub-millisecond lab numbers as a product claim. |
-| **Cold / warm build** | Dominated by native SWC + LightningCSS on SPA graphs. Compare against Vite/Rspack on the same fixture; do not use unpublished internal benches as marketing. |
+| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
+|---|---|---|---|---|---|---|
+| **lunx** | **338 ms** | **341 ms** | 53 ms | 416 ms | 425 ms | 221 KB |
+| Vite 8 | 416 ms | 530 ms | 46 ms | 444 ms | 459 ms | 220 KB |
+| Rspack | 376 ms | 408 ms | 217 ms | 323 ms | 327 ms | 219 KB |
+| Parcel | 1406 ms | 1419 ms | 30 ms | 1673 ms | 1515 ms | 222 KB |
+| webpack | 1451 ms | 1557 ms | 264 ms | 3992 ms | 3972 ms | 225 KB |
+| esbuild (bundler only) | – | – | – | 57 ms | 57 ms | 223 KB |
+| Bun (bundler only) | – | – | – | 37 ms | 43 ms | 212 KB |
+
+**Large app: 2,000 components** (`--scale 2000`)
+
+| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
+|---|---|---|---|---|---|---|
+| **lunx** | **315 ms** | **320 ms** | **183 ms** | 947 ms | **692 ms** | 470 KB |
+| Vite 8 | 367 ms | 653 ms | 183 ms | 742 ms | 720 ms | 470 KB |
+| Rspack | 612 ms | 739 ms | 627 ms | 739 ms | 794 ms | 493 KB |
+| Parcel | 5194 ms | 5227 ms | 198 ms | 5524 ms | 5606 ms | 455 KB |
+| webpack | 4077 ms | 4333 ms | 1007 ms | 8260 ms | 8864 ms | 516 KB |
+| esbuild (bundler only) | – | – | – | 163 ms | 150 ms | 493 KB |
+| Bun (bundler only) | – | – | – | 96 ms | 96 ms | 430 KB |
+
+Where lunx is behind: cold builds (the first build after a cache clear) trail Vite and Rspack, and esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the others do not.
 
 ---
 
@@ -483,6 +551,8 @@ keep working.
 |---|---|
 | `lunx dev` | Start development server with HMR |
 | `lunx build` | Create minified production build with security scan |
+| `lunx build --lib [entry]` | Build a library: ES/CJS (`--formats es,cjs,umd,iife`, `--name`), `.d.ts`, `--watch` |
+| `lunx build --force` | Rebuild even when nothing changed (builds are cached in `.lunx/`) |
 | `lunx preview` | Serve production build locally for verification |
 | `lunx create` | Interactive project scaffolding |
 | `lunx migrate` | Auto-migrate project configuration |
@@ -491,6 +561,8 @@ keep working.
 | `lunx security` | Execute the 8-command security audit suite |
 | `lunx why <module>` | Print import chain leading to a specific module |
 | `lunx info` | Print system & environment info for bug reports |
+
+**Build cache.** `lunx build` skips the build when no project file, installed package, env var or option changed since the last one and the output is untouched, and caches framework compiler output (Vue, Svelte, Solid, JSX) so a rebuild recompiles only changed components. `--force` or `LUNX_BUILD_CACHE=0` bypass it; `build: { cache: false }` turns it off. `LUNX_TIMINGS=1` prints where build time goes.
 
 ---
 

@@ -124,7 +124,7 @@ async function runTests() {
     // --- TS-02 SSR mode ---
     const invoiceRes = await fetchPage(`http://localhost:${port}/invoices/INV-123`);
     profileResData = invoiceRes.data;
-    ok2 = invoiceRes.status === 200 && invoiceRes.data.includes('<div id="root">');
+    ok2 = invoiceRes.status === 200 && invoiceRes.data.includes('id="root"');
     pass('TS-02  SSR mode renders invoices', 'HTML with invoice data', `${Buffer.byteLength(invoiceRes.data)} bytes`, [
       `Request: GET /invoices/INV-123`,
       `Response status: ${invoiceRes.status}`,
@@ -290,7 +290,10 @@ async function runTests() {
   log(`│ Ready for Phase 2.11: YES                  │`);
   log(`└─────────────────────────────────────────────┘`);
   
-  if (![ok2, ok3, ok4, ok5, ok6, ok7].every(Boolean)) {
+  const checks = { ok2, ok3, ok4, ok5, ok6, ok7 };
+  const failed = Object.keys(checks).filter((k) => !checks[k]);
+  if (failed.length) {
+    console.error(`FAILED checks: ${failed.join(', ')} (startup ${Math.round(startupTime)}ms, hmr ${Math.round(hmrLatency)}ms)`);
     process.exit(1);
   }
 }

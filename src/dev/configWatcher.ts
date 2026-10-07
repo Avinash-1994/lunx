@@ -69,9 +69,19 @@ export class ConfigWatcher {
             const { default: chokidar } = await import('../lib/watcher.js');
             this.chokidarWatcher = chokidar.watch(configFiles, { ignoreInitial: true });
             this.chokidarWatcher.on('change', (file: string) => {
+                // A config file that does not exist yet is watched through its directory,
+                // which reports every file in it: only config files count.
+                if (!configSet.has(path.resolve(file))) return;
                 const filename = path.basename(file);
                 const type = this.determineReloadType(filename);
                 log.info(`Config changed: ${filename} -> ${type}`, { category: 'server' });
+                this.onReload(type, file);
+            });
+            this.chokidarWatcher.on('add', (file: string) => {
+                if (!configSet.has(path.resolve(file))) return;
+                const filename = path.basename(file);
+                const type = this.determineReloadType(filename);
+                log.info(`Config added: ${filename} -> ${type}`, { category: 'server' });
                 this.onReload(type, file);
             });
         } catch (e: any) {

@@ -108,7 +108,22 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
     if (Object.keys(build).length) config.build = build;
     const input = b.rollupOptions?.input ?? b.rolldownOptions?.input;
     if (input) config.entry = typeof input === 'string' ? [input] : Array.isArray(input) ? input : Object.values(input);
-    if (b.lib) notes.push('build.lib is not mapped; use `lunx lib-build` for library output');
+    if (b.lib) {
+        // Vite's build.lib → lunx library mode (formats, fileName, name, entry, cssFileName).
+        const external = b.rollupOptions?.external ?? b.rolldownOptions?.external;
+        const globals = (b.rollupOptions?.output ?? b.rolldownOptions?.output)?.globals;
+        config.lib = {
+            entry: b.lib.entry,
+            ...(b.lib.name ? { name: b.lib.name } : {}),
+            ...(b.lib.formats ? { formats: b.lib.formats } : {}),
+            ...(b.lib.fileName ? { fileName: b.lib.fileName } : {}),
+            ...(b.lib.cssFileName ? { cssFileName: b.lib.cssFileName } : {}),
+            ...(Array.isArray(external) ? { external } : {}),
+            ...(globals ? { globals } : {}),
+            ...(b.minify === false ? { minify: false } : {}),
+            ...(b.sourcemap ? { sourcemap: true } : {}),
+        };
+    }
     if (vite.envPrefix) notes.push(`envPrefix ${JSON.stringify(vite.envPrefix)}: lunx exposes LUNX_, VITE_, REACT_APP_ and PUBLIC_ variables`);
     if (vite.css?.preprocessorOptions) notes.push('css.preprocessorOptions is not mapped');
 

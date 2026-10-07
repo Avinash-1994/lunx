@@ -17,7 +17,9 @@ export class HMRThrottle {
     private pendingUpdates = new Map<string, HMRUpdate>();
     private clientStates = new Map<WebSocket, ClientState>();
     private debounceTimer: NodeJS.Timeout | null = null;
-    private readonly DEBOUNCE_MS = 50;
+    // Coalesces the files of one save (the watcher already batched them); kept short
+    // because every ms here is HMR latency.
+    private readonly DEBOUNCE_MS = 5;
 
     constructor(private broadcast: (msg: string) => void) { }
 

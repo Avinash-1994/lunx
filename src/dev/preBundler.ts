@@ -340,7 +340,10 @@ export class DependencyPreBundler {
             for (const [name, file] of Object.entries(entryPoints)) {
                 const spec = specByName.get(name) ?? file;
                 const source = await fs.readFile(file, 'utf-8').catch(() => '');
-                if (isEsmSource(file, source)) {
+                // ESM, or a plain script with no exports at all (qwikloader):
+                // bundle it as-is. Wrapping a script as CommonJS let its
+                // package's `sideEffects: false` tree-shake the whole body.
+                if (isEsmSource(file, source) || !/\b(module|exports|require)\b/.test(source)) {
                     input[name] = spec;
                     continue;
                 }

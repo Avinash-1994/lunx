@@ -1,9 +1,0 @@
-{
-  "entry": [
-    "src/root.jsx"
-  ],
-  "mode": "development",
-  "preset": "spa",
-  "platform": "browser",
-  "adapter": "qwik"
-}

@@ -1,9 +1,0 @@
-{
-  "entry": [
-    "src/main.js"
-  ],
-  "mode": "development",
-  "preset": "spa",
-  "platform": "browser",
-  "adapter": "vanilla"
-}

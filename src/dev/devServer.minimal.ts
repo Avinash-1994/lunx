@@ -118,7 +118,7 @@ export async function startDevServer(cfg: BuildConfig) {
             console.log(`   \x1b[32m▶\x1b[0m  \x1b[1mCore\x1b[0m    \x1b[32mReady\x1b[0m in \x1b[33m${duration}ms\x1b[0m`);
             // Report the engine actually loaded, not a fixed string: a bug
             // report from the JS fallback must not look like one from native.
-            let engine = 'JS (SWC + LightningCSS)';
+            let engine = 'Oxc (JS helpers)';
             try {
                 const native = await import('../native/index.js');
                 if ((native as any).engineUsed === 'native') engine = 'Rust native';

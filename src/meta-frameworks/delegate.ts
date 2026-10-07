@@ -49,7 +49,8 @@ export const META_FRAMEWORKS: MetaFramework[] = [
     { name: 'Stencil', packages: ['@stencil/core'], bin: 'stencil', args: { dev: ['build', '--dev', '--watch', '--serve'], build: ['build'], preview: ['build', '--dev', '--watch', '--serve'] }, port: (p) => ['--port', String(p)] },
     { name: 'Marko Run', packages: ['@marko/run'], bin: 'marko-run', args: { dev: ['dev'], build: ['build'], preview: ['preview'] }, port: (p) => ['--port', String(p)] },
     viteLike('SvelteKit', ['@sveltejs/kit']),
-    viteLike('Qwik City', ['@builder.io/qwik-city', '@qwik.dev/router']),
+    // Qwik City renders server-side in dev only in `--mode ssr` (its starter's dev script).
+    { ...viteLike('Qwik City', ['@builder.io/qwik-city', '@qwik.dev/router']), args: { dev: ['--mode', 'ssr'], build: ['build'], preview: ['preview'] } },
     viteLike('Analog', ['@analogjs/platform']),
 ];
 
@@ -101,4 +102,68 @@ export async function delegate(meta: MetaFramework, command: Command, root: stri
             resolve(1);
         });
     });
+}
+
+/**
+ * Framework commands lunx runs itself through its Vite-compatible host
+ * (src/plugin-host): 'vite' means lunx acts as the Vite CLI; an argument list
+ * means the framework's own CLI runs in-process with `vite` pointing at lunx.
+ */
+const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` | string[]>>> = {
+    SvelteKit: { dev: 'vite', build: 'vite' },
+    'React Router (framework)': { dev: 'vite', build: ['build'] },
+    // `vite:<mode>`: Qwik City renders server-side in dev only in ssr mode.
+    'Qwik City': { dev: 'vite:ssr', build: 'vite' },
+    'TanStack Start': { dev: 'vite', build: 'vite' },
+    Astro: { dev: ['dev'], build: ['build'] },
+    VitePress: { dev: ['dev'], build: ['build'] },
+    Waku: { dev: ['dev'], build: ['build'] },
+    Nuxt: { dev: ['dev'], build: ['build'] },
+    SolidStart: { dev: ['dev'], build: ['build'] },
+    'Marko Run': { dev: ['dev'], build: ['build'] },
+    Remix: { dev: ['vite:dev'], build: ['vite:build'] },
+    Analog: { dev: 'vite', build: 'vite' },
+};
+
+/**
+ * CLI entry: run `command` through the project's meta-framework when there is
+ * one. Returns false (the caller continues with lunx's own pipeline) when the
+ * project is not a meta-framework, opts out with `delegate: false`, or the
+ * framework CLI is not installed.
+ */
+export async function maybeDelegate(command: Command, root: string, port?: number): Promise<boolean> {
+    const meta = detectMetaFramework(root);
+    if (!meta) return false;
+    const bin = findBin(root, meta.bin);
+    if (!bin) {
+        console.warn(`[lunx] ${meta.name} project, but its CLI (${meta.bin}) is not installed; using lunx's built-in ${meta.name} support. Install dependencies to run the full framework.`);
+        return false;
+    }
+    // Framework plugins read their config from the working directory and cache it, so be there before loading anything.
+    if (process.cwd() !== root) process.chdir(root);
+    const native = process.env.LUNX_PLUGIN_HOST !== '0' ? NATIVE[meta.name]?.[command] : undefined;
+    // Before anything imports a framework plugin, so its `import 'vite'` binds to lunx's host.
+    if (native) (await import('../plugin-host/loader.js')).installRedirects();
+    const { loadConfig } = await import('../config/index.js');
+    const optOut = await loadConfig(root).then((c: any) => c?.delegate === false).catch(() => false);
+    if (optOut) return false;
+    if (native) {
+        console.log(`[lunx] ${meta.name} project → built by lunx`);
+        const host = await import('../plugin-host/index.js');
+        if (Array.isArray(native)) {
+            await host.runFrameworkCli(root, bin, [...native, ...(command !== 'build' && port && meta.port ? meta.port(port) : [])]);
+        } else if (command === 'build') {
+            try {
+                await host.runHostBuild(root);
+            } catch (err: any) {
+                console.error(`[lunx] build failed: ${err?.stack ?? err}`);
+                process.exitCode = 1;
+            }
+        } else {
+            await host.startHostDev(root, { port, mode: native.startsWith('vite:') ? native.slice(5) : undefined });
+        }
+        return true;
+    }
+    process.exitCode = await delegate(meta, command, root, { port });
+    return true;
 }

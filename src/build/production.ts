@@ -10,14 +10,17 @@
  */
 
 import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import type { BuildConfig } from '../config/index.js';
-import { getBundler, type OutputItem } from '../engines/index.js';
+import { getBundler, parse, type OutputItem } from '../engines/index.js';
 import { transformGlobImports } from './glob-import.js';
+import { TransformCache } from './build-cache.js';
+import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 
@@ -85,8 +88,11 @@ export async function productionBuild(config: BuildConfig, framework: string): P
 
     // Script-only entries still get a page: the project's index.html when it
     // has one (it already references the script), otherwise a minimal page.
+    const federation = (config as any).federation as FederationOptions | undefined;
+    const exposesOnly = !!federation?.exposes && Object.keys(federation.exposes).length > 0 && !config.entry?.length;
+    if (exposesOnly && !fs.existsSync(path.join(root, 'index.html'))) entries.length = 0;
     let syntheticHtml: string | null = null;
-    if (!entries.some((e) => e.endsWith('.html'))) {
+    if (entries.length && !entries.some((e) => e.endsWith('.html'))) {
         const rootHtml = path.join(root, 'index.html');
         if (fs.existsSync(rootHtml)) {
             const html = fs.readFileSync(rootHtml, 'utf8');
@@ -132,6 +138,8 @@ export async function productionBuild(config: BuildConfig, framework: string): P
             styles: [],
         });
     }
+    const appEntries = new Set(Object.values(input));
+    if (federation) Object.assign(input, federationInputs(federation, root));
     if (Object.keys(input).length === 0 && htmlEntries.every((h) => h.styles.length === 0)) {
         throw new Error('No module scripts found in the HTML entry. Add <script type="module" src="/src/main.ts"></script>.');
     }
@@ -159,6 +167,10 @@ export async function productionBuild(config: BuildConfig, framework: string): P
     const getTransformer = () =>
         (transformerPromise ??= import('../core/universal-transformer.js').then((m) => new m.UniversalTransformer(root, { cache: false })));
     const compileJsx = framework === 'solid' || framework === 'preact' || framework === 'qwik' || framework === 'mithril';
+    // Framework compiler output on disk: a rebuild recompiles only the components that changed.
+    const compileCache = process.env.LUNX_BUILD_CACHE === '0' || (config.build as any)?.cache === false
+        ? null
+        : new TransformCache(root, 'framework', compilerSalt(root, framework, config.mode ?? 'production'));
 
     const plugins: any[] = [
         ...((config as any).__rollupPlugins ?? []),
@@ -176,7 +188,16 @@ export async function productionBuild(config: BuildConfig, framework: string): P
                 const isAngular = framework === 'angular' && /\.ts$/.test(file) && !file.includes('node_modules');
                 if (!isSfc && !isFrameworkJsx && !isAngular) return null;
                 const fw = file.endsWith('.vue') ? 'vue' : file.endsWith('.svelte') ? 'svelte' : framework;
+                // Cached when the output depends on this source alone: not Angular (it inlines
+                // templateUrl / styleUrls) nor SFC blocks that pull in another file (src="…").
+                const cacheable = compileCache && !isAngular && !/<(?:template|script|style)\b[^>]*\bsrc=/.test(code);
+                const parts = [file, fw, code];
+                if (cacheable) {
+                    const hit = await compileCache!.get(parts);
+                    if (hit) return { code: hit.code, map: null, moduleType: 'js' };
+                }
                 const out = await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false });
+                if (cacheable) await compileCache!.set(parts, { code: out.code });
                 return { code: out.code, map: null, moduleType: 'js' };
               },
             },
@@ -240,6 +261,28 @@ export async function productionBuild(config: BuildConfig, framework: string): P
                     : emitAsset(this, file, data);
                 return { code: `export default ${JSON.stringify(url)};`, moduleType: 'js' };
               },
+            },
+        },
+        {
+            // A dependency file with no imports, exports or CommonJS at all
+            // is a plain script (qwikloader, polyfills) that only exists for
+            // its side effects; its package's `sideEffects: false` must not
+            // tree-shake it away.
+            name: 'lunx:script-side-effects',
+            transform: {
+                filter: { id: /node_modules.*\.[cm]?js$/ },
+                handler(code: string, id: string) {
+                    if (/\b(module|exports|require)\b/.test(code)) return null;
+                    if (/\b(import|export)\b/.test(code)) {
+                        // `import(` alone (lazy chunks) still leaves a script.
+                        try {
+                            if (parse(id, code).body.some((n: any) => /^(Import|Export)/.test(n.type))) return null;
+                        } catch {
+                            return null;
+                        }
+                    }
+                    return { code, moduleSideEffects: true };
+                },
             },
         },
         {
@@ -322,6 +365,8 @@ export async function productionBuild(config: BuildConfig, framework: string): P
             },
         },
     ];
+
+    if (federation) plugins.push(federationEnginePlugin(federation, root, appEntries));
 
     // ── Rolldown ─────────────────────────────────────────────────────────────
     const envDefines: Record<string, string> = { ...((config as any).__envDefines ?? {}) };
@@ -427,6 +472,14 @@ export async function productionBuild(config: BuildConfig, framework: string): P
         emittedAssets.push({ fileName: toPosix(path.relative(outDir, target)), type: 'asset', source: page });
     }
 
+    // ── Module federation container ──────────────────────────────────────────
+    if (federation) {
+        const entryFiles = new Map<string, string>();
+        for (const item of output) if (item.type === 'chunk' && item.isEntry) entryFiles.set(item.name, item.fileName);
+        const remoteEntry = await writeRemoteEntry(federation, root, outDir, entryFiles, cssFile ? [cssFile] : []);
+        if (remoteEntry) emittedAssets.push({ fileName: remoteEntry.fileName, type: 'asset', source: remoteEntry.code });
+    }
+
     // ── public/ ──────────────────────────────────────────────────────────────
     const publicDir = path.resolve(root, (config as any).publicDir ?? 'public');
     if (fs.existsSync(publicDir) && fs.statSync(publicDir).isDirectory()) {
@@ -497,6 +550,39 @@ class CssCollector {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** What compiled output depends on besides the source: compiler versions and their config files. */
+function compilerSalt(root: string, framework: string, mode: string): string {
+    const parts = [framework, mode];
+    // The compiler code itself: a fix to it must not be served stale results.
+    try {
+        parts.push(crypto.createHash('sha256').update(fs.readFileSync(new URL('../core/universal-transformer.js', import.meta.url))).digest('hex'));
+    } catch {
+        parts.push(String(Date.now())); // unknown compiler: never reuse
+    }
+    const req = (() => {
+        try {
+            return createRequire(path.join(root, 'package.json'));
+        } catch {
+            return null;
+        }
+    })();
+    for (const pkg of ['vue', '@vue/compiler-sfc', 'svelte', 'solid-js', 'babel-preset-solid', 'preact', '@builder.io/qwik', 'mithril']) {
+        try {
+            parts.push(`${pkg}@${JSON.parse(fs.readFileSync(req!.resolve(`${pkg}/package.json`), 'utf8')).version}`);
+        } catch {
+            // not installed
+        }
+    }
+    for (const f of ['svelte.config.js', 'svelte.config.mjs', 'svelte.config.ts', 'tsconfig.json', 'babel.config.js', '.babelrc']) {
+        try {
+            parts.push(f, fs.readFileSync(path.join(root, f), 'utf8'));
+        } catch {
+            // absent
+        }
+    }
+    return parts.join('\0');
+}
 
 function ensureSlashes(base: string): string {
     if (/^(https?:)?\/\//.test(base)) return base.endsWith('/') ? base : `${base}/`;

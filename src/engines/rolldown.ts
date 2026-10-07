@@ -51,8 +51,12 @@ export const rolldownBundler: Bundler = {
             chunkFileNames: output.chunkFileNames,
             assetFileNames: output.assetFileNames,
             minify: output.minify,
+            // Minified apps drop @__PURE__ annotations (they were for this bundler); licences stay.
+            ...(output.minify && !output.keepAnnotations ? { comments: { legal: true, annotation: false, jsdoc: false } } : {}),
             sourcemap: output.sourcemap,
-            inlineDynamicImports: output.inlineDynamicImports,
+            globals: output.globals,
+            exports: output.exports,
+            ...(output.inlineDynamicImports ? { codeSplitting: false } : {}),
             ...(output.chunkGroups?.length ? { advancedChunks: { groups: output.chunkGroups } } : {}),
         };
         for (const key of Object.keys(outputOptions)) if (outputOptions[key] === undefined) delete outputOptions[key];
@@ -78,3 +82,18 @@ export const rolldownBundler: Bundler = {
         }
     },
 };
+
+/**
+ * Rollup-compatible build with the engine's native options and output, for
+ * the plugin host (src/plugin-host), whose plugins expect Rollup's
+ * full contract (chunk.modules, emitFile, viteMetadata…).
+ */
+export async function rollupCompatibleBuild(inputOptions: Record<string, any>, outputOptions: Record<string, any>, write: boolean): Promise<{ output: any[] }> {
+    const { rolldown } = await import('rolldown');
+    const bundle = await rolldown(inputOptions as any);
+    try {
+        return write ? await bundle.write(outputOptions as any) : await bundle.generate(outputOptions as any);
+    } finally {
+        await bundle.close();
+    }
+}

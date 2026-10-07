@@ -82,10 +82,16 @@ export interface BundleOutputOptions {
     format: 'es' | 'cjs' | 'iife' | 'umd';
     /** Global name for iife/umd. */
     name?: string;
-    entryFileNames?: string;
+    entryFileNames?: string | ((chunk: { name: string; isEntry: boolean }) => string);
+    /** UMD / IIFE: global names of external imports. */
+    globals?: Record<string, string>;
+    /** How CommonJS / UMD outputs expose exports ('named' keeps `exports.default`). */
+    exports?: 'auto' | 'named' | 'default' | 'none';
     chunkFileNames?: string;
     assetFileNames?: string;
     minify?: boolean;
+    /** Keep `@__PURE__` annotations in minified output (libraries: downstream bundlers tree-shake with them). */
+    keepAnnotations?: boolean;
     sourcemap?: boolean | 'inline' | 'hidden';
     inlineDynamicImports?: boolean;
     /** Named chunks: modules whose id matches go into that chunk. */

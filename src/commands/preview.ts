@@ -124,8 +124,11 @@ export async function preview(options: PreviewOptions = {}): Promise<void> {
   ): void => {
     const rawUrl = req.url ?? '/'
     // Strip base prefix
-    const urlPath = rawUrl.startsWith(base)
-      ? rawUrl.slice(base.length) || '/'
+    // Keep the leading slash: with base '/', slicing it off turned
+    // /assets/x.js into dist/.assets/x.js.
+    const prefix = base.replace(/\/+$/, '')
+    const urlPath = prefix && rawUrl.startsWith(prefix + '/')
+      ? rawUrl.slice(prefix.length)
       : rawUrl
 
     // Decode URI safely

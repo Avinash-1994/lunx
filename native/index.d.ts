@@ -77,7 +77,7 @@ export declare class GraphAnalyzer {
   clear(): void
 }
 
-/** Native file system watcher with 50ms debounce. */
+/** Native file system watcher with 10ms debounce. */
 export declare class NativeWatcher {
   constructor()
   getVersion(): string

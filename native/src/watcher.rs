@@ -1,6 +1,6 @@
 /// Native FS Watcher
 ///
-/// Uses the `notify` crate with a 50ms debounce.
+/// Uses the `notify` crate with a 10ms debounce (one save, coalesced; any more is HMR latency).
 /// Ignores heavy trees (node_modules, .git, dist, …) so we do not exhaust
 /// inotify watches or panic the Node process. Falls back to chokidar in JS
 /// if this module fails to load.
@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-const DEBOUNCE_MS: u64 = 50;
+const DEBOUNCE_MS: u64 = 10;
 
 const IGNORED_DIR_NAMES: &[&str] = &[
     "node_modules",
@@ -81,7 +81,7 @@ fn watch_filtered(watcher: &mut RecommendedWatcher, root: &Path) {
     }
 }
 
-/// Native file system watcher with 50ms debounce.
+/// Native file system watcher with 10ms debounce.
 #[napi]
 pub struct NativeWatcher {
     inner: Arc<Mutex<Option<RecommendedWatcher>>>,

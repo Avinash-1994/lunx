@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { DevFederation } from '../federation/dev.js';
 import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
@@ -43,7 +44,7 @@ import { LiveConfigManager } from '../config/live-config.js';
  * Rewrite bare module imports to node_modules paths
  * Production-grade AST-based rewriting (Phase C1 Honest)
  */
-async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federationRemotes?: Set<string>, singletonRedirects?: Map<string, string>, aliases?: AliasEntry[]): Promise<string> {
+async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federation?: DevFederation | null, aliases?: AliasEntry[]): Promise<string> {
   try {
     const ast = parseModule('module.js', code);
 
@@ -76,26 +77,13 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
           return;
         }
 
-        if (federationRemotes) {
-          const [remoteName] = specifier.split('/');
-          if (remoteName && federationRemotes.has(remoteName) && specifier.includes('/')) {
-            return;
-          }
+        if (federation?.isRemote(specifier)) {
+          replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.remoteUrl(specifier)) });
+          return;
         }
-
-        // Singleton redirect: if this is a singleton package managed by the shell host,
-        // point directly to the shell's pre-bundled copy to enforce one instance.
-        if (singletonRedirects && singletonRedirects.size > 0) {
-          const pkgRoot = specifier.startsWith('@')
-            ? specifier.split('/').slice(0, 2).join('/')
-            : specifier.split('/')[0];
-          if (singletonRedirects.has(pkgRoot)) {
-            const safeName = specifier.replace(/[/@]/g, '_');
-            const hostBase = singletonRedirects.get(pkgRoot)!;
-            const singletonUrl = `${hostBase}/@lunx-deps/${safeName}.js`;
-            replacements.push({ start: node.start, end: node.end, replacement: `'${singletonUrl}'` });
-            return;
-          }
+        if (federation?.isShared(specifier)) {
+          replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.sharedUrl(specifier)) });
+          return;
         }
 
         let replacement = `/node_modules/${specifier}`;
@@ -131,7 +119,10 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
 
     // Walk AST
     for (const node of ast.body) {
-      if (node.type === 'ImportDeclaration') {
+      if (node.type === 'ImportDeclaration' && federation?.isRemote(node.source.value)) {
+        // A remote's exports are only known at runtime: bind them from its module.
+        replacements.push({ start: node.start, end: node.end, replacement: federation.rewriteImportDeclaration(node) });
+      } else if (node.type === 'ImportDeclaration') {
         addReplacement(node.source);
       } else if (node.type === 'ExportNamedDeclaration' && node.source) {
         addReplacement(node.source);
@@ -380,16 +371,13 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // Sass / Less / Stylus / PostCSS are compiled by the shared CSS compiler
   // (build/css.ts), the same one production uses.
 
+  // Module federation: the same runtime and container API as production builds.
+  let devFederation: DevFederation | null = null;
   if (cfg.federation?.remotes && Object.keys(cfg.federation.remotes).length > 0) {
-    const remoteNames = Object.keys(cfg.federation.remotes).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
     pluginManager.register({
       name: 'lunx-federation-dev',
-      transform(code, id) {
-        const regex = new RegExp('\\bimport\\s*\\(\\s*["\'](' + remoteNames + ')\\/([^"\']+)["\']\\s*\\)', 'g');
-        if (!regex.test(code)) return code;
-        return code.replace(regex, (_, remote, modulePath) => {
-          return `globalThis.__lunx_import__("${remote}/${modulePath}")`;
-        });
+      transform(code) {
+        return devFederation ? devFederation.rewriteDynamic(code) : code;
       }
     });
   }
@@ -415,6 +403,17 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // HMR client are served at once, and only module requests (whose imports
   // must point at the bundled deps) wait for it.
   let prebundleReady: Promise<void> = Promise.resolve();
+  if (cfg.federation?.name) {
+    const { DevFederation } = await import('../federation/dev.js');
+    devFederation = new DevFederation(cfg.federation as any, {
+      root: cfg.root,
+      depsDir: resolvedCacheDir,
+      deps: async () => {
+        await prebundleReady.catch(() => {});
+        return preBundledDeps;
+      },
+    });
+  }
 
   try {
     // 1. Load package.json dependencies
@@ -480,111 +479,116 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
     const defaultDeps = frameworkDeps[primaryFramework] || [];
 
-    // Auto-discover from package.json
-    let pkgDepsList: string[] = [];
-    try {
-      const pkgJsonRaw = await fs.readFile(path.join(cfg.root, 'package.json'), 'utf-8');
-      const pkgJson = JSON.parse(pkgJsonRaw);
-      pkgDepsList = Object.keys({ ...pkgJson.dependencies, ...pkgJson.peerDependencies });
-    } catch { }
+    // Scanning the sources for imports and pre-bundling run in the background, as in
+    // Vite: the server answers at once, and module requests wait for prebundleReady.
+    // (Awaiting the scan made boot grow with the app: ~0.5s at 2,000 modules.)
+    prebundleReady = (async () => {
+      // Auto-discover from package.json
+      let pkgDepsList: string[] = [];
+      try {
+        const pkgJsonRaw = await fs.readFile(path.join(cfg.root, 'package.json'), 'utf-8');
+        const pkgJson = JSON.parse(pkgJsonRaw);
+        pkgDepsList = Object.keys({ ...pkgJson.dependencies, ...pkgJson.peerDependencies });
+      } catch { }
 
-    // Pre-bundle what the app imports, not everything it lists: a crawl of
-    // the sources from the entry is a few ms; bundling unused dependencies
-    // cost ~1s per boot. Anything missed is still bundled on first request.
-    try {
-      const { scanDeps } = await import('./dep-scan.js');
-      const scan = await scanDeps(cfg.root, cfg.entry?.length ? cfg.entry : ['index.html'], aliases);
-      if (scan.files > 0) pkgDepsList = [...scan.deps];
-      _mark(`scanned ${scan.files} files, ${scan.deps.size} deps`);
-    } catch (e: any) {
-      log.debug(`dependency scan failed, pre-bundling package.json deps: ${e.message}`);
-    }
+      // Pre-bundle what the app imports, not everything it lists: a crawl of
+      // the sources from the entry is a few ms; bundling unused dependencies
+      // cost ~1s per boot. Anything missed is still bundled on first request.
+      try {
+        const { scanDeps } = await import('./dep-scan.js');
+        const scan = await scanDeps(cfg.root, cfg.entry?.length ? cfg.entry : ['index.html'], aliases);
+        if (scan.files > 0) pkgDepsList = [...scan.deps];
+        _mark(`scanned ${scan.files} files, ${scan.deps.size} deps`);
+      } catch (e: any) {
+        log.debug(`dependency scan failed, pre-bundling package.json deps: ${e.message}`);
+      }
 
-    // 3. User Config (prebundle)
-    const prebundleConfig = cfg.prebundle || { enabled: true, include: [], exclude: [] };
+      // 3. User Config (prebundle)
+      const prebundleConfig = cfg.prebundle || { enabled: true, include: [], exclude: [] };
 
-    if (prebundleConfig.enabled !== false) {
-      _mark('prebundle start');
-      // Merge sources
-      let depsToBundle = new Set([
-        ...defaultDeps,
-        ...pkgDepsList,
-        ...(prebundleConfig.include || [])
-      ]);
+      if (prebundleConfig.enabled !== false) {
+        _mark('prebundle start');
+        // Merge sources
+        let depsToBundle = new Set([
+          ...defaultDeps,
+          ...pkgDepsList,
+          ...(prebundleConfig.include || [])
+        ]);
 
-      // ── Server-only packages that must NEVER be pre-bundled as browser ESM ──
-      // These packages use Node.js built-ins (node:fs, node:url, etc.) and are
-      // only used in the server/build pipeline, not in browser code.
-      // Lunx understands the SSR boundary better than any other build tool.
-      const SERVER_ONLY_PACKAGES = new Set([
-        // Meta-framework cores (all Node.js SSR engines)
-        'astro', '@astrojs/compiler', '@astrojs/prism',
-        '@sveltejs/kit', '@sveltejs/vite-plugin-svelte',
-        'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
-        'next', '@next/env', '@next/swc',
-        'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
-        // (@angular/core and @builder.io/qwik are browser runtimes: excluding
-        // them made other packages bundle private copies of them.)
-        '@angular/cli', '@angular/compiler-cli', '@angular/build',
-        '@analogjs/platform', '@analogjs/vite-plugin-angular',
-        '@builder.io/qwik-city',
-        'waku', '@waku/dev-server',
-        'vitepress', 'vite',
-        '@solidjs/start',
-        '@tanstack/start', '@tanstack/router-vite-plugin',
-        'electron', 'electron-builder',
-        '@tauri-apps/cli', '@tauri-apps/api',
-        // Build tools (never browser code)
-        'esbuild', 'rollup', 'webpack', 'parcel',
-        'typescript', 'ts-node', 'tsx',
-        // Node-only utilities
-        'chokidar', 'better-sqlite3', 'ws',
-        'express', 'koa', 'fastify', 'hono',
-      ]);
+        // ── Server-only packages that must NEVER be pre-bundled as browser ESM ──
+        // These packages use Node.js built-ins (node:fs, node:url, etc.) and are
+        // only used in the server/build pipeline, not in browser code.
+        // Lunx understands the SSR boundary better than any other build tool.
+        const SERVER_ONLY_PACKAGES = new Set([
+          // Meta-framework cores (all Node.js SSR engines)
+          'astro', '@astrojs/compiler', '@astrojs/prism',
+          '@sveltejs/kit', '@sveltejs/vite-plugin-svelte',
+          'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
+          'next', '@next/env', '@next/swc',
+          'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
+          // (@angular/core and @builder.io/qwik are browser runtimes: excluding
+          // them made other packages bundle private copies of them.)
+          '@angular/cli', '@angular/compiler-cli', '@angular/build',
+          '@analogjs/platform', '@analogjs/vite-plugin-angular',
+          '@builder.io/qwik-city',
+          'waku', '@waku/dev-server',
+          'vitepress', 'vite',
+          '@solidjs/start',
+          '@tanstack/start', '@tanstack/router-vite-plugin',
+          'electron', 'electron-builder',
+          '@tauri-apps/cli', '@tauri-apps/api',
+          // Build tools (never browser code)
+          'esbuild', 'rollup', 'webpack', 'parcel',
+          'typescript', 'ts-node', 'tsx',
+          // Node-only utilities
+          'chokidar', 'better-sqlite3', 'ws',
+          'express', 'koa', 'fastify', 'hono',
+        ]);
 
-      // Filter 1: Must verify existence in node_modules (Avoid resolve errors)
-      const validDeps = new Set<string>();
-      for (const dep of depsToBundle) {
-        // Exclude user-specified overrides
-        if (prebundleConfig.exclude?.includes(dep)) continue;
+        // Filter 1: Must verify existence in node_modules (Avoid resolve errors)
+        const validDeps = new Set<string>();
+        for (const dep of depsToBundle) {
+          // Exclude user-specified overrides
+          if (prebundleConfig.exclude?.includes(dep)) continue;
 
-        // Exclude server-only / Node.js-only packages from browser bundling
-        const rootPkg = dep.startsWith('@') ? dep.split('/').slice(0, 2).join('/') : dep.split('/')[0];
-        if (SERVER_ONLY_PACKAGES.has(rootPkg) || SERVER_ONLY_PACKAGES.has(dep)) continue;
+          // Exclude server-only / Node.js-only packages from browser bundling
+          const rootPkg = dep.startsWith('@') ? dep.split('/').slice(0, 2).join('/') : dep.split('/')[0];
+          if (SERVER_ONLY_PACKAGES.has(rootPkg) || SERVER_ONLY_PACKAGES.has(dep)) continue;
 
-        try {
-          const isDirectDep = pkgDeps.includes(rootPkg);
-          if (isDirectDep) {
-            validDeps.add(dep);
-          } else {
-            try {
-              require.resolve(dep, { paths: [cfg.root] });
+          try {
+            const isDirectDep = pkgDeps.includes(rootPkg);
+            if (isDirectDep) {
               validDeps.add(dep);
-            } catch (e) {
+            } else {
               try {
-                const pkgJsonPath = path.join(cfg.root, 'node_modules', rootPkg, 'package.json');
-                await fs.access(pkgJsonPath);
+                require.resolve(dep, { paths: [cfg.root] });
                 validDeps.add(dep);
-              } catch { }
+              } catch (e) {
+                try {
+                  const pkgJsonPath = path.join(cfg.root, 'node_modules', rootPkg, 'package.json');
+                  await fs.access(pkgJsonPath);
+                  validDeps.add(dep);
+                } catch { }
+              }
             }
+          } catch (e) {
+            // Skip missing dep
           }
-        } catch (e) {
-          // Skip missing dep
+        }
+
+        if (validDeps.size > 0) {
+          // 4. Pass to PreBundler
+          await preBundler.preBundleDependencies(Array.from(validDeps)).then(
+            (deps) => {
+              preBundledDeps = deps;
+              _mark('prebundle done');
+              log.debug('Dependencies pre-bundled successfully', { count: deps.size });
+            },
+            (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
+          );
         }
       }
-
-      if (validDeps.size > 0) {
-        // 4. Pass to PreBundler
-        prebundleReady = preBundler.preBundleDependencies(Array.from(validDeps)).then(
-          (deps) => {
-            preBundledDeps = deps;
-            _mark('prebundle done');
-            log.debug('Dependencies pre-bundled successfully', { count: deps.size });
-          },
-          (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
-        );
-      }
-    }
+    })().catch((e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`));
 
     if (process.env.LUNX_DEV_WARMUP === '1') await prebundleReady;
     // A full build before serving cost ~0.75s of every boot. Modules are
@@ -846,49 +850,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     }
     statusHandler.trackRequest();
     if (await statusHandler.handleRequest(req, res)) return;
+    if (devFederation && await devFederation.handle(req, res)) return;
     if (federationDev.handleRequest(req, res)) return;
-
-    // ── Bug Class B fix: Singleton dep proxy for remote apps ────────────────────
-    // When this app is a REMOTE (has `exposes`) with singleton shared deps,
-    // proxy pre-bundled dep requests (/@lunx-deps/react, etc.) to the shell
-    // so there is exactly one React instance across all federation boundaries.
-    if (cfg.federation?.exposes && cfg.federation.shared && req.url?.startsWith('/@lunx-deps/')) {
-      const singletonPkgs = Object.entries(cfg.federation.shared)
-        .filter(([, v]) => typeof v === 'object' && (v as any).singleton)
-        .map(([k]) => k);
-      // Strip query string then .js extension: "react.js?v=123" → "react", "react-dom_client.js" → "react-dom"
-      const rawDepPath = req.url.slice('/@lunx-deps/'.length).split('?')[0];
-      // Convert lunx safe-name back to pkg name: "react-dom_client.js" → check both "react-dom" and "react"
-      const withoutExt = rawDepPath.replace(/\.js$/, '');
-      // rootPkg: take portion before first underscore (for subpath like react_jsx-dev-runtime → react)
-      const rootPkgRaw = withoutExt.startsWith('@')
-        ? withoutExt.split('_').slice(0, 2).join('/')  // scoped pkg
-        : withoutExt.split('_')[0];                     // react-dom_client → react-dom
-      // Only proxy if this dep belongs to a singleton package
-      const matchedSingleton = singletonPkgs.find(pkg =>
-        pkg === rootPkgRaw || withoutExt === pkg.replace(/[/@]/g, '_') || withoutExt.startsWith(pkg.replace(/[/@]/g, '_'))
-      );
-      if (matchedSingleton) {
-        const singletonHost = (cfg.federation as any).singletonHost || 'http://localhost:5173';
-        const proxyUrl = `${singletonHost}/@lunx-deps/${rawDepPath}${req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
-        try {
-          const { getFetch } = await import('../utils/fetch.js');
-          const fetch = await getFetch();
-          const upstream = await fetch(proxyUrl);
-          const body = await upstream.text();
-          res.writeHead(upstream.status, {
-            'Content-Type': upstream.headers.get('content-type') || 'application/javascript',
-            'Access-Control-Allow-Origin': '*',
-            'Cache-Control': 'no-store',
-          });
-          res.end(body);
-          return;
-        } catch {
-          // proxy failed — fall through to serve own copy (graceful degradation)
-        }
-      }
-    }
-
 
     // Security Scan (Day 41)
     if (!anomalyDetector.scanRequest({ url: req.url || '', headers: req.headers, method: req.method || 'GET' })) {
@@ -1151,32 +1114,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     <script type="module" src="/@lunx/hmr-client"></script>
         `;
 
-        // Federation runtime injection for host apps
-        let federationRuntime = '';
-        if (cfg.federation?.remotes && Object.keys(cfg.federation.remotes).length > 0) {
-          const { generateFederationRuntime } = await import('../federation/index.js');
-          federationRuntime = `<script>${generateFederationRuntime(cfg.federation.remotes)}</script>`;
-
-          // Bug Class B fix: inject an importmap that redirects shared singleton packages
-          // (react, react-dom, etc.) from any remote origin to the host's pre-bundled copy.
-          // This ensures only ONE React instance exists across all federation boundaries.
-          if (cfg.federation.shared) {
-            const singletonEntries: string[] = [];
-            for (const [pkg, sharedCfg] of Object.entries(cfg.federation.shared)) {
-              const isSingleton = typeof sharedCfg === 'object' && (sharedCfg as any).singleton;
-              if (isSingleton) {
-                // Map the bare specifier to the host's pre-bundled chunk
-                const hostOrigin = `http://localhost:${cfg.server?.port || cfg.port || 5173}`;
-                singletonEntries.push(`    "${pkg}": "${hostOrigin}/@lunx-deps/${pkg}"`);
-                // Also cover scoped variants (e.g. react-dom/client)
-                singletonEntries.push(`    "${pkg}/": "${hostOrigin}/@lunx-deps/${pkg}/"`);
-              }
-            }
-            if (singletonEntries.length > 0) {
-              federationRuntime = `<script type="importmap">{\n  "imports": {\n${singletonEntries.join(',\n')}\n  }\n}</script>\n` + federationRuntime;
-            }
-          }
-        }
+        // Module federation needs nothing in the page: its runtime is imported by the modules that use it.
+        const federationRuntime = '';
 
         // Always inject basic shims in dev mode to prevent ReferenceErrors from any React-ish modules
         let preamble = `
@@ -1717,25 +1656,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             define: devDefines
           });
 
-          // Rewrite imports after transformation
-          const federationRemotes = cfg.federation?.remotes ? new Set(Object.keys(cfg.federation.remotes)) : undefined;
-
-          // Build singleton redirect map for remote apps (Bug Class B fix).
-          // Maps each singleton pkg name → shell host base URL.
-          // rewriteImports will redirect bare 'react' imports to the shell's pre-bundled copy.
-          let singletonRedirects: Map<string, string> | undefined;
-          if (cfg.federation?.exposes && cfg.federation.shared) {
-            const hostBase = (cfg.federation as any).singletonHost || 'http://localhost:5173';
-            singletonRedirects = new Map<string, string>();
-            for (const [pkg, sharedCfg] of Object.entries(cfg.federation.shared)) {
-              if (typeof sharedCfg === 'object' && (sharedCfg as any).singleton) {
-                singletonRedirects.set(pkg, hostBase);
-              }
-            }
-          }
-
           const globbed = transformGlobImports(transformResult.code, filePath, cfg.root);
-          let code = await rewriteImports(globbed ?? transformResult.code, cfg.root, preBundledDeps, federationRemotes, singletonRedirects, aliases);
+          let code = await rewriteImports(globbed ?? transformResult.code, cfg.root, preBundledDeps, devFederation, aliases);
 
           res.writeHead(200, {
             'Content-Type': 'application/javascript',
@@ -2013,8 +1935,11 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       log.warn('Restarting server due to config change...', { category: 'server' });
       broadcast(JSON.stringify({ type: 'restarting' }));
       await new Promise(r => setTimeout(r, 500)); // Give clients time to receive message
-      server.close();
-      wss?.close();
+      // Drop keep-alive connections so the port is free for the restarted server.
+      (server as any).closeAllConnections?.();
+      await Promise.race([new Promise<void>((r) => server.close(() => r())), new Promise((r) => setTimeout(r, 1000))]);
+      // The ws server may be one that only closes with the HTTP server.
+      if (typeof (wss as any)?.close === 'function') wss!.close();
       await configWatcher.close();
       federationDev.stop();
       // Re-run startDevServer (recursive)
@@ -2032,7 +1957,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   const filesWithErrors = new Set<string>();
 
   const { DevWatcher } = await import('./watcher.js');
-  const watcher = new DevWatcher(cfg.root, 50);
+  // A short batch: editors write a save as one or two events, and each ms is HMR latency.
+  const watcher = new DevWatcher(cfg.root, 10);
   watcher.on('change', async (files: string[]) => {
     for (const file of files) {
       try {
@@ -2045,15 +1971,16 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           const hadError = filesWithErrors.has(file);
 
           try {
-            const code = await fs.readFile(file, 'utf-8');
-
-            // Attempt transformation to catch errors immediately
+            // Compile now to catch errors at once, with the same input and options as the
+            // request path, so the browser's request for the update hits this result.
+            const code = await pluginManager.transform(await fs.readFile(file, 'utf-8'), file);
             await universalTransformer.transform({
               filePath: file,
               code,
               framework: primaryFramework,
               root: cfg.root,
-              isDev: true
+              isDev: true,
+              define: devDefines
             });
 
             // If transformation succeeds and there was a previous error, show success
@@ -2117,7 +2044,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
           affected.forEach((affectedFile: string) => {
             // Clear cache for affected files too
-            universalTransformer.clearCache(affectedFile);
+            // The changed file was just compiled from its new contents; importers re-compile.
+            if (affectedFile !== file) universalTransformer.clearCache(affectedFile);
 
             // Determine message type
             let type = 'update';

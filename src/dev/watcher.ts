@@ -29,14 +29,17 @@ export class DevWatcher extends EventEmitter {
     private timer: NodeJS.Timeout | null = null;
     private engine: 'rust-notify' | 'chokidar' | 'unknown' = 'unknown';
 
-    constructor(private rootDir: string, private debounceMs: number = 50) {
+    constructor(private rootDir: string, private debounceMs: number = 10) {
         super();
         this.start();
     }
 
     private start() {
         const ignoredPatterns = [
-            '**/node_modules/**', '**/.git/**', '**/dist/**', '**/.lunx/**', '**/.lunx_cache/**'
+            '**/node_modules/**', '**/.git/**', '**/dist/**', '**/.lunx/**', '**/.lunx_cache/**',
+            // Logs, editor swap files and tool output: never part of the app,
+            // and a dev server writing its log into the root reloaded forever.
+            '**/coverage/**', '**/*.log', '**/*.swp', '**/*.tsbuildinfo', '**/.DS_Store',
         ];
 
         if (NativeWatcher) {
@@ -70,8 +73,9 @@ export class DevWatcher extends EventEmitter {
             } catch (err: any) {
                 console.warn(`[lunx] WARN: native watcher failed to load, falling back to chokidar (`, err?.message ?? err, `)`);
             }
-        } else {
-            console.warn(`[lunx] WARN: native watcher failed to load, falling back to chokidar`);
+        } else if (process.env.LUNX_DEBUG) {
+            // The native helpers are optional; lunx's JS watcher does the same job.
+            console.warn(`[lunx] native watcher not installed for this platform; using the JS watcher`);
         }
 
         // Chokidar fallback

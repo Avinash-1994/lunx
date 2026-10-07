@@ -1,9 +1,0 @@
-{
-  "entry": [
-    "src/main.jsx"
-  ],
-  "mode": "development",
-  "preset": "spa",
-  "platform": "browser",
-  "adapter": "react"
-}

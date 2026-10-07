@@ -93,7 +93,7 @@ function scheduleReactRefresh(): void {
     refreshTimer = setTimeout(() => {
         refreshTimer = null;
         runtime.performReactRefresh();
-    }, 16);
+    }, 0);
 }
 
 async function handleUpdate(modules: string[]): Promise<void> {
@@ -179,8 +179,11 @@ declare const __LUNX_HMR_URL__: string | undefined;
 
 function hmrUrl(): string {
     if (typeof __LUNX_HMR_URL__ !== 'undefined') return __LUNX_HMR_URL__;
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/__lunx_hmr`;
+    // The server that served this client: a federated remote's modules run in
+    // another app's page but get their updates from their own dev server.
+    const own = new URL(import.meta.url);
+    const proto = own.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${own.host}/__lunx_hmr`;
 }
 
 let everConnected = false;
@@ -249,7 +252,9 @@ export function createHotContext(id: string) {
 }
 
 const w = window as any;
-if (!w.__lunx_hmr_connected__) {
+const connected: Set<string> = (w.__lunx_hmr_servers__ ??= new Set());
+if (!connected.has(hmrUrl())) {
+    connected.add(hmrUrl());
     w.__lunx_hmr_connected__ = true;
     connect();
     w.__lunxHmr = w.__lunxHmr ?? {};

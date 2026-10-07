@@ -1,71 +1,80 @@
 {
-  "lunx": {
-    "kind": "module server",
-    "devBootMs": 291,
-    "devAppCodeMs": 302,
-    "buildColdMs": 462,
-    "buildWarmMs": 457,
-    "jsBytes": 219626,
-    "cssBytes": 29
-  },
-  "vite": {
-    "kind": "module server",
-    "devBootMs": 381,
-    "devAppCodeMs": 485,
-    "buildColdMs": 792,
-    "buildWarmMs": 431,
-    "jsBytes": 220248,
-    "cssBytes": 30
-  },
-  "rspack": {
-    "kind": "bundler",
-    "devBootMs": 339,
-    "devAppCodeMs": 373,
-    "buildColdMs": 304,
-    "buildWarmMs": 324,
-    "jsBytes": 219460,
-    "cssBytes": 29
-  },
-  "webpack": {
-    "kind": "bundler",
-    "devBootMs": 1368,
-    "devAppCodeMs": 1461,
-    "buildColdMs": 3392,
-    "buildWarmMs": 3571,
-    "jsBytes": 224696,
-    "cssBytes": 0
-  },
-  "parcel": {
-    "kind": "bundler",
-    "devBootMs": 1315,
-    "devAppCodeMs": 1324,
-    "buildColdMs": 1420,
-    "buildWarmMs": 1546,
-    "jsBytes": 221951,
-    "cssBytes": 96
-  },
-  "esbuild": {
-    "kind": "bundler",
-    "devBootMs": null,
-    "buildColdMs": 65,
-    "buildWarmMs": 60,
-    "jsBytes": 222973,
-    "cssBytes": 30
-  },
-  "bun": {
-    "kind": "bundler",
-    "devBootMs": null,
-    "buildColdMs": 39,
-    "buildWarmMs": 37,
-    "jsBytes": 211811,
-    "cssBytes": 30
-  },
-  "rolldown": {
-    "kind": "bundler (JS only)",
-    "devBootMs": null,
-    "buildColdMs": 404,
-    "buildWarmMs": 269,
-    "jsBytes": 221449,
-    "cssBytes": 0
+  "scale": null,
+  "runs": 3,
+  "results": {
+    "lunx": {
+      "kind": "module server",
+      "devBootMs": 338,
+      "devAppCodeMs": 341,
+      "hmrMs": 53,
+      "buildColdMs": 416,
+      "buildWarmMs": 425,
+      "jsBytes": 220745,
+      "cssBytes": 29
+    },
+    "vite": {
+      "kind": "module server",
+      "devBootMs": 416,
+      "devAppCodeMs": 530,
+      "hmrMs": 46,
+      "buildColdMs": 444,
+      "buildWarmMs": 459,
+      "jsBytes": 220248,
+      "cssBytes": 30
+    },
+    "rspack": {
+      "kind": "bundler",
+      "devBootMs": 376,
+      "devAppCodeMs": 408,
+      "hmrMs": 217,
+      "buildColdMs": 323,
+      "buildWarmMs": 327,
+      "jsBytes": 219460,
+      "cssBytes": 29
+    },
+    "webpack": {
+      "kind": "bundler",
+      "devBootMs": 1451,
+      "devAppCodeMs": 1557,
+      "hmrMs": 264,
+      "buildColdMs": 3992,
+      "buildWarmMs": 3972,
+      "jsBytes": 224696,
+      "cssBytes": 0
+    },
+    "parcel": {
+      "kind": "bundler",
+      "devBootMs": 1406,
+      "devAppCodeMs": 1419,
+      "hmrMs": 30,
+      "buildColdMs": 1673,
+      "buildWarmMs": 1515,
+      "jsBytes": 221951,
+      "cssBytes": 96
+    },
+    "esbuild": {
+      "kind": "bundler",
+      "devBootMs": null,
+      "buildColdMs": 57,
+      "buildWarmMs": 57,
+      "jsBytes": 222973,
+      "cssBytes": 30
+    },
+    "bun": {
+      "kind": "bundler",
+      "devBootMs": null,
+      "buildColdMs": 37,
+      "buildWarmMs": 43,
+      "jsBytes": 211811,
+      "cssBytes": 30
+    },
+    "rolldown": {
+      "kind": "bundler (JS only)",
+      "devBootMs": null,
+      "buildColdMs": 442,
+      "buildWarmMs": 233,
+      "jsBytes": 221449,
+      "cssBytes": 0
+    }
   }
 }

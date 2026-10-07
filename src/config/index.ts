@@ -32,16 +32,24 @@ export const BuildConfigSchema = z.object({
   esbuildPlugins: z.array(z.any()).optional(),
   platform: z.enum(['browser', 'node', 'edge']).default('browser'),
   preset: z.enum(['spa', 'ssr', 'ssg']).default('spa'),
+  // Library mode (src/build/library.ts): `lunx build` writes a package instead of an app.
+  lib: z.any().optional(),
   federation: z.object({
     name: z.string(),
     filename: z.string().optional(),
     singletonHost: z.string().optional(),
     exposes: z.record(z.string(), z.string()).optional(),
     remotes: z.record(z.string(), z.string()).optional(),
-    shared: z.record(z.string(), z.object({
-      singleton: z.boolean().optional(),
-      requiredVersion: z.string().optional(),
-    })).optional(),
+    shared: z.union([
+      z.array(z.string()),
+      z.record(z.string(), z.union([z.boolean(), z.string(), z.object({
+        singleton: z.boolean().optional(),
+        requiredVersion: z.union([z.string(), z.literal(false)]).optional(),
+        strictVersion: z.boolean().optional(),
+        eager: z.boolean().optional(),
+        version: z.string().optional(),
+      })])),
+    ]).optional(),
     prefetch: z.array(z.string()).optional(),
     fallback: z.string().optional(),
     mock: z.boolean().optional(),
@@ -129,13 +137,14 @@ export type BuildConfig = {
   esbuildPlugins?: any[];
   platform: 'browser' | 'node' | 'edge';
   preset: 'spa' | 'ssr' | 'ssg';
+  lib?: import('../build/library.js').LibraryOptions;
   federation?: {
     name: string;
     filename?: string;
     singletonHost?: string;
     exposes?: Record<string, string>;
     remotes?: Record<string, string>;
-    shared?: Record<string, { singleton?: boolean; requiredVersion?: string }>;
+    shared?: string[] | Record<string, boolean | string | { singleton?: boolean; requiredVersion?: string | false; strictVersion?: boolean; eager?: boolean; version?: string }>;
     prefetch?: string[];
     fallback?: string;
     mock?: boolean;
@@ -213,7 +222,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'entry', 'outDir', 'framework', 'preset', 'mode', 'platform', 'port',
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
-  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate'
+  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib'
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {

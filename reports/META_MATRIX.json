@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-01T12:15:35.502Z",
+  "generatedAt": "2026-10-06T13:40:25.344Z",
   "results": [
     {
       "name": "next",
@@ -27,6 +27,60 @@
     },
     {
       "name": "react-router",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "vitepress",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "solidstart",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "docusaurus",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "waku",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "tanstack-start",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "qwik-city",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "marko-run",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "remix",
+      "dev": "pass",
+      "build": "pass",
+      "notes": []
+    },
+    {
+      "name": "analog",
       "dev": "pass",
       "build": "pass",
       "notes": []

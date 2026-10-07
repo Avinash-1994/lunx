@@ -35,6 +35,7 @@ export default {
         '/node_modules/',
         '\\.node$',
         '/native/index\\.cjs$',
+        '<rootDir>/dist/',  // already compiled ES modules
     ],
     collectCoverageFrom: [
         'src/**/*.{ts,tsx}',

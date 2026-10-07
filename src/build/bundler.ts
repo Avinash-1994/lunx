@@ -5,6 +5,14 @@ import { BuildConfig } from '../config/index.js';
 
 export async function build(rawConfig: BuildConfig) {
   let config = rawConfig;
+  // LUNX_TIMINGS=1: how long each build phase took.
+  const timings: Array<[string, number]> = [];
+  let phaseStart = performance.now();
+  const phase = (name: string) => {
+    const now = performance.now();
+    timings.push([name, now - phaseStart]);
+    phaseStart = now;
+  };
 
   // Step 2: detect active framework adapter
   let adapter: any = null;
@@ -81,6 +89,7 @@ export async function build(rawConfig: BuildConfig) {
     }
   }
 
+  phase('setup (adapters, plugins)');
   console.log('🏗️  Starting Build Pipeline...');
   console.log('📁 Root:', config.root);
   console.log('📦 Entry:', config.entry);
@@ -119,9 +128,13 @@ export async function build(rawConfig: BuildConfig) {
         }));
         
         const cacheDir = path.join(config.root, '.lunx', 'security');
+        // Strict projects wait for fresh OSV data; others build from the cache while a
+        // detached process refreshes it, so a build never waits on the network.
+        const strict = (config as any).security?.vulnSeverity !== undefined || process.env.LUNX_SECURITY_STRICT === '1';
         const cveResult = await security.scanCVE(packagesToScan, {
           cacheDir,
           distDir: path.resolve(config.root, config.outDir || 'dist'),
+          network: strict ? 'wait' : 'background',
         });
         if (!cveResult.clean) {
           // A CVE in a transitive dependency is not a reason to refuse to
@@ -169,15 +182,12 @@ export async function build(rawConfig: BuildConfig) {
   })();
   securityGate.catch(() => {}); // observed below; avoid an unhandled rejection meanwhile
 
-  // The engine bundler (src/engines; Rolldown by default) builds for production. The legacy engine
-  // still owns module federation, SSR/node targets, and `build.bundler: 'legacy'`.
+  // The engine bundler (src/engines; Rolldown by default) builds for production: browser apps,
+  // module federation, and node / edge / SSR targets. The legacy engine runs only for
+  // `build.bundler: 'legacy'`.
   const { bundlerAvailable, productionBuild } = await import('./production.js');
-  const useEngine =
-    (config.build as any)?.bundler !== 'legacy' &&
-    !config.federation &&
-    config.preset !== 'ssr' &&
-    (config.platform ?? 'browser') === 'browser' &&
-    (await bundlerAvailable());
+  const useEngine = (config.build as any)?.bundler !== 'legacy' && (await bundlerAvailable());
+  const serverTarget = config.preset === 'ssr' || (config.platform ?? 'browser') !== 'browser';
 
   let pipeline: any = null;
   try {
@@ -185,7 +195,9 @@ export async function build(rawConfig: BuildConfig) {
     if (useEngine) {
       const { detectFramework } = await import('../core/framework-detector.js');
       const framework = config.framework || (await detectFramework(config.root));
-      result = await productionBuild(config, framework);
+      result = serverTarget
+        ? await (await import('./server-build.js')).serverBuild(config, framework)
+        : await productionBuild(config, framework);
       console.log(`[lunx] bundled ${result.modules.length} modules with ${result.engine} in ${Math.round(result.durationMs)}ms`);
     } else {
       const { FrameworkPipeline } = await import('../core/pipeline/framework-pipeline.js');
@@ -197,7 +209,9 @@ export async function build(rawConfig: BuildConfig) {
       }
     }
 
+  phase('bundle');
     await securityGate;
+    phase('security gate (lockfile, CVE)');
 
     if (config.mode === 'production') {
       const security = await import('@lunx/security');
@@ -225,11 +239,13 @@ export async function build(rawConfig: BuildConfig) {
       };
       scanDir(buildOutDir);
       
+  phase('read output');
       const scanResult = security.scanSecrets(filesToScan);
       if (!scanResult.clean) {
         throw new Error('Potential secret detected in bundle output! Aborting build.');
       }
 
+  phase('secret scan');
       try {
         const pkgPath = path.join(config.root, 'package.json');
         
@@ -278,6 +294,7 @@ export async function build(rawConfig: BuildConfig) {
         console.warn('[lunx:security] Failed to generate SBOM:', e.message);
       }
 
+  phase('sbom');
       // 3.3 Output Hardening (SRI, CSP, Headers)
       try {
         const sriManifest = security.generateSRI(buildOutDir);
@@ -316,6 +333,7 @@ export async function build(rawConfig: BuildConfig) {
       }
     }
 
+  phase('sri/csp/headers');
     // Day 52: Print final bundle stats in production mode
     if (config.mode === 'production') {
       const { printBundleStats } = await import('./bundle-stats.js');
@@ -330,8 +348,12 @@ export async function build(rawConfig: BuildConfig) {
       await adapter.buildOutput(outDir);
     }
 
+    phase('stats, adapter output');
+    if (process.env.LUNX_TIMINGS) {
+      for (const [name, ms] of timings) console.log(`  [lunx:timings] ${name.padEnd(32)} ${ms.toFixed(1).padStart(7)} ms`);
+    }
     console.log('✅ Build completed successfully!');
-    return result; // Added
+    return result;
   } catch (error: any) {
     console.error('❌ Build failed:', error.message);
     throw error;
