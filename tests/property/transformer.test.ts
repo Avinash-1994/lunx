@@ -14,6 +14,10 @@ import path from 'path';
 describe('Property-Based: Universal Transformer', () => {
     const transformer = new UniversalTransformer(process.cwd());
 
+    // Words that cannot name a binding in a module (strict mode).
+    const RESERVED = new Set(['await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null', 'package', 'private', 'protected', 'public', 'return', 'static', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'eval', 'arguments']);
+    const identifier = fc.stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/).filter((name) => !RESERVED.has(name));
+
     /**
      * Property: Transformed code should always be valid JavaScript
      * 
@@ -27,7 +31,7 @@ describe('Property-Based: Universal Transformer', () => {
                     // Simple variable declarations
                     fc.record({
                         type: fc.constant('var'),
-                        name: fc.stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/),
+                        name: identifier,
                         value: fc.oneof(fc.integer(), fc.string(), fc.boolean())
                     }).map(({ name, value }) =>
                         `const ${name} = ${JSON.stringify(value)};`
@@ -35,8 +39,8 @@ describe('Property-Based: Universal Transformer', () => {
 
                     // Function declarations
                     fc.record({
-                        name: fc.stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/),
-                        params: fc.array(fc.stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/), { maxLength: 3 }),
+                        name: identifier,
+                        params: fc.array(identifier, { maxLength: 3 }),
                         body: fc.constant('return true;')
                     }).map(({ name, params, body }) =>
                         `function ${name}(${params.join(', ')}) { ${body} }`
@@ -44,7 +48,7 @@ describe('Property-Based: Universal Transformer', () => {
 
                     // Import statements
                     fc.record({
-                        name: fc.stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/),
+                        name: identifier,
                         from: fc.stringMatching(/^[a-zA-Z0-9\-_/]+$/)
                     }).map(({ name, from }) =>
                         `import ${name} from '${from}';`
@@ -143,7 +147,7 @@ describe('Property-Based: Universal Transformer', () => {
     it('should be idempotent for vanilla JavaScript', async () => {
         await fc.assert(
             fc.asyncProperty(
-                fc.stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/).chain(name =>
+                identifier.chain(name =>
                     fc.record({
                         name: fc.constant(name),
                         value: fc.integer()
