@@ -1958,7 +1958,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
   const { DevWatcher } = await import('./watcher.js');
   // A short batch: editors write a save as one or two events, and each ms is HMR latency.
-  const watcher = new DevWatcher(cfg.root, 10);
+  const watcher = new DevWatcher(cfg.root);
   watcher.on('change', async (files: string[]) => {
     for (const file of files) {
       try {

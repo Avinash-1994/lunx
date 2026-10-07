@@ -111,6 +111,8 @@ interface Pending {
     key: string;
     outDir: string;
     inputs: Record<string, Stamp> | null;
+    /** First build: the inputs, read in the background while it runs (output directory not yet known). */
+    scan?: Promise<Record<string, Stamp> | null>;
 }
 
 /**
@@ -130,10 +132,17 @@ export function checkBuild(root: string, options: Record<string, unknown>): { hi
     } catch {
         // no previous build
     }
-    const outDir = entry?.outDir ?? path.join(root, 'dist');
+    if (!entry) {
+        // Nothing to compare against: read the inputs while the build runs (Rolldown bundles in
+        // Rust threads, so the main thread is mostly waiting) instead of before it starts.
+        const scan = inputsOfAsync(root);
+        scan.catch(() => {});
+        return { hit: false, pending: { file, key, outDir: '', inputs: null, scan } };
+    }
+    const outDir = entry.outDir;
     const inputs = inputsOf(root, outDir);
     const pending: Pending = { file, key, outDir, inputs };
-    if (!entry || !inputs || entry.key !== key || !same(entry.inputs, inputs)) return { hit: false, pending };
+    if (!inputs || entry.key !== key || !same(entry.inputs, inputs)) return { hit: false, pending };
     const outputs = walk(entry.outDir, new Set()) ?? {};
     const hit = Object.keys(entry.outputs).length > 0 && same(entry.outputs, outputs);
     return { hit, outDir: entry.outDir, pending };
@@ -149,14 +158,69 @@ function inputsOf(root: string, outDir: string): Record<string, Stamp> | null {
     return inputs;
 }
 
+async function inputsOfAsync(root: string): Promise<Record<string, Stamp> | null> {
+    const inputs = await walkAsync(root);
+    if (!inputs) return null;
+    for (const marker of INSTALL_MARKERS) {
+        const s = stamp(path.join(root, marker));
+        if (s) inputs[marker] = s;
+    }
+    return inputs;
+}
+
+/** `walk`, without blocking the event loop. */
+async function walkAsync(root: string): Promise<Record<string, Stamp> | null> {
+    const out: Record<string, Stamp> = {};
+    let count = 0;
+    let overflow = false;
+    const visit = async (dir: string): Promise<void> => {
+        let entries: fs.Dirent[];
+        try {
+            entries = await fsp.readdir(dir, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        await Promise.all(entries.map(async (e) => {
+            if (overflow) return;
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) {
+                if (!SKIP_DIRS.has(e.name)) await visit(full);
+            } else if (e.isFile()) {
+                if (++count > MAX_FILES) {
+                    overflow = true;
+                    return;
+                }
+                try {
+                    const st = await fsp.stat(full);
+                    out[path.relative(root, full)] = [Math.round(st.mtimeMs), st.size];
+                } catch {
+                    // removed meanwhile
+                }
+            }
+        }));
+    };
+    await visit(root);
+    return overflow ? null : out;
+}
+
 /** After a successful build: remember its inputs (as they were before it ran) and its output. */
-export function recordBuild(root: string, pending: Pending, outDir: string, enabled = true): void {
+export async function recordBuild(root: string, pending: Pending, outDir: string, enabled = true): Promise<void> {
     if (!enabled) {
         fs.rmSync(pending.file, { force: true });
         return;
     }
-    // The first build learns the output directory from config; inputs are re-read without it.
-    const inputs = outDir === pending.outDir ? pending.inputs : inputsOf(root, outDir);
+    let inputs: Record<string, Stamp> | null;
+    if (pending.scan) {
+        // Read before the output directory was known: drop what the build wrote there.
+        inputs = await pending.scan;
+        const prefix = path.relative(root, outDir);
+        if (inputs && prefix && !prefix.startsWith('..')) {
+            for (const k of Object.keys(inputs)) if (k === prefix || k.startsWith(prefix + path.sep)) delete inputs[k];
+        }
+    } else {
+        // The output directory moved since the last build: inputs are re-read without it.
+        inputs = outDir === pending.outDir ? pending.inputs : inputsOf(root, outDir);
+    }
     const outputs = walk(outDir, new Set());
     if (!inputs || !outputs) return;
     fs.mkdirSync(path.dirname(pending.file), { recursive: true });
@@ -167,43 +231,68 @@ export function recordBuild(root: string, pending: Pending, outDir: string, enab
 // ── Transform cache ──────────────────────────────────────────────────────────
 
 /**
- * A disk cache for compiler output. `key` must cover everything the output
- * depends on (source, compiler and its options); entries are content-addressed,
- * so stale ones are never read, only left for `lunx clean`-style removal.
+ * A disk cache for compiler output. Each entry is keyed by everything the
+ * output depends on (source, compiler and its options), so a stale entry is
+ * never read.
+ *
+ * Entries live in one pack file per scope, read once when first needed and
+ * written once by `flush()`: a thousand small files cost more in syscalls
+ * than the compiling they save. The written pack holds only the entries this
+ * build used, so entries for deleted or edited files drop out on their own.
  */
 export class TransformCache {
-    private readonly dir: string;
+    private readonly file: string;
     private readonly salt: string;
+    private entries: Map<string, unknown> | null = null;
+    private loading: Promise<Map<string, unknown>> | null = null;
+    private readonly used = new Map<string, unknown>();
+    private dirty = false;
 
     constructor(root: string, scope: string, salt: string) {
-        this.dir = path.join(root, '.lunx', 'transform-cache', scope);
+        this.file = path.join(root, '.lunx', 'transform-cache', `${scope}.json`);
         this.salt = `${lunxVersion()}\0${salt}`;
     }
 
-    private file(parts: string[]): string {
+    private key(parts: string[]): string {
         const h = crypto.createHash('sha256').update(this.salt);
         for (const p of parts) h.update('\0').update(p);
-        const key = h.digest('hex');
-        return path.join(this.dir, key.slice(0, 2), `${key.slice(2)}.json`);
+        return h.digest('base64url');
+    }
+
+    private load(): Promise<Map<string, unknown>> {
+        if (this.entries) return Promise.resolve(this.entries);
+        return (this.loading ??= fsp
+            .readFile(this.file, 'utf8')
+            .then((text) => new Map(Object.entries(JSON.parse(text))))
+            .catch(() => new Map<string, unknown>())
+            .then((m) => (this.entries = m)));
     }
 
     async get(parts: string[]): Promise<any | null> {
-        try {
-            return JSON.parse(await fsp.readFile(this.file(parts), 'utf8'));
-        } catch {
-            return null;
-        }
+        const key = this.key(parts);
+        const entries = await this.load();
+        if (!entries.has(key)) return null;
+        const value = entries.get(key);
+        this.used.set(key, value);
+        return value;
     }
 
     async set(parts: string[], value: unknown): Promise<void> {
-        const file = this.file(parts);
+        this.used.set(this.key(parts), value);
+        this.dirty = true;
+    }
+
+    /** Write the entries this build used. A cache that cannot be written is a slower next build, not a failure. */
+    async flush(): Promise<void> {
+        const entries = await this.load();
+        if (!this.dirty && this.used.size === entries.size) return;
         try {
-            await fsp.mkdir(path.dirname(file), { recursive: true });
-            const tmp = `${file}.${process.pid}.tmp`;
-            await fsp.writeFile(tmp, JSON.stringify(value));
-            await fsp.rename(tmp, file);
+            await fsp.mkdir(path.dirname(this.file), { recursive: true });
+            const tmp = `${this.file}.${process.pid}.tmp`;
+            await fsp.writeFile(tmp, JSON.stringify(Object.fromEntries(this.used)));
+            await fsp.rename(tmp, this.file);
         } catch {
-            // A cache that cannot be written is a slower build, not a failed one.
+            // ignore
         }
     }
 }

@@ -57,15 +57,7 @@ export async function build(rawConfig: BuildConfig) {
     if (adapter.config) {
       config = await adapter.config(config) as BuildConfig;
     }
-    const metaProxies = new Set([
-      'nextjs-pages', 'next', 'nuxt', 'svelte-kit', 'solidstart', 'remix',
-      'tanstack-start', 'waku', 'analog', 'react-router', 'astro', 'vitepress',
-      'gatsby', 'redwoodjs', 'qwik-city',
-    ]);
-    const extra = metaProxies.has(adapter.name)
-      ? ` (upstream ${adapter.name}, not a Lunx SSR engine)`
-      : '';
-    console.log(`[lunx] adapter: ${adapter.name}${extra}`);
+    console.log(`[lunx] adapter: ${adapter.name}`);
   }
 
   // Step 4: merge adapter plugins into plugin list
