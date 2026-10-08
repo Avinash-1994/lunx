@@ -2,7 +2,6 @@ import path from 'path';
 import { performance } from 'perf_hooks';
 import { createRequire } from 'module';
 import fs from 'fs';
-import { gzipSync } from 'zlib';
 
 const require = createRequire(import.meta.url);
 
@@ -27,7 +26,8 @@ async function printBuildSummary(outDir: string, elapsed: number) {
         if (!stat.isFile()) return null;
         // The build already wrote a .gz copy of most files: read its size instead of compressing again.
         const gzFile = full + '.gz';
-        const gz = fs.existsSync(gzFile) ? fs.statSync(gzFile).size : gzipSync(fs.readFileSync(full)).length;
+        // zlib is loaded only for this fallback: ~8ms at startup otherwise.
+        const gz = fs.existsSync(gzFile) ? fs.statSync(gzFile).size : (require('node:zlib') as typeof import('node:zlib')).gzipSync(fs.readFileSync(full)).length;
         return { name: f, size: stat.size, gz };
       } catch { return null; }
     })

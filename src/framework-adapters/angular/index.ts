@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
 import { CacheStore } from '../../lib/store.js';
+import { lightningcss as loadLightningcss } from '../../lib/lightningcss.js';
 
 const require = createRequire(import.meta.url);
 
@@ -93,7 +94,7 @@ export class AngularCompilerAdapter {
     else if (id.endsWith('.css') || id.endsWith('.scss')) {
       // 3. LightningCSS Styles & ViewEncapsulation
       try {
-        const lightningcss = require('lightningcss');
+        const lightningcss = loadLightningcss();
         const res = lightningcss.transform({
           filename: id,
           code: Buffer.from(code),

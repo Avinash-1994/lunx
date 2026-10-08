@@ -4,6 +4,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { lightningcss } from './lightningcss.js';
 import { compile, minify as oxcMinify, type Lang } from '../engines/index.js';
 
 const require = createRequire(import.meta.url);
@@ -30,7 +31,7 @@ export function transformSync(code: string, opts: TransformOptions = {}): { code
     const loader = opts.loader ?? 'js';
     const file = opts.sourcefile ?? `input.${loader === 'css' ? 'css' : loader}`;
     if (loader === 'css') {
-        const { transform: css } = require('lightningcss');
+        const { transform: css } = lightningcss();
         const out = css({ filename: file, code: Buffer.from(code), minify: !!opts.minify });
         return { code: out.code.toString(), map: '', warnings: [] };
     }

@@ -8,7 +8,6 @@
  * Opt out with `delegate: false` in lunx.config or LUNX_NO_DELEGATE=1.
  */
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -91,6 +90,8 @@ export async function delegate(meta: MetaFramework, command: Command, root: stri
     const args = [...meta.args[command], ...(opts.port && meta.port ? meta.port(opts.port) : []), ...(opts.extraArgs ?? [])];
     console.log(`[lunx] ${meta.name} project → ${meta.bin} ${args.join(' ')}`);
     console.log(`[lunx] ${meta.name} compiles with its own toolchain; lunx test, check, security and analyze still apply. (delegate: false to opt out)`);
+    // Loaded here: child_process (with net) costs ~10ms, and most builds never delegate.
+    const { spawn } = await import('node:child_process');
     return new Promise((resolve) => {
         const child = spawn(bin, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: process.env });
         const stop = () => child.kill('SIGTERM');

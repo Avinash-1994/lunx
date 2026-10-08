@@ -123,7 +123,8 @@ interface Pending {
 export function checkBuild(root: string, options: Record<string, unknown>): { hit: boolean; outDir?: string; pending: Pending } {
     const env = Object.entries(process.env)
         .filter(([k]) => /^(NODE_ENV|LUNX_|VITE_|PUBLIC_|REACT_APP_)/.test(k) && k !== 'LUNX_TIMINGS')
-        .sort(([a], [b]) => a.localeCompare(b));
+        // Code-unit order: localeCompare would load ICU's collator, ~13ms on the first call.
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     const key = crypto.createHash('sha256').update(lunxVersion()).update(serialize(options)).update(JSON.stringify(env)).digest('hex');
     const file = path.join(root, '.lunx', 'build-cache', `${crypto.createHash('sha256').update(serialize(options)).digest('hex').slice(0, 12)}.json`);
     let entry: Entry | null = null;
