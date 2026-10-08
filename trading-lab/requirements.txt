@@ -1,4 +1,5 @@
 pandas>=2.1
 numpy>=1.26
 yfinance>=0.2.40   # only needed for --source nse
+scikit-learn>=1.3  # only needed for the ml strategy
 pytest>=8          # tests

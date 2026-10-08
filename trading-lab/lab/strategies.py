@@ -33,7 +33,7 @@ def rsi(close: pd.DataFrame, n: int) -> pd.DataFrame:
 
 
 def period_starts(dates: pd.DatetimeIndex, freq: str) -> pd.DatetimeIndex:
-    """First bar of each month ('M') or ISO week ('W'); every bar for 'D'.
+    """First bar of each quarter ('Q'), month ('M') or ISO week ('W'); every bar for 'D'.
 
     Uses only the previous bar's date, so it never needs to know the future
     (unlike "last trading day of the month").
@@ -42,6 +42,8 @@ def period_starts(dates: pd.DatetimeIndex, freq: str) -> pd.DatetimeIndex:
         return dates
     if freq == "M":
         key = dates.year * 12 + dates.month
+    elif freq == "Q":
+        key = dates.year * 4 + (dates.month - 1) // 3
     elif freq == "W":
         iso = dates.isocalendar()
         key = (iso["year"] * 100 + iso["week"]).to_numpy()
@@ -246,7 +248,13 @@ def rotation(panel: Panel, capital: float, assets: list[str] | None = None, look
     return _frame(rows, assets)
 
 
+def ml(panel: Panel, capital: float, **params) -> pd.DataFrame:
+    from .ml import ml as _ml  # imported lazily: needs scikit-learn
+    return _ml(panel, capital, **params)
+
+
 REGISTRY = {
+    "ml": ml,
     "buyhold": buyhold,
     "momentum": momentum,
     "smooth_momentum": smooth_momentum,

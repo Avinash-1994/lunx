@@ -25,6 +25,7 @@ Out-of-sample walk-forward results, after exchange fees and slippage and **befor
 |---|---|---|---|---|
 | `trend` (BTC+ETH, volatility-targeted) | 32.4% | −39.9% | 1.06 | Rs 79.5k |
 | `onchain_trend` (trend + MVRV valuation) | 44.6% | −44.8% | 1.17 | Rs 152.9k |
+| `ml` (gradient-boosting model, retrained monthly) | 23.0% | −69.6% | 0.70 | Rs 46.4k |
 | `rotation` (top coins weekly) | 98.3%* | −57.0% | 1.44 | *see warning* |
 | Buy & hold BTC (benchmark) | 50.7% | −76.7% | 0.98 | Rs 207.5k |
 
@@ -36,6 +37,9 @@ Out-of-sample walk-forward results, after exchange fees and slippage and **befor
   against its own past, exiting when it is euphoric and buying half a position when it is cheap,
   improved risk-adjusted returns over plain trend in 75% of like-for-like comparisons. The
   exchange-inflow signal added nothing reliable.
+- **Machine learning did worse than the simple rules.** A gradient-boosting model trained only on past
+  data (11 price features plus MVRV) made 23%/yr with a −70% drawdown and 727 trades. It found nothing
+  the 100-day trend rule doesn't already capture, and it paid more in fees.
 - \* **`rotation` is not trustworthy.** It made +499% in 2021 alone, about +1%/yr in 2022–23 and about
   +30%/yr since 2024, with 50–70% drawdowns. Its coin list is also today's survivors (coins that
   collapsed, like LUNA, FTT and EOS, aren't in the free data), which inflates it.
@@ -43,7 +47,7 @@ Out-of-sample walk-forward results, after exchange fees and slippage and **befor
 
 ### NSE equities: not yet tested on real data
 
-The NSE strategies (`momentum`, `smooth_momentum`, `meanrev`) have been tested for correctness on
+The NSE strategies (`momentum`, `smooth_momentum`, `meanrev`, `ml`) have been tested for correctness on
 synthetic data only, because the build environment could not reach NSE or Yahoo. Run the walk-forward
 yourself (below) before trusting any of them. The one strong lesson from the cost model already holds:
 **at Rs 10,000, the flat ~Rs 15 DP charge per sell is about 0.6% of a Rs 2,500 position.** High-turnover
@@ -59,14 +63,17 @@ Retail tools rarely implement it, and it costs no extra data.
 ```bash
 cd trading-lab
 pip install -r requirements.txt
-python -m pytest -q tests                      # 16 tests, incl. "no strategy peeks at future data"
+python -m pytest -q tests                      # 21 tests, incl. "no strategy peeks at future data"
+
+# NSE: build your own official price database (free, no account; first run ~20-30 min)
+python run.py update-data --from 2018-01-01    # later runs only fetch new days
+python run.py report --source nse-official --test-start 2020-01-01   # every strategy, one table
 
 # crypto, real data, free
-python run.py walkforward --source coinmetrics --strategy onchain_trend --test-start 2019-01-01
+python run.py report --source coinmetrics --test-start 2019-01-01
 
-# NSE, real data via Yahoo Finance (free)
-python run.py walkforward --source nse --strategy smooth_momentum --test-start 2019-01-01
-python run.py walkforward --source nse --strategy momentum --test-start 2019-01-01
+# one strategy in detail (yearly picks + parameter grid)
+python run.py walkforward --source nse-official --strategy smooth_momentum --test-start 2020-01-01
 
 # paper trading: what to hold now, and orders for the next session
 python run.py signals --source binance --strategy trend --set ma=100 --since 2026-10-01
@@ -81,9 +88,22 @@ Results (equity curves, trades, parameter grids) are written to `results/`.
 |---|---|---|---|
 | Crypto live signals | Binance public market-data API (`--source binance`) | free, no key | built |
 | Crypto research + on-chain | CoinMetrics community data on GitHub (`--source coinmetrics`) | free | built; lags by weeks to months, so research only |
-| NSE quick start | Yahoo Finance via `yfinance` (`--source nse`) | free, unofficial | built |
-| NSE official end-of-day | NSE daily bhavcopy files → local store | free, official | next step (`--source csv` reads files today) |
-| NSE live and orders | A broker API (e.g. Angel One SmartAPI or Upstox; check current terms) | usually free for API access | next step, once you pick a broker |
+| NSE official end-of-day | NSE daily bhavcopy files → `data/nse_eod.sqlite` (`update-data`, `--source nse-official`) | free, official | built |
+| NSE alternative | Yahoo Finance via `yfinance` (`--source nse`) | free, unofficial | built |
+| NSE orders (later, optional) | Zerodha Kite Connect Personal API | free | not built yet |
+
+Bhavcopy prices are raw, so the store back-adjusts splits and bonuses using the adjusted "previous close"
+that NSE publishes on each ex-date. Dividends are not adjusted, which slightly understates returns.
+Renamed symbols (e.g. ZOMATO → ETERNAL) keep their history under the old name.
+
+### Where an API key is needed
+
+| Task | API key needed? |
+|---|---|
+| All price data (NSE and crypto) | **No.** Everything above is free and keyless. |
+| Paper trading / `signals` | **No.** |
+| Automatic order placement on Zerodha | Yes: Kite Connect Personal (free). Optional, later. |
+| Automatic order placement on Binance | Yes: Binance API key with trading only, withdrawals off. Optional, later. |
 
 Every download is stored under `data/cache/`. If a provider is down, renamed or blocked, the tool uses
 the stored copy and prints a warning instead of failing. Any source that produces daily OHLCV can plug in
@@ -103,9 +123,11 @@ through `lab/data.py`.
 ```
 lab/costs.py       NSE delivery and crypto cost models (verify rates with your broker)
 lab/data.py        data loaders + local store with fallback
+lab/nse_store.py   official NSE bhavcopy downloader, SQLite store, split/bonus adjustment
 lab/strategies.py  momentum, smooth_momentum, meanrev, trend, onchain_trend, rotation, buyhold
+lab/ml.py          gradient-boosting / logistic model, retrained on past data only
 lab/backtest.py    next-open fills, whole shares, cash limits, pending orders
 lab/validate.py    yearly walk-forward + parameter-robustness grid
-run.py             CLI: backtest | walkforward | signals
+run.py             CLI: update-data | report | backtest | walkforward | signals
 tests/             correctness tests, incl. a no-lookahead check for every strategy
 ```

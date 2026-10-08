@@ -4,6 +4,8 @@
   python run.py backtest    --source coinmetrics --strategy trend --set ma=100
   python run.py walkforward --source coinmetrics --strategy onchain_trend --test-start 2020-01-01
   python run.py signals     --source binance --strategy trend --set ma=100 --since 2026-10-01
+  python run.py update-data --from 2018-01-01      # free official NSE bhavcopy -> data/nse_eod.sqlite
+  python run.py report      --source nse-official  # walk-forward every strategy, one summary table
 
 `signals` is paper trading: it replays the strategy from --since to the latest
 bar and prints current holdings plus the orders to place at the next open.
@@ -19,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from lab import backtest, data
+from lab.nse_store import NseStore
 from lab.costs import CryptoSpotCosts, NseDeliveryCosts
 from lab.metrics import result_stats
 from lab.strategies import REGISTRY
@@ -27,13 +30,15 @@ from lab.validate import walk_forward
 HERE = Path(__file__).parent
 CRYPTO_SOURCES = {"coinmetrics", "binance", "synthetic-crypto"}
 
+NSE_STORE = HERE / "data" / "nse_eod.sqlite"
 DEFAULT_UNIVERSE = {
     "nse": HERE / "universes" / "nifty50_plus_former.txt",
+    "nse-official": HERE / "universes" / "nifty50_plus_former.txt",
     "csv": None,
     "coinmetrics": HERE / "universes" / "crypto_coinmetrics.txt",
     "binance": HERE / "universes" / "crypto_binance.txt",
 }
-DEFAULT_BENCH = {"nse": "NIFTYBEES", "csv": "NIFTYBEES", "synthetic": "BENCH",
+DEFAULT_BENCH = {"nse": "NIFTYBEES", "nse-official": "NIFTYBEES", "csv": "NIFTYBEES", "synthetic": "BENCH",
                  "coinmetrics": "btc", "binance": "BTCUSDT", "synthetic-crypto": "BENCH"}
 
 
@@ -55,6 +60,9 @@ def load(args) -> data.Panel:
     if args.source == "nse":
         bench = DEFAULT_BENCH["nse"]
         return data.load_nse(sorted(set(symbols + [bench])), start=args.data_start, cache_dir=cache)
+    if args.source == "nse-official":
+        bench = DEFAULT_BENCH["nse-official"]
+        return NseStore(NSE_STORE).panel(sorted(set(symbols + [bench])), start=args.data_start)
     if args.source == "binance":
         return data.load_binance(symbols, start=args.data_start, cache_dir=cache)
     if args.source == "coinmetrics":
@@ -72,9 +80,12 @@ def load(args) -> data.Panel:
 def strategy_params(args, panel) -> dict:
     params = parse_sets(args.set)
     crypto = args.source in CRYPTO_SOURCES
-    if not crypto and args.strategy in ("momentum", "smooth_momentum", "meanrev"):
+    if not crypto and args.strategy in ("momentum", "smooth_momentum", "meanrev", "ml"):
         params.setdefault("benchmark", DEFAULT_BENCH[args.source])
-    if crypto and args.strategy in ("trend", "onchain_trend", "rotation") and "assets" not in params:
+    if not crypto and args.strategy == "ml":
+        params.setdefault("top_n", 3)
+        params.setdefault("regime_ma", 200)
+    if crypto and args.strategy in ("trend", "onchain_trend", "rotation", "ml") and "assets" not in params:
         bench = DEFAULT_BENCH[args.source]
         params["assets"] = [s for s in panel.symbols if s != "BENCH"] if args.strategy == "rotation" \
             else [s for s in panel.symbols if s in (bench, "eth", "ETHUSDT")] or [panel.symbols[0]]
@@ -156,13 +167,62 @@ def cmd_signals(args) -> None:
         print("\nNo orders: the strategy does not trade at the next session.")
 
 
+REPORT_STRATEGIES = {
+    "nse": ["momentum", "smooth_momentum", "meanrev", "ml"],
+    "crypto": ["trend", "onchain_trend", "ml", "rotation"],
+}
+
+
+def cmd_report(args) -> None:
+    """Walk-forward every strategy for this market and print one comparison table."""
+    panel = load(args)
+    crypto = args.source in CRYPTO_SOURCES
+    names = REPORT_STRATEGIES["crypto" if crypto else "nse"]
+    if crypto and "mvrv" not in panel.extra:
+        names = [n for n in names if n != "onchain_trend"]
+    bench = DEFAULT_BENCH[args.source]
+    rows, bench_stats = [], None
+    for name in names:
+        args.strategy = name
+        print(f"\n=== {name}")
+        wf = walk_forward(panel, name, costs_for(args), args.capital, args.test_start,
+                          fixed=strategy_params(args, panel), min_trade_frac=args.min_trade,
+                          benchmark=bench if bench in panel.symbols else None)
+        st, g = wf["oos_stats"], wf["grid"]
+        rows.append({"strategy": name, "CAGR_%": st["CAGR_%"], "max_dd_%": st["max_drawdown_%"],
+                     "sharpe": st["sharpe"], "end_equity": st["end_equity"], "trades": st["trades"],
+                     "costs": st["costs_paid"], "grid_median_CAGR_%": g["CAGR_%"].median(),
+                     "grid_%_profitable": round(100 * (g["CAGR_%"] > 0).mean())})
+        bench_stats = wf["benchmark"] or bench_stats
+    if bench_stats:
+        rows.append({"strategy": f"buy&hold {bench}", "CAGR_%": bench_stats["CAGR_%"],
+                     "max_dd_%": bench_stats["max_drawdown_%"], "sharpe": bench_stats["sharpe"],
+                     "end_equity": bench_stats["end_equity"], "trades": bench_stats["trades"],
+                     "costs": bench_stats["costs_paid"]})
+    table = pd.DataFrame(rows)
+    print(f"\nREPORT: {args.source}, out-of-sample from {args.test_start}, start capital {args.capital:,.0f}, "
+          f"after costs, before tax")
+    print(table.to_string(index=False))
+    out = HERE / "results"
+    out.mkdir(exist_ok=True)
+    table.to_csv(out / f"report_{args.source}.csv", index=False)
+
+
+def cmd_update_data(args) -> None:
+    NseStore(NSE_STORE).update(start=args.from_date, end=args.to_date)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("backtest", "walkforward", "signals"):
+    up = sub.add_parser("update-data", help="download/refresh free official NSE end-of-day data")
+    up.add_argument("--from", dest="from_date", default="2018-01-01")
+    up.add_argument("--to", dest="to_date")
+    for name in ("backtest", "walkforward", "signals", "report"):
         p = sub.add_parser(name)
         p.add_argument("--source", default="coinmetrics",
-                       choices=["nse", "binance", "coinmetrics", "csv", "synthetic", "synthetic-crypto"])
+                       choices=["nse", "nse-official", "binance", "coinmetrics", "csv", "synthetic",
+                                "synthetic-crypto"])
         p.add_argument("--strategy", default="trend", choices=sorted(REGISTRY))
         p.add_argument("--set", nargs="*", help="strategy params, e.g. --set ma=100 top_n=3")
         p.add_argument("--capital", type=float, default=10_000)
@@ -175,9 +235,11 @@ def main() -> None:
         p.add_argument("--synthetic-trend", type=float, default=0.0)
     sub.choices["backtest"].add_argument("--start")
     sub.choices["walkforward"].add_argument("--test-start", default="2020-01-01")
+    sub.choices["report"].add_argument("--test-start", default="2020-01-01")
     sub.choices["signals"].add_argument("--since", required=True)
     args = ap.parse_args()
-    {"backtest": cmd_backtest, "walkforward": cmd_walkforward, "signals": cmd_signals}[args.cmd](args)
+    {"backtest": cmd_backtest, "walkforward": cmd_walkforward, "signals": cmd_signals, "report": cmd_report,
+     "update-data": cmd_update_data}[args.cmd](args)
 
 
 if __name__ == "__main__":

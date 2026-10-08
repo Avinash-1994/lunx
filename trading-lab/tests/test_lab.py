@@ -29,11 +29,13 @@ EQUITY_CASES = [
     ("momentum", dict(benchmark="BENCH", lookback=63, regime_ma=50)),
     ("smooth_momentum", dict(benchmark="BENCH", lookback=63, regime_ma=50)),
     ("meanrev", dict(benchmark="BENCH", trend_ma=50)),
+    ("ml", dict(benchmark="BENCH", top_n=3, horizon=21, min_train=2000, model="logit")),
 ]
 CRYPTO_CASES = [
     ("trend", dict(assets=["S00", "S01"], ma=50)),
     ("onchain_trend", dict(assets=["S00", "S01"], ma=50, flow_z=1.0)),
     ("rotation", dict(assets=["S00", "S01", "S02"], regime_asset="BENCH", regime_ma=50)),
+    ("ml", dict(assets=["S00", "S01", "S02"], horizon=5, min_train=300)),
 ]
 
 
@@ -129,9 +131,10 @@ def _assert_causal(panel, name, params, capital=10_000):
         d = panel.dates[cut]
         part = REGISTRY[name](panel.upto(d), capital, **params)
         a = full.loc[:d].reindex(columns=part.columns)
-        a = a[(a != 0).any(axis=1) | a.index.isin(part.index)] if name in ("trend", "onchain_trend") else a
+        daily = name in ("trend", "onchain_trend") or (name == "ml" and not params.get("top_n"))
+        a = a[(a != 0).any(axis=1) | a.index.isin(part.index)] if daily else a
         pd.testing.assert_frame_equal(a.loc[part.index], part, check_freq=False, check_names=False)
-        assert set(part.index) == set(full.loc[:d].index) or name in ("trend", "onchain_trend")
+        assert set(part.index) == set(full.loc[:d].index) or daily
 
 
 @pytest.mark.parametrize("name,params", EQUITY_CASES)

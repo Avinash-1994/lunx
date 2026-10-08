@@ -23,6 +23,7 @@ GRIDS = {
     "trend": {"ma": [50, 100, 150, 200], "band": [0.0, 0.03], "target_vol": [0.4, 0.8]},
     "onchain_trend": {"ma": [50, 100, 200], "hot": [0.85, 0.95], "cold": [0.0, 0.1], "flow_z": [None, 2.0]},
     "rotation": {"lookback": [14, 30, 60], "top_k": [1, 2, 3], "ma": [20, 50]},
+    "ml": {"horizon": [5, 20], "threshold": [0.5, 0.55, 0.6]},
 }
 
 
