@@ -13,7 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster HMR**: a save reaches the browser without stacked debounces (small app: 53 → 36 ms; Vite 46 ms).
 - Faster cold builds: the compile cache is one file per build, first builds read the build-cache inputs in the background, brotli precompression defaults to quality 6 (≈1% larger than 9, 3× faster), and the OSV cache refresh starts after the build.
 
+- **Faster startup and cold builds** (small app: dev boot 365 → 263 ms, cold build 390 → 349 ms; Rspack 389 / 409 ms):
+  - configs Node can run as they are (ESM without local imports, TypeScript with type stripping) are imported directly instead of bundled with Rolldown first; `LUNX_CONFIG_BUNDLE=1` restores bundling;
+  - the lockfile / CVE checks start once Rolldown has the module graph, while it minifies, and precompression runs alongside the post-build steps;
+  - OSV advisories are cached once per machine (`LUNX_ADVISORY_CACHE_DIR` to move it), so new checkouts and monorepo packages no longer each start a refresh process;
+  - lightningcss, `child_process`, `https` and `zlib` load only when needed, and lightningcss without detect-libc.
+
 ### Fixed
+- `index.html.gz` / `.br` are written after SRI is injected; they used to hold the page without its `integrity` attributes.
 - Production Vue bundles no longer embed each component's absolute path.
 - The adapter log no longer calls frameworks lunx builds "upstream, not a Lunx SSR engine".
 

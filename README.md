@@ -470,33 +470,33 @@ lunx security report
 
 ## 📊 Performance Benchmarks
 
-Every tool installed from npm, same React + TypeScript app, median of 3 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
+Every tool installed from npm, same React + TypeScript app, median of 5 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
 
 **Small app**
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | 365 ms | 371 ms | 36 ms | 390 ms | 353 ms | 221 KB |
-| Vite 8 | 366 ms | 429 ms | 46 ms | 423 ms | 446 ms | 220 KB |
-| Rspack | 378 ms | 407 ms | 204 ms | 357 ms | 352 ms | 225 KB |
-| Parcel | 1421 ms | 1435 ms | 35 ms | 1782 ms | 1626 ms | 222 KB |
-| webpack | 1499 ms | 1616 ms | 280 ms | 4140 ms | 4060 ms | 219 KB |
-| esbuild (bundler only) | – | – | – | 60 ms | 60 ms | 223 KB |
-| Bun (bundler only) | – | – | – | 44 ms | 44 ms | 212 KB |
+| **lunx** | 263 ms | 267 ms | 35 ms | 349 ms | 353 ms | 221 KB |
+| Vite 8 | 401 ms | 486 ms | 42 ms | 448 ms | 533 ms | 220 KB |
+| Rspack | 389 ms | 424 ms | 218 ms | 409 ms | 419 ms | 219 KB |
+| Parcel | 1650 ms | 1662 ms | 33 ms | 1892 ms | 1858 ms | 222 KB |
+| webpack | 1643 ms | 1773 ms | 292 ms | 4695 ms | 4586 ms | 225 KB |
+| esbuild (bundler only) | – | – | – | 71 ms | 82 ms | 223 KB |
+| Bun (bundler only) | – | – | – | 47 ms | 49 ms | 212 KB |
 
 **Large app: 2,000 components** (`--scale 2000`)
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | 348 ms | 352 ms | 168 ms | 807 ms | 617 ms | 470 KB |
-| Vite 8 | 364 ms | 683 ms | 168 ms | 871 ms | 678 ms | 470 KB |
-| Rspack | 704 ms | 856 ms | 733 ms | 829 ms | 863 ms | 493 KB |
-| Parcel | 4893 ms | 4925 ms | 189 ms | 5245 ms | 5400 ms | 455 KB |
-| webpack | 4095 ms | 4321 ms | 1129 ms | 9274 ms | 9318 ms | 516 KB |
-| esbuild (bundler only) | – | – | – | 132 ms | 146 ms | 493 KB |
-| Bun (bundler only) | – | – | – | 87 ms | 93 ms | 430 KB |
+| **lunx** | 276 ms | 280 ms | 189 ms | 787 ms | 667 ms | 470 KB |
+| Vite 8 | 396 ms | 755 ms | 194 ms | 869 ms | 716 ms | 470 KB |
+| Rspack | 736 ms | 882 ms | 744 ms | 983 ms | 960 ms | 493 KB |
+| Parcel | 5379 ms | 5410 ms | 256 ms | 5782 ms | 5930 ms | 455 KB |
+| webpack | 4228 ms | 4465 ms | 1216 ms | 10269 ms | 10152 ms | 516 KB |
+| esbuild (bundler only) | – | – | – | 179 ms | 183 ms | 493 KB |
+| Bun (bundler only) | – | – | – | 110 ms | 99 ms | 430 KB |
 
-Where lunx is behind: Rspack's cold build of the small app is ~30 ms faster (startup of Node and Rolldown dominates there), and esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the others do not. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
+Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support, and Parcel's HMR on the small app is within a few ms of lunx's (33 vs 35 ms). `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
 
 ---
 
