@@ -1,0 +1,56 @@
+{
+  "tarball": "lunx-dev-1.1.0.tgz",
+  "node": "v22.22.0",
+  "results": [
+    {
+      "template": "next",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 60
+    },
+    {
+      "template": "sveltekit",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 29
+    },
+    {
+      "template": "react-router",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 21
+    },
+    {
+      "template": "qwik-city",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 22
+    },
+    {
+      "template": "remix",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 47
+    }
+  ]
+}

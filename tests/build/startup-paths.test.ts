@@ -72,9 +72,18 @@ export default defineConfig({ base: '/app/', plugins: [react()], semver: valid('
         expect(config.how).toBe(nativeConfigs ? 'native' : 'bundled');
         expect(config.base).toBe('/app/');
         expect(config.plugins).toEqual(['stub-react']);
-        expect(config.url.split('?')[0]).toBe(pathToFileURL(path.join(root, 'vite.config.mjs')).href);
+        expect(config.url.split('?')[0]).toBe(pathToFileURL(fs.realpathSync(path.join(root, 'vite.config.mjs'))).href);
         expect(config.semver).toBe('stub');
         expect(config.semverIsReal).toBe(true);
+    }, 60_000);
+
+    it('imports through a symlinked project path (macOS /var is /private/var)', () => {
+        const real = project({ 'vite.config.mjs': `import react from '@vitejs/plugin-react';\nexport default { plugins: [react()], how: ${how} };` });
+        const link = `${real}-link`;
+        fs.symlinkSync(real, link, 'dir');
+        const config = loadConfig(link, 'vite.config.mjs');
+        expect(config.how).toBe(nativeConfigs ? 'native' : 'bundled');
+        expect(config.plugins).toEqual(['stub-react']);
     }, 60_000);
 
     it('reads an edited config again in the same process', () => {

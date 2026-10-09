@@ -692,25 +692,14 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
     }
 
     /**
-     * Lit Transformer - Works with all Lit versions
+     * Lit: TypeScript's experimentalDecorators with `useDefineForClassFields:
+     * false`, which Lit's decorated reactive properties need, compiled by Oxc
+     * (no TypeScript install required).
      */
     private async transformLit(code: string, filePath: string, isDev: boolean): Promise<TransformResult> {
         try {
-            const ts = await import('typescript');
-            const result = ts.transpileModule(code, {
-                compilerOptions: {
-                    target: ts.ScriptTarget.ES2020,
-                    module: ts.ModuleKind.ESNext,
-                    experimentalDecorators: true,
-                    useDefineForClassFields: false,
-                    moduleResolution: ts.ModuleResolutionKind.NodeJs
-                },
-                fileName: filePath
-            });
-
-            let finalCode = result.outputText;
-
-            return { code: finalCode, map: result.sourceMapText };
+            const out = compile(filePath, code, { legacyDecorators: true, classFields: 'assign', sourcemap: isDev });
+            return { code: out.code, map: out.map };
         } catch (error: any) {
             log.error(`Lit transform failed for ${filePath}:`, error.message);
             return this.transformVanilla(code, filePath, isDev);

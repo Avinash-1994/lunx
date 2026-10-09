@@ -10,6 +10,7 @@
  */
 
 import crypto from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import moduleApi from 'node:module';
 import path from 'node:path';
@@ -81,8 +82,10 @@ const stubbedImports = new Map<string, Record<string, string>>();
 let hooks: { deregister(): void } | null = null;
 
 async function importNative(file: string, source: string, opts: LoadModuleOptions): Promise<any> {
+    // Node names a module by its real path (macOS' /var is /private/var), from the JS realpathSync, which keeps
+    // Windows 8.3 short names: the hook sees that URL as the parent.
     // Keyed by content, like the bundle's temp file: an edited config (dev server reload) is a new module.
-    let url = `${pathToFileURL(file).href}?v=${crypto.createHash('sha1').update(source).digest('hex').slice(0, 8)}`;
+    let url = `${pathToFileURL(realpathSync(file)).href}?v=${crypto.createHash('sha1').update(source).digest('hex').slice(0, 8)}`;
     if (opts.fresh) url += `&t=${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
     const stubs = opts.stubs ?? {};
     const stubbed = Object.keys(stubs).length > 0;
