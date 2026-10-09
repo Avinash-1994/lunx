@@ -77,13 +77,15 @@ export default defineConfig({ base: '/app/', plugins: [react()], semver: valid('
         expect(config.semverIsReal).toBe(true);
     }, 60_000);
 
-    it('imports through a symlinked project path (macOS /var is /private/var)', () => {
-        const real = project({ 'vite.config.mjs': `import react from '@vitejs/plugin-react';\nexport default { plugins: [react()], how: ${how} };` });
+    it.each([['natively', {}], ['bundled', { LUNX_CONFIG_BUNDLE: '1' }]])('imports through a symlinked project path %s (macOS /var is /private/var)', (mode, env) => {
+        const real = project({ 'vite.config.mjs': `import react from '@vitejs/plugin-react';\nexport default { plugins: [react()], how: ${how}, url: import.meta.url };` });
         const link = `${real}-link`;
         fs.symlinkSync(real, link, 'dir');
-        const config = loadConfig(link, 'vite.config.mjs');
-        expect(config.how).toBe(nativeConfigs ? 'native' : 'bundled');
+        const config = loadConfig(link, 'vite.config.mjs', env);
+        expect(config.how).toBe(nativeConfigs && mode === 'natively' ? 'native' : 'bundled');
         expect(config.plugins).toEqual(['stub-react']);
+        // Either way the config sees its real path, as Node reports it.
+        expect(config.url.split('?')[0]).toBe(pathToFileURL(fs.realpathSync(path.join(real, 'vite.config.mjs'))).href);
     }, 60_000);
 
     it('reads an edited config again in the same process', () => {

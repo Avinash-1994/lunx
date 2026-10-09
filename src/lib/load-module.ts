@@ -119,7 +119,9 @@ async function importWithBundle(file: string, opts: LoadModuleOptions): Promise<
     const { getBundler } = await import('../engines/index.js');
     const stubs = opts.stubs ?? {};
     const STUB = '\0lunx-stub:';
-    const dir = path.dirname(file);
+    // As Node names a module natively: by its real path.
+    const real = realpathSync(file);
+    const dir = path.dirname(real);
     const output = await getBundler().bundle({
         input: file,
         cwd: opts.root,
@@ -129,11 +131,11 @@ async function importWithBundle(file: string, opts: LoadModuleOptions): Promise<
         external: (id: string) => !(id in stubs) && !id.startsWith(STUB) && !/^[./]/.test(id) && !path.isAbsolute(id),
         // The bundle runs from a temp file; keep the config's own location.
         define: {
-            'import.meta.url': JSON.stringify(pathToFileURL(file).href),
+            'import.meta.url': JSON.stringify(pathToFileURL(real).href),
             'import.meta.dirname': JSON.stringify(dir),
-            'import.meta.filename': JSON.stringify(file),
+            'import.meta.filename': JSON.stringify(real),
             __dirname: JSON.stringify(dir),
-            __filename: JSON.stringify(file),
+            __filename: JSON.stringify(real),
         },
         plugins: [{
             name: 'lunx:config-stubs',
