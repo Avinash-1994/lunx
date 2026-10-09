@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Parallel component compilation**: production builds of projects with 100+ Vue / Svelte / compiled-JSX components compile them on worker threads, starting before Rolldown asks for them. 1,000 Vue SFCs build cold in ~1.6–2.0 s instead of ~3.1 s on 4 cores; output is identical. `LUNX_COMPILE_WORKERS=0` turns it off, `=N` sets the pool size.
+- Vue compiles in production mode without unused source maps, and the compiler loads with `require()`.
+- **Faster HMR**: a save reaches the browser without stacked debounces (small app: 53 → 36 ms; Vite 46 ms).
+- Faster cold builds: the compile cache is one file per build, first builds read the build-cache inputs in the background, brotli precompression defaults to quality 6 (≈1% larger than 9, 3× faster), and the OSV cache refresh starts after the build.
+
+- **Faster startup and cold builds** (small app: dev boot 365 → 263 ms, cold build 390 → 349 ms; Rspack 389 / 409 ms):
+  - configs Node can run as they are (ESM without local imports, TypeScript with type stripping) are imported directly instead of bundled with Rolldown first; `LUNX_CONFIG_BUNDLE=1` restores bundling;
+  - the lockfile / CVE checks start once Rolldown has the module graph, while it minifies, and precompression runs alongside the post-build steps;
+  - OSV advisories are cached once per machine (`LUNX_ADVISORY_CACHE_DIR` to move it), so new checkouts and monorepo packages no longer each start a refresh process;
+  - lightningcss, `child_process`, `https` and `zlib` load only when needed, and lightningcss without detect-libc.
+
+- **`lunx create` rebuilt**: one scaffolder behind `lunx create`, `create-lunx` and `lunx bootstrap`, with 26 starters: React, Vue, Svelte, Solid, Preact, Lit, Alpine, Angular, Qwik and vanilla apps (TypeScript or `--no-ts`, most with `--tailwind`); Next.js, Nuxt, SvelteKit, Astro, React Router, TanStack Start, SolidStart, Qwik City, VitePress, Waku, Analog, Remix, Docusaurus and Marko Run; a library and an edge function. `npm run test:templates` scaffolds each from the packed package, installs it from npm, type-checks, builds, and opens the dev and preview servers in a browser.
+- `npx lunx-dev create my-app` works: the package has a `lunx-dev` bin.
+- Lit compiles with Oxc (legacy decorators, `useDefineForClassFields: false` semantics) instead of TypeScript, which Lit projects no longer need installed.
+
+### Fixed
+- Scaffolded projects depended on packages that are not on npm (`lunx@^2.0.0`, `@lunx/plugin-*`, `@lunx/framework-*`), so `npm install` failed in every new project; several templates (Nuxt, SvelteKit, Electron, Tauri…) were placeholder pages.
+- `lunx-dev` declared `react@^19`, `vue@^3.5` and others as optional peer dependencies, which npm enforces: installing it in a React 18 project failed with ERESOLVE. It declares none now.
+- `lunx preview` in React Router and Remix projects ran a command that does not exist (`react-router start`) or the dev server (`remix vite:dev`); it runs `react-router-serve` / `remix-serve` on the build. Qwik City builds also build `src/entry.preview`, which `vite preview` serves.
+- Code compiled twice (a framework transform, then the final pass) declared its decorator helpers twice, a syntax error: decorated Lit components did not load in dev.
+- Configs in symlinked directories (macOS' `/var` → `/private/var`) lost their stubbed imports and fell back to bundling.
+- `index.html.gz` / `.br` are written after SRI is injected; they used to hold the page without its `integrity` attributes.
+- Production Vue bundles no longer embed each component's absolute path.
+- The adapter log no longer calls frameworks lunx builds "upstream, not a Lunx SSR engine".
+
 ## [1.1.0] - 2026-10-06
 
 ### Added

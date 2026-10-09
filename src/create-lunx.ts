@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-import { createLunxProject } from './create/index.js';
+import { createLunxProject, parseCreateArgs } from './create/index.js';
 
-const projectName = process.argv[2];
-createLunxProject(projectName).catch((err) => {
-    console.error(err);
+try {
+    const { name, options } = parseCreateArgs(process.argv.slice(2));
+    await createLunxProject(name, options);
+} catch (err: any) {
+    console.error(`\n  ${err?.message ?? err}\n`);
     process.exit(1);
-});
+}

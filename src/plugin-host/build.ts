@@ -23,7 +23,7 @@ const INPUT_KEYS = new Set([
     'moduleTypes', 'experimental', 'checks', 'makeAbsoluteExternalsRelative', 'context', 'jsx', 'transform', 'watch',
 ]);
 
-const OUTPUT_DROP = new Set(['hoistTransitiveImports', 'experimentalMinChunkSize', 'generatedCode', 'interop', 'compact', 'dynamicImportInCjs', 'freeze', 'indent', 'noConflict', 'sanitizeFileName', 'validate', 'experimentalDeepDynamicChunkOptimization', 'manualChunks', 'inlineDynamicImports']);
+const OUTPUT_DROP = new Set(['hoistTransitiveImports', 'experimentalMinChunkSize', 'generatedCode', 'interop', 'compact', 'dynamicImportInCjs', 'freeze', 'indent', 'noConflict', 'sanitizeFileName', 'validate', 'experimentalDeepDynamicChunkOptimization', 'manualChunks', 'onlyExplicitManualChunks', 'inlineDynamicImports']);
 
 const JS_LIKE = /\.(m?[jt]sx?|c[jt]s|json)$/;
 

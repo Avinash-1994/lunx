@@ -15,17 +15,18 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import zlib from 'node:zlib';
 import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
+import { CompilePool, MIN_POOL_FILES } from './compile-pool.js';
 import { transformGlobImports } from './glob-import.js';
 import { TransformCache } from './build-cache.js';
 import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 
-const gzip = promisify(zlib.gzip);
-const brotli = promisify(zlib.brotliCompress);
+// zlib (~8ms to load) is first needed after the bundle; the engine-busy hook loads it while Rolldown works.
+let zlibModule: Promise<typeof import('node:zlib')> | null = null;
+const loadZlib = () => (zlibModule ??= import('node:zlib').then((m) => m.default ?? m));
 
 const ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 const CSS_EXT = CSS_LANGS;
@@ -45,11 +46,39 @@ export interface ProductionBuildResult {
     artifacts: BuildArtifact[];
     /** Every module that ended up in the bundle (absolute paths). */
     modules: string[];
+    /** With `deferCompression`: compress the HTML pages as they are now, and wait for the rest. */
+    finishCompression?: () => Promise<void>;
+}
+
+export interface ProductionBuildOptions {
+    /**
+     * Called once Rolldown has the module graph and is rendering and
+     * minifying in Rust: the main thread is idle until the bundle is done,
+     * so work started here costs the build no time.
+     */
+    onEngineBusy?: () => void;
+    /**
+     * Return before the .gz / .br copies are written. They are written
+     * alongside whatever the caller does next, except the HTML pages, which
+     * `finishCompression` compresses after the caller has rewritten them
+     * (SRI, CSP).
+     */
+    deferCompression?: boolean;
 }
 
 /** The bundler is a regular dependency, but a broken native binding must not take the CLI down. */
 export function bundlerAvailable(): Promise<boolean> {
     return getBundler().available();
+}
+
+async function precompress(file: string, data: Buffer, brotliQuality: number): Promise<void> {
+    if (data.length < 1024) return;
+    const zlib = await loadZlib();
+    const [gz, br] = await Promise.all([
+        promisify(zlib.gzip)(data, { level: 9 }),
+        promisify(zlib.brotliCompress)(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: brotliQuality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } }),
+    ]);
+    await Promise.all([fsp.writeFile(`${file}.gz`, gz), fsp.writeFile(`${file}.br`, br)]);
 }
 
 const hash8 = (data: string | Uint8Array) => crypto.createHash('sha256').update(data).digest('hex').slice(0, 8);
@@ -65,7 +94,7 @@ interface HtmlEntry {
     styles: string[];
 }
 
-export async function productionBuild(config: BuildConfig, framework: string): Promise<ProductionBuildResult> {
+export async function productionBuild(config: BuildConfig, framework: string, options: ProductionBuildOptions = {}): Promise<ProductionBuildResult> {
     const started = performance.now();
     const root = path.resolve(config.root || process.cwd());
     const outDir = path.resolve(root, config.outDir || 'dist');
@@ -171,6 +200,28 @@ export async function productionBuild(config: BuildConfig, framework: string): P
     const compileCache = process.env.LUNX_BUILD_CACHE === '0' || (config.build as any)?.cache === false
         ? null
         : new TransformCache(root, 'framework', compilerSalt(root, framework, config.mode ?? 'production'));
+    const frameworkOf = (file: string): string => (file.endsWith('.vue') ? 'vue' : file.endsWith('.svelte') ? 'svelte' : framework);
+    // Sources whose compiled output depends only on themselves (not Angular, which inlines
+    // templateUrl / styleUrls, nor SFC blocks that pull in another file with src="…").
+    const selfContained = (code: string): boolean => !/<(?:template|script|style)\b[^>]*\bsrc=/.test(code);
+    // Many components to compile: start worker threads on them now, before Rolldown asks.
+    // Angular stays on the main thread (its compiler reads other files itself).
+    const compilePool = framework === 'angular' ? null : await startCompilePool();
+    async function startCompilePool(): Promise<CompilePool | null> {
+        const files = CompilePool.candidates(fs.realpathSync(root), compileJsx ? /\.(vue|svelte|[jt]sx)$/ : /\.(vue|svelte)$/, config.outDir);
+        if (!files || files.length < MIN_POOL_FILES) return null;
+        const todo: Array<[string, string]> = [];
+        await Promise.all(files.map(async (file) => {
+            const code = await fsp.readFile(file, 'utf8').catch(() => null);
+            if (code === null) return;
+            if (compileCache && selfContained(code) && (await compileCache.get([file, frameworkOf(file), code]))) return;
+            todo.push([file, code]);
+        }));
+        if (todo.length < MIN_POOL_FILES) return null;
+        const pool = CompilePool.start(root, framework === 'vue' || framework === 'svelte' ? [framework] : []);
+        for (const [file, code] of todo) pool.prefetch(file, code, frameworkOf(file));
+        return pool;
+    }
 
     const plugins: any[] = [
         ...((config as any).__rollupPlugins ?? []),
@@ -187,18 +238,23 @@ export async function productionBuild(config: BuildConfig, framework: string): P
                 const isFrameworkJsx = compileJsx && !file.includes('node_modules') && (/\.[jt]sx$/.test(file) || (/\.m?js$/.test(file) && looksLikeJsx(code)));
                 const isAngular = framework === 'angular' && /\.ts$/.test(file) && !file.includes('node_modules');
                 if (!isSfc && !isFrameworkJsx && !isAngular) return null;
-                const fw = file.endsWith('.vue') ? 'vue' : file.endsWith('.svelte') ? 'svelte' : framework;
-                // Cached when the output depends on this source alone: not Angular (it inlines
-                // templateUrl / styleUrls) nor SFC blocks that pull in another file (src="…").
-                const cacheable = compileCache && !isAngular && !/<(?:template|script|style)\b[^>]*\bsrc=/.test(code);
+                const fw = frameworkOf(file);
+                const cacheable = compileCache && !isAngular && selfContained(code);
                 const parts = [file, fw, code];
                 if (cacheable) {
                     const hit = await compileCache!.get(parts);
                     if (hit) return { code: hit.code, map: null, moduleType: 'js' };
                 }
-                const out = await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false });
-                if (cacheable) await compileCache!.set(parts, { code: out.code });
-                return { code: out.code, map: null, moduleType: 'js' };
+                const pool = isAngular ? null : compilePool;
+                const compiled = pool && !pool.failed
+                    ? await pool.compile(file, code, fw).catch((err) => {
+                          if (!pool.failed) throw err; // a compile error, as on the main thread
+                          return null; // the worker died: compile here instead
+                      })
+                    : null;
+                const outCode = compiled ?? (await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false })).code;
+                if (cacheable) await compileCache!.set(parts, { code: outCode });
+                return { code: outCode, map: null, moduleType: 'js' };
               },
             },
         },
@@ -367,6 +423,15 @@ export async function productionBuild(config: BuildConfig, framework: string): P
     ];
 
     if (federation) plugins.push(federationEnginePlugin(federation, root, appEntries));
+    // Rolldown has the module graph and renders and minifies in Rust from here: start the
+    // JavaScript work the build needs next while the main thread would otherwise wait.
+    plugins.push({
+        name: 'lunx:engine-busy',
+        buildEnd: () => {
+            if (build.compress !== false) void loadZlib();
+            options.onEngineBusy?.();
+        },
+    });
 
     // ── Rolldown ─────────────────────────────────────────────────────────────
     const envDefines: Record<string, string> = { ...((config as any).__envDefines ?? {}) };
@@ -418,7 +483,7 @@ export async function productionBuild(config: BuildConfig, framework: string): P
                   test: new RegExp(`[\\\\/]node_modules[\\\\/](${pkgs.map(escapeRe).join('|')})[\\\\/]`),
               }))
             : undefined,
-    }, true);
+    }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush()]));
 
     // ── CSS ──────────────────────────────────────────────────────────────────
     const htmlCss = new Map<HtmlEntry, string[]>();
@@ -492,28 +557,37 @@ export async function productionBuild(config: BuildConfig, framework: string): P
     ];
 
     // ── Precompression (.gz / .br) for static hosts ──────────────────────────
+    let finishCompression: (() => Promise<void>) | undefined;
     if (build.compress !== false) {
-        const quality = typeof build.compress === 'object' ? build.compress.brotliQuality ?? 9 : 9;
-        await Promise.all(
-            artifacts
-                .filter((a) => /\.(js|mjs|css|html|svg|json)$/.test(a.fileName))
-                .map(async (a) => {
-                    const data = typeof a.source === 'string' ? Buffer.from(a.source) : Buffer.from(a.source);
-                    if (data.length < 1024) return;
-                    const file = path.join(outDir, a.fileName);
-                    const [gz, br] = await Promise.all([
-                        gzip(data, { level: 9 }),
-                        brotli(data, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: quality, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: data.length } }),
-                    ]);
-                    await Promise.all([fsp.writeFile(`${file}.gz`, gz), fsp.writeFile(`${file}.br`, br)]);
-                }),
+        // Brotli 6: within ~1% of quality 9's size at a third of the time (36 ms vs 11 ms for a 220 kB bundle).
+        const quality = typeof build.compress === 'object' ? build.compress.brotliQuality ?? 6 : 6;
+        const compressible = artifacts.filter((a) => /\.(js|mjs|css|html|svg|json)$/.test(a.fileName));
+        const isHtml = (a: BuildArtifact) => a.fileName.endsWith('.html');
+        const rest = Promise.all(
+            compressible
+                .filter((a) => !(options.deferCompression && isHtml(a)))
+                .map((a) => precompress(path.join(outDir, a.fileName), Buffer.from(a.source), quality)),
         );
+        if (options.deferCompression) {
+            rest.catch(() => {}); // observed by finishCompression
+            finishCompression = async () => {
+                await Promise.all([
+                    rest,
+                    ...compressible.filter(isHtml).map(async (a) => {
+                        const file = path.join(outDir, a.fileName);
+                        await precompress(file, await fsp.readFile(file), quality);
+                    }),
+                ]);
+            };
+        } else {
+            await rest;
+        }
     }
 
     const modules = new Set<string>();
     for (const o of output) if (o.type === 'chunk') for (const id of o.moduleIds as string[]) if (path.isAbsolute(cleanId(id))) modules.add(cleanId(id));
 
-    return { success: true, engine: getBundler().name, durationMs: performance.now() - started, artifacts, modules: [...modules] };
+    return { success: true, engine: getBundler().name, durationMs: performance.now() - started, artifacts, modules: [...modules], finishCompression };
 }
 
 // ── CSS processing ───────────────────────────────────────────────────────────

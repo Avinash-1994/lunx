@@ -57,15 +57,7 @@ export async function build(rawConfig: BuildConfig) {
     if (adapter.config) {
       config = await adapter.config(config) as BuildConfig;
     }
-    const metaProxies = new Set([
-      'nextjs-pages', 'next', 'nuxt', 'svelte-kit', 'solidstart', 'remix',
-      'tanstack-start', 'waku', 'analog', 'react-router', 'astro', 'vitepress',
-      'gatsby', 'redwoodjs', 'qwik-city',
-    ]);
-    const extra = metaProxies.has(adapter.name)
-      ? ` (upstream ${adapter.name}, not a Lunx SSR engine)`
-      : '';
-    console.log(`[lunx] adapter: ${adapter.name}${extra}`);
+    console.log(`[lunx] adapter: ${adapter.name}`);
   }
 
   // Step 4: merge adapter plugins into plugin list
@@ -77,7 +69,8 @@ export async function build(rawConfig: BuildConfig) {
   // 3.2: Plugin Permission Sandbox
   if (config.plugins) {
     try {
-      const { createPluginPermissionProxy } = await import('@lunx/security');
+      // The subpath alone: the full package (scanners, SBOM, CVE) loads later, while Rolldown works.
+      const { createPluginPermissionProxy } = await import('@lunx/security/plugin-permissions');
       config.plugins = config.plugins.map((p: any) => {
         const perms = { declared: p.permissions || [], name: p.name || 'anonymous' };
         return createPluginPermissionProxy(p, perms, { 
@@ -96,9 +89,11 @@ export async function build(rawConfig: BuildConfig) {
   console.log('📂 Output:', config.outDir);
 
   // Phase 3.1 — Supply Chain Security Checks
-  // The lockfile/CVE gate queries the OSV API, so it runs alongside bundling
-  // rather than in front of it; a failure still fails the build below.
-  const securityGate: Promise<void> = (async () => {
+  // The lockfile/CVE gate runs alongside bundling rather than in front of it;
+  // a failure still fails the build below. The engine build starts it once
+  // Rolldown has the module graph and is rendering and minifying in Rust, so
+  // its JavaScript work runs while the main thread would otherwise be idle.
+  const runSecurityGate = async (): Promise<void> => {
   if (config.mode === 'production') {
     // Allow opting out via env var (CI/regression) or per-project config key
     const skipSecurity =
@@ -127,7 +122,7 @@ export async function build(rawConfig: BuildConfig) {
           version: String(version).replace(/^[^0-9]/, '')
         }));
         
-        const cacheDir = path.join(config.root, '.lunx', 'security');
+        const cacheDir = security.advisoryCacheDir(config.root);
         // Strict projects wait for fresh OSV data; others build from the cache while a
         // detached process refreshes it, so a build never waits on the network.
         const strict = (config as any).security?.vulnSeverity !== undefined || process.env.LUNX_SECURITY_STRICT === '1';
@@ -179,8 +174,15 @@ export async function build(rawConfig: BuildConfig) {
     }
     }
   }
-  })();
-  securityGate.catch(() => {}); // observed below; avoid an unhandled rejection meanwhile
+  };
+  let securityGate: Promise<void> | null = null;
+  const startSecurityGate = (): Promise<void> => {
+    if (!securityGate) {
+      securityGate = runSecurityGate();
+      securityGate.catch(() => {}); // observed below; avoid an unhandled rejection meanwhile
+    }
+    return securityGate;
+  };
 
   // The engine bundler (src/engines; Rolldown by default) builds for production: browser apps,
   // module federation, and node / edge / SSR targets. The legacy engine runs only for
@@ -195,11 +197,13 @@ export async function build(rawConfig: BuildConfig) {
     if (useEngine) {
       const { detectFramework } = await import('../core/framework-detector.js');
       const framework = config.framework || (await detectFramework(config.root));
+      if (serverTarget) startSecurityGate();
       result = serverTarget
         ? await (await import('./server-build.js')).serverBuild(config, framework)
-        : await productionBuild(config, framework);
+        : await productionBuild(config, framework, { onEngineBusy: startSecurityGate, deferCompression: true });
       console.log(`[lunx] bundled ${result.modules.length} modules with ${result.engine} in ${Math.round(result.durationMs)}ms`);
     } else {
+      startSecurityGate();
       const { FrameworkPipeline } = await import('../core/pipeline/framework-pipeline.js');
       pipeline = await FrameworkPipeline.auto(config);
       result = await pipeline.build();
@@ -210,7 +214,7 @@ export async function build(rawConfig: BuildConfig) {
     }
 
   phase('bundle');
-    await securityGate;
+    await startSecurityGate();
     phase('security gate (lockfile, CVE)');
 
     if (config.mode === 'production') {
@@ -334,6 +338,9 @@ export async function build(rawConfig: BuildConfig) {
     }
 
   phase('sri/csp/headers');
+    // JS and CSS were compressed alongside the steps above; HTML now that they rewrote it.
+    await result.finishCompression?.();
+  phase('precompression');
     // Day 52: Print final bundle stats in production mode
     if (config.mode === 'production') {
       const { printBundleStats } = await import('./bundle-stats.js');

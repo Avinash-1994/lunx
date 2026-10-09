@@ -1,14 +1,20 @@
 {
   "name": "create-lunx",
-  "version": "1.0.10",
-  "description": "Scaffolding tool for Lunx",
+  "version": "1.1.0",
+  "description": "Create a lunx project: npm create lunx@latest",
   "type": "module",
   "bin": {
     "create-lunx": "./index.js"
   },
   "main": "index.js",
   "dependencies": {
-    "lunx": "^1.0.10"
+    "lunx-dev": "^1.1.0"
   },
-  "scripts": {}
+  "scripts": {},
+  "files": [
+    "index.js"
+  ],
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
 }
