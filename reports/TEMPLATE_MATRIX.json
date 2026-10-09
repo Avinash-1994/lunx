@@ -3,6 +3,216 @@
   "node": "v22.22.0",
   "results": [
     {
+      "template": "vanilla",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 10
+    },
+    {
+      "template": "vanilla --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 8
+    },
+    {
+      "template": "vanilla --tailwind",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 14
+    },
+    {
+      "template": "react",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 11
+    },
+    {
+      "template": "react --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 10
+    },
+    {
+      "template": "react --tailwind",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 12
+    },
+    {
+      "template": "preact",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 10
+    },
+    {
+      "template": "preact --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 8
+    },
+    {
+      "template": "vue",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 11
+    },
+    {
+      "template": "vue --no-ts --tailwind",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 11
+    },
+    {
+      "template": "svelte",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 11
+    },
+    {
+      "template": "svelte --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 10
+    },
+    {
+      "template": "svelte --tailwind",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 17
+    },
+    {
+      "template": "solid",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 15
+    },
+    {
+      "template": "solid --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 11
+    },
+    {
+      "template": "lit",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 10
+    },
+    {
+      "template": "lit --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 8
+    },
+    {
+      "template": "alpine",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 10
+    },
+    {
+      "template": "alpine --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 8
+    },
+    {
+      "template": "angular",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 18
+    },
+    {
+      "template": "qwik",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 15
+    },
+    {
       "template": "next",
       "create": "pass",
       "install": "pass",
@@ -10,7 +220,17 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 60
+      "seconds": 58
+    },
+    {
+      "template": "nuxt",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 80
     },
     {
       "template": "sveltekit",
@@ -20,7 +240,17 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 29
+      "seconds": 22
+    },
+    {
+      "template": "astro",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 27
     },
     {
       "template": "react-router",
@@ -33,6 +263,26 @@
       "seconds": 21
     },
     {
+      "template": "tanstack-start",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 27
+    },
+    {
+      "template": "solidstart",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 51
+    },
+    {
       "template": "qwik-city",
       "create": "pass",
       "install": "pass",
@@ -40,7 +290,37 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 22
+      "seconds": 20
+    },
+    {
+      "template": "vitepress",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 25
+    },
+    {
+      "template": "waku",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 23
+    },
+    {
+      "template": "analog",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 102
     },
     {
       "template": "remix",
@@ -50,7 +330,67 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 47
+      "seconds": 37
+    },
+    {
+      "template": "docusaurus",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 84
+    },
+    {
+      "template": "marko-run",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 20
+    },
+    {
+      "template": "library",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "skip",
+      "preview": "skip",
+      "seconds": 4
+    },
+    {
+      "template": "library --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "skip",
+      "preview": "skip",
+      "seconds": 3
+    },
+    {
+      "template": "edge",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "skip",
+      "preview": "skip",
+      "seconds": 4
+    },
+    {
+      "template": "edge --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "skip",
+      "preview": "skip",
+      "seconds": 3
     }
   ]
 }
