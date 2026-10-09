@@ -1,0 +1,29 @@
+{
+  "nse_history_from": "2018-01-01",
+  "strategies": [
+    {
+      "name": "crypto-trend",
+      "source": "binance",
+      "strategy": "trend",
+      "params": {"assets": ["BTCUSDT", "ETHUSDT"], "ma": 100, "band": 0.03, "target_vol": 0.4},
+      "capital": 10000,
+      "since": "2026-10-09"
+    },
+    {
+      "name": "crypto-onchain",
+      "source": "coinmetrics",
+      "strategy": "onchain_trend",
+      "params": {"assets": ["btc", "eth"], "ma": 50, "hot": 0.95, "cold": 0.1},
+      "capital": 10000,
+      "since": "2026-10-09"
+    },
+    {
+      "name": "nse-smooth-momentum",
+      "source": "nse-official",
+      "strategy": "smooth_momentum",
+      "params": {"lookback": 126, "top_n": 3, "candidates": 10, "regime_ma": 200},
+      "capital": 10000,
+      "since": "2026-10-09"
+    }
+  ]
+}

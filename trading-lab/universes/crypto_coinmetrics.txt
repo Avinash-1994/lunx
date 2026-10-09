@@ -1,0 +1,12 @@
+# CoinMetrics community asset ids (free daily data incl. on-chain metrics).
+# sol and avax are not listed: the free files have no price history for them.
+btc
+eth
+bnb
+xrp
+ada
+doge
+ltc
+link
+trx
+dot
