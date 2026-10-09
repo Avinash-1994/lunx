@@ -91,3 +91,17 @@ def test_update_stops_after_repeated_network_errors(tmp_path):
     with pytest.raises(SystemExit):
         store.update("2024-07-01", "2024-07-12", fetch=broken, pause=0, verbose=False)
     assert store.known_days() == set()  # failures are not mistaken for holidays
+
+
+def test_a_changed_archive_address_is_not_mistaken_for_holidays(tmp_path):
+    store = NseStore(tmp_path / "nse.sqlite")
+    with pytest.raises(SystemExit, match="weekdays in a row"):
+        store.update("2024-07-01", "2024-07-31", fetch=lambda url: None, pause=0, verbose=False)
+    assert store.known_days() == set()
+
+
+def test_unexpected_file_content_counts_as_failure(tmp_path):
+    store = NseStore(tmp_path / "nse.sqlite")
+    with pytest.raises(SystemExit, match="unexpected files"):
+        store.update("2024-07-01", "2024-07-12", fetch=lambda url: b"<html>blocked</html>", pause=0, verbose=False)
+    assert store.known_days() == set()

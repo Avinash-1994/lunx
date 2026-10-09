@@ -145,3 +145,42 @@ def test_equity_strategies_do_not_look_ahead(eq_panel, name, params):
 @pytest.mark.parametrize("name,params", CRYPTO_CASES)
 def test_crypto_strategies_do_not_look_ahead(crypto_panel, name, params):
     _assert_causal(crypto_panel, name, params)
+
+
+# ---------------------------------------------------------------- CoinMetrics API
+
+class _FakeResponse:
+    def __init__(self, payload):
+        import json
+        self.body = json.dumps(payload).encode()
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_coinmetrics_api_follows_pages_and_parses_numbers():
+    from lab.data import coinmetrics_api
+    pages = {
+        "first": {"data": [{"asset": "btc", "time": "2026-10-06T00:00:00.000000000Z", "PriceUSD": "62000.5",
+                            "CapMVRVCur": "1.9"}],
+                  "next_page_url": "https://example/page2"},
+        "https://example/page2": {"data": [{"asset": "btc", "time": "2026-10-07T00:00:00.000000000Z",
+                                            "PriceUSD": "63000", "CapMVRVCur": "1.95"}]},
+    }
+    seen = []
+
+    def opener(url, timeout):
+        seen.append(url)
+        return _FakeResponse(pages["first" if len(seen) == 1 else url])
+
+    df = coinmetrics_api("btc", opener=opener)
+    assert "assets=btc" in seen[0] and "CapMVRVCur" in seen[0]
+    assert list(df.index.strftime("%Y-%m-%d")) == ["2026-10-06", "2026-10-07"]
+    assert df["PriceUSD"].tolist() == [62000.5, 63000.0]
+    assert df["CapMVRVCur"].iloc[-1] == 1.95

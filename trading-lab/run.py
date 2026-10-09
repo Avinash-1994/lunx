@@ -6,10 +6,13 @@
   python run.py signals     --source binance --strategy trend --set ma=100 --since 2026-10-01
   python run.py update-data --from 2018-01-01      # free official NSE bhavcopy -> data/nse_eod.sqlite
   python run.py report      --source nse-official  # walk-forward every strategy, one summary table
+  python run.py daily       --config portfolio.json  # paper-trade your chosen strategies, keep a journal
+  python run.py zerodha-login                        # once a day, only if you want Zerodha orders
+  python run.py zerodha --name nse-smooth-momentum   # real holdings vs strategy; add --place to send
 
-`signals` is paper trading: it replays the strategy from --since to the latest
-bar and prints current holdings plus the orders to place at the next open.
-Nothing is ever sent to a broker or exchange.
+`signals` and `daily` are paper trading: they replay the strategy from --since to
+the latest bar and print current holdings plus the orders for the next open.
+Only `zerodha --place` sends anything to a broker, and it asks first.
 """
 from __future__ import annotations
 
@@ -146,25 +149,138 @@ def cmd_walkforward(args) -> None:
         {"oos": wf["oos_stats"], "benchmark": wf["benchmark"], "chosen": wf["chosen"]}, indent=2, default=str))
 
 
-def cmd_signals(args) -> None:
-    panel = load(args)
-    params = strategy_params(args, panel)
+MAX_DATA_AGE_DAYS = {"crypto": 2, "nse": 4}  # older than this and signals are not tradable
+
+
+def data_age_days(panel, today=None) -> int:
+    today = pd.Timestamp(today or pd.Timestamp.now().normalize())
+    return int((today - panel.dates[-1]).days)
+
+
+def is_stale(source: str, panel, today=None) -> bool:
+    limit = MAX_DATA_AGE_DAYS["crypto" if source in CRYPTO_SOURCES else "nse"]
+    return data_age_days(panel, today) > limit
+
+
+def paper_state(args, panel, params: dict, since: str):
+    """(paper result since `since`, symbols the strategy trades)."""
     w = REGISTRY[args.strategy](panel, args.capital, **params)
-    res = backtest.run(panel, w, costs_for(args), args.capital, start=args.since, min_trade_frac=args.min_trade)
-    last = panel.dates[-1]
-    print(f"Paper portfolio since {args.since}, data up to {last.date()}")
+    res = backtest.run(panel, w, costs_for(args), args.capital, start=since, min_trade_frac=args.min_trade)
+    return res, list(w.columns)
+
+
+def print_paper(res, panel, since: str, stale: bool) -> None:
+    print(f"Paper portfolio since {since}, data up to {panel.dates[-1].date()}")
     print_stats("performance", result_stats(res))
     print("\nholdings:")
     px = panel.close.ffill().iloc[-1]
     for s, q in res.holdings.items():
         print(f"  {s:<12} qty {q:<12g} ~value {q * px[s]:,.2f}")
     print(f"  cash         {res.cash:,.2f}")
-    if res.pending_orders:
+    if stale:
+        print(f"\n!! STALE DATA: the latest bar is {data_age_days(panel)} days old. Do NOT trade on these "
+              "signals; refresh the data first.")
+    elif res.pending_orders:
         print("\nORDERS FOR NEXT SESSION (place manually; prices are last close, use limit orders):")
         for o in res.pending_orders:
             print(f"  {o['side']:<4} {o['symbol']:<12} qty {o['qty']:g} @ ~{o['approx_price']:,.2f}")
     else:
         print("\nNo orders: the strategy does not trade at the next session.")
+
+
+def cmd_signals(args) -> None:
+    panel = load(args)
+    res, _ = paper_state(args, panel, strategy_params(args, panel), args.since)
+    print_paper(res, panel, args.since, is_stale(args.source, panel))
+
+
+def run_config_entry(e: dict, panels: dict | None = None):
+    """Replay one portfolio.json strategy. Returns (namespace, panel, paper result, traded symbols)."""
+    ns = argparse.Namespace(source=e["source"], strategy=e["strategy"], set=[], capital=float(e["capital"]),
+                            universe=e.get("universe"), data_dir=e.get("data_dir"),
+                            data_start=e.get("data_start", "2015-01-01"), min_trade=e.get("min_trade", 0.05),
+                            seed=0, synthetic_trend=0.0)
+    panels = {} if panels is None else panels
+    key = (ns.source, ns.universe, ns.data_start)
+    if key not in panels:
+        panels[key] = load(ns)
+    panel = panels[key]
+    params = {**strategy_params(ns, panel), **e.get("params", {})}
+    res, traded = paper_state(ns, panel, params, e["since"])
+    return ns, panel, res, traded
+
+
+def cmd_zerodha_login(args) -> None:
+    from lab import zerodha
+    zerodha.login(args.request_token)
+
+
+def cmd_zerodha(args) -> None:
+    """Compare a strategy's paper portfolio with your real Zerodha holdings; optionally place the orders."""
+    from lab import zerodha
+    cfg = json.loads(Path(args.config).read_text())
+    matches = [e for e in cfg["strategies"] if e["name"] == args.name]
+    if not matches:
+        raise SystemExit(f"No strategy named {args.name!r} in {args.config}")
+    e = matches[0]
+    if e["source"] not in ("nse", "nse-official"):
+        raise SystemExit("Zerodha orders are for NSE strategies only.")
+    ns, panel, res, traded = run_config_entry(e)
+    if is_stale(ns.source, panel):
+        raise SystemExit(f"Data is {data_age_days(panel)} days old. Run: python run.py update-data")
+    kite = zerodha.client()
+    real, cash = zerodha.account_snapshot(kite)
+    target = zerodha.target_quantities(res.holdings, res.pending_orders)
+    last = panel.close.ffill().iloc[-1]
+    prices = {s: float(last[s]) for s in traded if s in last and pd.notna(last[s])}
+    max_order = float(e.get("max_order_value", 0.6 * float(e["capital"])))
+    orders, warnings = zerodha.plan_orders(target, real, set(traded), prices, cash, max_order_value=max_order)
+
+    print(f"{e['name']}: data up to {panel.dates[-1].date()}, Zerodha cash {cash:,.2f}")
+    print(f"{'symbol':<12}{'target':>8}{'real':>8}")
+    for s in sorted(set(target) | {s for s in real if s in traded}):
+        print(f"{s:<12}{target.get(s, 0):>8}{real.get(s, 0):>8}")
+    for w in warnings:
+        print("  ! " + w)
+    if not orders:
+        print("\nReal holdings already match the strategy. Nothing to do.")
+        return
+    print("\nOrders (LIMIT, delivery/CNC):")
+    for o in orders:
+        print(f"  {o['side']:<4} {o['symbol']:<12} {o['qty']:>5} @ {o['price']:,.2f}  (~{o['qty'] * o['price']:,.0f})")
+    if not args.place:
+        print("\nDry run. Add --place to send these to Zerodha.")
+        return
+    if input("\nType YES to place these orders on your real Zerodha account: ").strip() != "YES":
+        print("Cancelled. Nothing was sent.")
+        return
+    for line in zerodha.place(kite, orders):
+        print(line)
+
+
+def cmd_daily(args) -> None:
+    """Paper-trade every strategy in the config, log to results/paper_journal.csv."""
+    cfg = json.loads(Path(args.config).read_text())
+    entries = cfg["strategies"]
+    if not args.no_update and any(e["source"] == "nse-official" for e in entries):
+        NseStore(NSE_STORE).update(start=cfg.get("nse_history_from", "2018-01-01"))
+    panels, rows = {}, []
+    for e in entries:
+        ns, panel, res, _ = run_config_entry(e, panels)
+        stale = is_stale(ns.source, panel)
+        print(f"\n==================== {e['name']} ({e['strategy']} on {e['source']})")
+        print_paper(res, panel, e["since"], stale)
+        st = result_stats(res)
+        rows.append({"run_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"), "name": e["name"],
+                     "data_date": panel.dates[-1].date().isoformat(), "stale": stale,
+                     "equity": st["end_equity"], "return_%": st["total_return_%"],
+                     "holdings": json.dumps({k: round(v, 6) for k, v in res.holdings.items()}),
+                     "orders": json.dumps([] if stale else res.pending_orders, default=float)})
+    out = HERE / "results"
+    out.mkdir(exist_ok=True)
+    journal = out / "paper_journal.csv"
+    pd.DataFrame(rows).to_csv(journal, mode="a", header=not journal.exists(), index=False)
+    print(f"\nJournal updated: {journal}")
 
 
 REPORT_STRATEGIES = {
@@ -237,9 +353,19 @@ def main() -> None:
     sub.choices["walkforward"].add_argument("--test-start", default="2020-01-01")
     sub.choices["report"].add_argument("--test-start", default="2020-01-01")
     sub.choices["signals"].add_argument("--since", required=True)
+    dp = sub.add_parser("daily", help="paper-trade every strategy in a config file and keep a journal")
+    dp.add_argument("--config", default=str(HERE / "portfolio.json"))
+    dp.add_argument("--no-update", action="store_true", help="skip refreshing NSE data")
+    zl = sub.add_parser("zerodha-login", help="daily Zerodha Kite Connect login")
+    zl.add_argument("--request-token")
+    zp = sub.add_parser("zerodha", help="compare paper portfolio with real Zerodha holdings, optionally place orders")
+    zp.add_argument("--config", default=str(HERE / "portfolio.json"))
+    zp.add_argument("--name", required=True, help="strategy name from the config")
+    zp.add_argument("--place", action="store_true", help="send the orders (asks for confirmation)")
     args = ap.parse_args()
     {"backtest": cmd_backtest, "walkforward": cmd_walkforward, "signals": cmd_signals, "report": cmd_report,
-     "update-data": cmd_update_data}[args.cmd](args)
+     "update-data": cmd_update_data, "daily": cmd_daily, "zerodha-login": cmd_zerodha_login,
+     "zerodha": cmd_zerodha}[args.cmd](args)
 
 
 if __name__ == "__main__":

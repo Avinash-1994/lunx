@@ -30,7 +30,8 @@ LEGACY_URLS = (
     "https://nsearchives.nseindia.com/content/historical/EQUITIES/{d:%Y}/{mon}/cm{d:%d}{mon}{d:%Y}bhav.csv.zip",
     "https://archives.nseindia.com/content/historical/EQUITIES/{d:%Y}/{mon}/cm{d:%d}{mon}{d:%Y}bhav.csv.zip",
 )
-UDIFF_FROM = date(2024, 7, 8)  # NSE switched to the new (UDiFF) file format on this date
+UDIFF_FROM = date(2024, 7, 8)
+MAX_HOLIDAY_RUN = 5  # longest plausible run of weekday exchange holidays  # NSE switched to the new (UDiFF) file format on this date
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Chrome/124.0 Safari/537.36",
@@ -119,39 +120,60 @@ class NseStore:
 
         Weekdays with no file (exchange holidays) are remembered so they aren't retried,
         except for the last few days, whose files may simply not be published yet.
+        NSE is never shut for more than a few weekdays in a row, so a longer gap means
+        the archive address changed: we stop rather than record fake holidays.
         """
         d = pd.Timestamp(start).date()
         last = pd.Timestamp(end).date() if end else date.today()
         known = self.known_days()
         recent = date.today() - timedelta(days=4)
         added = failures = 0
+        no_file: list[date] = []  # consecutive weekdays without a file, not yet recorded as holidays
+
+        def record_holidays():
+            for h in no_file:
+                if h < recent:
+                    self.db.execute("INSERT OR REPLACE INTO days VALUES (?, 'holiday')", (h.isoformat(),))
+            self.db.commit()
+            no_file.clear()
+
         while d <= last:
             if d.weekday() < 5 and d.isoformat() not in known:
-                raw = None
                 try:
+                    raw = None
                     for url in urls_for(d):
                         raw = fetch(url)
                         if raw:
                             break
+                    rows = parse_bhavcopy(raw) if raw else None
                     failures = 0
                 except Exception as e:
+                    rows = None
                     failures += 1
                     if verbose:
                         print(f"  ! {d}: {e}")
                     if failures >= 3:
-                        raise SystemExit("NSE archives unreachable (3 failures in a row). Check your internet "
-                                         "connection, or try again later - NSE sometimes blocks bursts.") from e
-                if raw:
-                    self.add_day(d, parse_bhavcopy(raw))
-                    added += 1
-                    if verbose and added % 50 == 0:
-                        print(f"  ... {d} ({added} trading days added)")
-                elif failures == 0 and d < recent:
-                    self.db.execute("INSERT OR REPLACE INTO days VALUES (?, 'holiday')", (d.isoformat(),))
-                    self.db.commit()
+                        record_holidays()
+                        raise SystemExit("NSE archives unreachable or returning unexpected files (3 failures in "
+                                         "a row). Check your internet connection, or try again later - NSE "
+                                         "sometimes blocks bursts.") from e
+                else:
+                    if rows is not None:
+                        record_holidays()
+                        self.add_day(d, rows)
+                        added += 1
+                        if verbose and added % 50 == 0:
+                            print(f"  ... {d} ({added} trading days added)")
+                    else:
+                        no_file.append(d)
+                        if len(no_file) > MAX_HOLIDAY_RUN:
+                            raise SystemExit(f"No NSE file for {len(no_file)} weekdays in a row ({no_file[0]} to "
+                                             f"{no_file[-1]}). NSE may have changed its archive addresses; "
+                                             "nothing was recorded for these days, so a later run will retry them.")
                 if pause:
                     time.sleep(pause)
             d += timedelta(days=1)
+        record_holidays()
         if verbose:
             print(f"NSE store: {added} new trading days, data up to {self.last_trading_day()}")
         return added

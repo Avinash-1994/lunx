@@ -63,7 +63,7 @@ Retail tools rarely implement it, and it costs no extra data.
 ```bash
 cd trading-lab
 pip install -r requirements.txt
-python -m pytest -q tests                      # 21 tests, incl. "no strategy peeks at future data"
+python -m pytest -q tests                      # 31 tests, incl. "no strategy peeks at future data"
 
 # NSE: build your own official price database (free, no account; first run ~20-30 min)
 python run.py update-data --from 2018-01-01    # later runs only fetch new days
@@ -77,20 +77,60 @@ python run.py walkforward --source nse-official --strategy smooth_momentum --tes
 
 # paper trading: what to hold now, and orders for the next session
 python run.py signals --source binance --strategy trend --set ma=100 --since 2026-10-01
-python run.py signals --source nse --strategy momentum --set top_n=3 lookback=126 --since 2026-10-01
+python run.py signals --source nse-official --strategy momentum --set top_n=3 lookback=126 --since 2026-10-01
 ```
 
 Results (equity curves, trades, parameter grids) are written to `results/`.
+
+## Daily paper trading
+
+1. Copy `portfolio.example.json` to `portfolio.json`. Keep the strategies you want, and set their
+   parameters from your `report` / `walkforward` results.
+2. Run this once a day after market close (6 pm IST or later, when NSE has published the day's file):
+   ```bash
+   python run.py daily
+   ```
+   It refreshes NSE data, replays every strategy from its `since` date, prints holdings and the orders
+   for the next session, and appends a line to `results/paper_journal.csv`.
+3. Schedule it with cron (Linux/Mac: `0 19 * * 1-5 cd /path/to/trading-lab && python run.py daily`) or
+   Windows Task Scheduler.
+
+If the data is too old (more than 2 days for crypto, 4 days for NSE), the tool prints **STALE DATA** and
+gives no orders. This matters for `onchain_trend`: its MVRV data is only current when the CoinMetrics
+Community API is reachable. The free GitHub files were about 4.5 months behind when this was written.
+
+## Zerodha (optional, after paper trading)
+
+Uses the free Kite Connect Personal API for orders, holdings and cash. Prices still come from the free
+data store, because the free plan has no market data.
+
+1. At https://developers.kite.trade create a Personal app, then put the keys in `trading-lab/.env`
+   (git-ignored):
+   ```
+   KITE_API_KEY=...
+   KITE_API_SECRET=...
+   ```
+2. `pip install kiteconnect`, then once each day: `python run.py zerodha-login`
+3. `python run.py zerodha --name nse-smooth-momentum` shows the strategy's target vs. your real holdings
+   and the orders needed (dry run). Add `--place` to send them; you must type `YES` to confirm.
+
+How it stays safe:
+- It only touches the symbols the strategy trades. Your other holdings are never sold.
+- It places LIMIT delivery (CNC) orders only, 1% from the last close, with a per-order value cap.
+  Outside market hours they go as after-market orders.
+- Unfilled orders expire. The next run compares real holdings with the target and re-issues what's missing.
+- SEBI's retail-algo rules may require API orders to come from a static IP registered with Zerodha.
+  If orders are rejected for that reason, the tool says so.
 
 ## Data: the permanent setup
 
 | Use | Source | Cost | Status |
 |---|---|---|---|
 | Crypto live signals | Binance public market-data API (`--source binance`) | free, no key | built |
-| Crypto research + on-chain | CoinMetrics community data on GitHub (`--source coinmetrics`) | free | built; lags by weeks to months, so research only |
+| Crypto on-chain (MVRV) | CoinMetrics Community API, falling back to its GitHub files (`--source coinmetrics`) | free, no key | built; the API is daily, the GitHub files can lag months |
 | NSE official end-of-day | NSE daily bhavcopy files → `data/nse_eod.sqlite` (`update-data`, `--source nse-official`) | free, official | built |
 | NSE alternative | Yahoo Finance via `yfinance` (`--source nse`) | free, unofficial | built |
-| NSE orders (later, optional) | Zerodha Kite Connect Personal API | free | not built yet |
+| NSE orders (optional) | Zerodha Kite Connect Personal API (`zerodha-login`, `zerodha`) | free | built |
 
 Bhavcopy prices are raw, so the store back-adjusts splits and bonuses using the adjusted "previous close"
 that NSE publishes on each ex-date. Dividends are not adjusted, which slightly understates returns.
@@ -102,7 +142,7 @@ Renamed symbols (e.g. ZOMATO → ETERNAL) keep their history under the old name.
 |---|---|
 | All price data (NSE and crypto) | **No.** Everything above is free and keyless. |
 | Paper trading / `signals` | **No.** |
-| Automatic order placement on Zerodha | Yes: Kite Connect Personal (free). Optional, later. |
+| Order placement on Zerodha | Yes: Kite Connect Personal (free), kept in `.env`. Optional. |
 | Automatic order placement on Binance | Yes: Binance API key with trading only, withdrawals off. Optional, later. |
 
 Every download is stored under `data/cache/`. If a provider is down, renamed or blocked, the tool uses
@@ -112,8 +152,8 @@ through `lab/data.py`.
 ## Safety rules (please keep them)
 
 - **Paper trade first** for at least 4–8 weeks with `signals`, and compare against what the backtest expected.
-- **Place orders manually** at first. Monthly momentum is 3–6 orders a month. Broker API fees and SEBI's
-  retail-algo rules (static IP, broker-registered algos) aren't worth it at Rs 10,000.
+- **Place orders manually** at first. Monthly momentum is only 3–6 orders a month. Use `zerodha --place`
+  only after paper results match the backtest.
 - When you add exchange or broker keys later: put them in `.env` (git-ignored), never share them in chat,
   **disable withdrawals**, and whitelist your IP.
 - Decide your maximum loss in advance (for example −25%) and stop the strategy if it hits it.
@@ -128,6 +168,8 @@ lab/strategies.py  momentum, smooth_momentum, meanrev, trend, onchain_trend, rot
 lab/ml.py          gradient-boosting / logistic model, retrained on past data only
 lab/backtest.py    next-open fills, whole shares, cash limits, pending orders
 lab/validate.py    yearly walk-forward + parameter-robustness grid
-run.py             CLI: update-data | report | backtest | walkforward | signals
+lab/zerodha.py     Kite Connect: login, holdings/cash, order planning, guarded LIMIT order placement
+portfolio.example.json   strategies to paper trade daily (copy to portfolio.json)
+run.py             CLI: update-data | report | backtest | walkforward | signals | daily | zerodha-login | zerodha
 tests/             correctness tests, incl. a no-lookahead check for every strategy
 ```

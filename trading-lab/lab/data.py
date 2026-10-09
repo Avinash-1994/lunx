@@ -184,15 +184,41 @@ def load_binance(symbols: list[str], start: str = "2018-01-01", cache_dir: str |
 
 # --------------------------------------------------------------------------- CoinMetrics
 
+COINMETRICS_API = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
 COINMETRICS_URL = "https://raw.githubusercontent.com/coinmetrics/data/master/csv/{asset}.csv"
 COINMETRICS_EXTRA = {"mvrv": "CapMVRVCur", "flow_in": "FlowInExNtv", "flow_out": "FlowOutExNtv",
                      "active_addr": "AdrActCnt", "spot_volume": "volume_reported_spot_usd_1d"}
 
 
+def coinmetrics_api(asset: str, start: str = "2010-01-01", opener=urllib.request.urlopen) -> pd.DataFrame:
+    """Daily metrics from the free CoinMetrics Community API (no key, updated daily).
+
+    Metrics the free tier doesn't serve are skipped rather than failing the request.
+    """
+    from urllib.parse import urlencode
+    query = urlencode({"assets": asset, "metrics": ",".join(["PriceUSD", *COINMETRICS_EXTRA.values()]),
+                       "frequency": "1d", "start_time": start, "page_size": 10000,
+                       "ignore_forbidden_errors": "true", "ignore_unsupported_errors": "true"})
+    url, rows = f"{COINMETRICS_API}?{query}", []
+    while url:
+        with opener(url, timeout=60) as r:
+            payload = json.loads(r.read())
+        rows.extend(payload.get("data", []))
+        url = payload.get("next_page_url")
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df.index = pd.to_datetime(df.pop("time"), utc=True).dt.tz_localize(None).dt.normalize()
+    df.index.name = "time"
+    return df.drop(columns=["asset"], errors="ignore").apply(pd.to_numeric, errors="coerce")
+
+
 def load_coinmetrics(assets: list[str], start: str = "2017-01-01", cache_dir: str | Path = "data/cache",
                      max_age_hours: float = 24) -> Panel:
-    """Free daily crypto prices + on-chain metrics from CoinMetrics' community data on GitHub.
+    """Free daily crypto prices + on-chain metrics from CoinMetrics.
 
+    Tries the Community API first (current to yesterday), then the GitHub CSV files
+    (free but can lag by months), then the last stored copy.
     Close-only (UTC end of day). Crypto trades 24/7, so the next day's open is taken
     as today's close. Extras (MVRV, exchange flows, active addresses) go in panel.extra.
     """
@@ -200,6 +226,12 @@ def load_coinmetrics(assets: list[str], start: str = "2017-01-01", cache_dir: st
     closes, extras = {}, {k: {} for k in COINMETRICS_EXTRA}
     for asset in assets:
         def fetch(asset=asset):
+            try:
+                df = coinmetrics_api(asset)
+                if not df.empty and df.get("PriceUSD", pd.Series(dtype=float)).notna().any():
+                    return df
+            except Exception as e:
+                print(f"  ! {asset}: CoinMetrics API failed ({e}); trying the GitHub files")
             with urllib.request.urlopen(COINMETRICS_URL.format(asset=asset), timeout=60) as r:
                 return pd.read_csv(io.BytesIO(r.read()), index_col=0, parse_dates=True, low_memory=False)
 
@@ -215,7 +247,8 @@ def load_coinmetrics(assets: list[str], start: str = "2017-01-01", cache_dir: st
             if col in df:
                 extras[k][asset] = pd.to_numeric(df[col], errors="coerce")
     if not closes:
-        raise SystemExit("No CoinMetrics data loaded. Check access to raw.githubusercontent.com.")
+        raise SystemExit("No CoinMetrics data loaded. Check access to community-api.coinmetrics.io "
+                         "or raw.githubusercontent.com.")
     close = pd.DataFrame(closes).sort_index().loc[start:]
     close = close[close.notna().any(axis=1)]
     open_ = close.shift(1)
