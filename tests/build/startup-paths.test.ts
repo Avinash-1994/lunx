@@ -109,7 +109,7 @@ console.log(JSON.stringify({ first: first.base, same: first === again, edited: e
             'shared.mjs': `export const base = '/shared/';`,
         });
         const dirname = loadConfig(root, 'dirname.config.mjs');
-        expect(dirname).toMatchObject({ how: 'bundled', dir: root });
+        expect(dirname).toMatchObject({ how: 'bundled', dir: fs.realpathSync(root) });
         const local = loadConfig(root, 'local.config.mjs');
         expect(local).toMatchObject({ how: 'bundled', base: '/shared/' });
     }, 60_000);
