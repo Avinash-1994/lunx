@@ -10,7 +10,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 9
     },
     {
       "template": "vanilla --no-ts",
@@ -30,7 +30,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 14
+      "seconds": 11
     },
     {
       "template": "react",
@@ -60,7 +60,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 12
+      "seconds": 15
     },
     {
       "template": "preact",
@@ -70,7 +70,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 11
     },
     {
       "template": "preact --no-ts",
@@ -90,7 +90,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 11
+      "seconds": 13
     },
     {
       "template": "vue --no-ts --tailwind",
@@ -100,7 +100,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 11
+      "seconds": 12
     },
     {
       "template": "svelte",
@@ -110,7 +110,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 11
+      "seconds": 13
     },
     {
       "template": "svelte --no-ts",
@@ -130,7 +130,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 17
+      "seconds": 13
     },
     {
       "template": "solid",
@@ -140,7 +140,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 15
+      "seconds": 14
     },
     {
       "template": "solid --no-ts",
@@ -150,7 +150,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 11
+      "seconds": 12
     },
     {
       "template": "lit",
@@ -160,7 +160,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 12
     },
     {
       "template": "lit --no-ts",
@@ -170,7 +170,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 8
+      "seconds": 9
     },
     {
       "template": "alpine",
@@ -190,7 +190,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 8
+      "seconds": 9
     },
     {
       "template": "angular",
@@ -200,7 +200,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 18
+      "seconds": 21
     },
     {
       "template": "qwik",
@@ -210,7 +210,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 15
+      "seconds": 16
     },
     {
       "template": "next",
@@ -220,7 +220,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 58
+      "seconds": 69
     },
     {
       "template": "nuxt",
@@ -230,7 +230,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 80
+      "seconds": 52
     },
     {
       "template": "sveltekit",
@@ -250,7 +250,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 27
+      "seconds": 34
     },
     {
       "template": "react-router",
@@ -260,7 +260,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 21
+      "seconds": 24
     },
     {
       "template": "tanstack-start",
@@ -270,7 +270,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 27
+      "seconds": 23
     },
     {
       "template": "solidstart",
@@ -280,7 +280,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 51
+      "seconds": 65
     },
     {
       "template": "qwik-city",
@@ -290,7 +290,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 20
+      "seconds": 21
     },
     {
       "template": "vitepress",
@@ -300,7 +300,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 25
+      "seconds": 24
     },
     {
       "template": "waku",
@@ -310,7 +310,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 23
+      "seconds": 24
     },
     {
       "template": "analog",
@@ -320,7 +320,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 102
+      "seconds": 93
     },
     {
       "template": "remix",
@@ -330,7 +330,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 37
+      "seconds": 35
     },
     {
       "template": "docusaurus",
@@ -340,7 +340,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 84
+      "seconds": 95
     },
     {
       "template": "marko-run",
@@ -350,7 +350,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 20
+      "seconds": 22
     },
     {
       "template": "library",
@@ -391,6 +391,26 @@
       "dev": "skip",
       "preview": "skip",
       "seconds": 3
+    },
+    {
+      "template": "electron",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "pass",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 16
+    },
+    {
+      "template": "electron --no-ts",
+      "create": "pass",
+      "install": "pass",
+      "typecheck": "skip",
+      "build": "pass",
+      "dev": "pass",
+      "preview": "pass",
+      "seconds": 13
     }
   ]
 }

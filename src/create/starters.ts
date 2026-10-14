@@ -570,6 +570,8 @@ const nuxt = framework({
     label: 'Nuxt',
     aliases: ['nuxt-app'],
     deps: { nuxt: '^4.1.2', vue: VUE },
+    // @vitejs/devtools 0.8's peer set crashes npm 10's resolver ("reading 'edgesOut'"); 0.7 installs everywhere.
+    packageJson: { overrides: { '@vitejs/devtools': '~0.7.6' } },
     files: (name) => ({
         'app/app.vue': lines('<template>', `  <h1>${name}</h1>`, '</template>'),
         'nuxt.config.ts': lines('export default defineNuxtConfig({', '  devtools: { enabled: false },', '});'),
