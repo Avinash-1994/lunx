@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { createRequire } from 'module';
+import module, { createRequire } from 'module';
+
+// Node's compile cache (as Vite's and Rspack's CLIs): the modules each command loads are
+// compiled once and kept on disk, not parsed again on every run. NODE_DISABLE_COMPILE_CACHE=1 opts out.
+(module as any).enableCompileCache?.();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,6 +74,16 @@ const ALL_COMMANDS = [
   'init', 'bootstrap', 'css', 'inspect', 'report', 'audit',
   'verify', 'test', 'doctor', 'security', 'migrate'
 ];
+
+/** Scaffolding errors (bad name, unknown template, non-empty directory) are messages, not stack traces. */
+async function runOrExit(task: () => Promise<void>): Promise<void> {
+  try {
+    await task();
+  } catch (err: any) {
+    console.error(`\n  ${err?.message ?? err}\n`);
+    process.exit(1);
+  }
+}
 
 async function main() {
   // BUG-CLI-01: short-circuit block REMOVED — yargs is the single handler for all commands
@@ -307,14 +321,13 @@ async function main() {
     )
     .command(
       'bootstrap',
-      'Create a new project from a template',
+      'Create a new project from a template (same as `lunx create`)',
       (yargs: any) => yargs
-        .option('template', { type: 'string', description: 'Template to use (react, vanilla)', default: 'react' })
+        .option('template', { type: 'string', description: 'Template to use', default: 'react' })
         .option('name', { type: 'string', description: 'Project name', demandOption: true }),
       async (args: any) => {
-        const { bootstrapProject } = await import('./init/bootstrap.js');
-        const targetDir = path.join(process.cwd(), args.name);
-        await bootstrapProject(targetDir, args.template);
+        const { createLunxProject } = await import('./create/index.js');
+        await runOrExit(() => createLunxProject(args.name, { template: args.template }));
       }
     )
     .command(
@@ -413,18 +426,17 @@ async function main() {
     )
     .command(
       'create [name]',
-      'Create a new Lunx project',
+      'Create a new project (interactive without --template)',
       (yargs: any) => yargs
-        .positional('name', { type: 'string', description: 'Project name' })
+        .positional('name', { type: 'string', description: 'Project name ("." for the current directory)' })
         // `--template` is what every other scaffolder calls this flag
-        // (create-vite, create-next-app), so accept it as an alias rather than
-        // rejecting it with "Unknown argument".
-        .option('framework', { type: 'string', alias: 'template', description: 'Framework to use' })
-        .option('ts', { type: 'boolean', description: 'Use TypeScript', default: true })
-        .option('tailwind', { type: 'boolean', description: 'Add Tailwind CSS', default: false }),
+        // (create-vite, create-next-app); --framework is kept for older docs.
+        .option('template', { type: 'string', alias: 'framework', description: 'Template: react, vue, svelte, solid, preact, lit, alpine, angular, qwik, vanilla, next, nuxt, sveltekit, astro, …' })
+        .option('ts', { type: 'boolean', description: 'TypeScript (--no-ts for JavaScript)' })
+        .option('tailwind', { type: 'boolean', description: 'Add Tailwind CSS' }),
       async (args: any) => {
-        const { runCreate } = await import('./commands/create.js');
-        await runCreate(args.name, { framework: args.framework, ts: args.ts, tailwind: args.tailwind });
+        const { createLunxProject } = await import('./create/index.js');
+        await runOrExit(() => createLunxProject(args.name, { template: args.template, ts: args.ts, tailwind: args.tailwind }));
       }
     )
     .command(

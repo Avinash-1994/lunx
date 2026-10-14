@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { compileCss, isCssModule } from '../../build/css.js';
+import { lightningcss as loadLightningcss } from '../../lib/lightningcss.js';
 import { cleanUrl, isCSSRequest, normalizePath } from '../utils.js';
 import { isAssetRequest } from './asset.js';
 
@@ -211,7 +212,7 @@ function attachMeta(chunk: any, meta: ViteMetadata): void {
 }
 
 async function minifyCss(css: string, fileName: string): Promise<string> {
-    const { transform } = await import('lightningcss');
+    const { transform } = loadLightningcss();
     try {
         return transform({ filename: fileName, code: Buffer.from(css), minify: true, errorRecovery: true } as any).code.toString();
     } catch {

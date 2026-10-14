@@ -33,6 +33,8 @@ export interface TransformResult {
     code: string;
     map?: string;
     dependencies?: string[];
+    /** Already plain JavaScript: no TypeScript left and no defines to apply, so the final Oxc pass can be skipped. */
+    plain?: boolean;
 }
 
 export class UniversalTransformer {
@@ -147,6 +149,7 @@ export class UniversalTransformer {
         // Final Normalization Pass (Phase F1 Honest)
         // Skip for binary files, compiled code, and CSS
         const skipNormalization =
+            (result.plain && !options.define) ||
             options.filePath.endsWith('.css') ||
             options.filePath.endsWith('.node') ||
             options.filePath.includes('/compiler/') ||
@@ -293,8 +296,9 @@ if (import.meta.hot && __lunx_refresh) {
                 // Try: user project first, then lunx's own node_modules (lunx ships @vue/compiler-sfc as a dep)
                 const searchPaths = [this.root, process.cwd(), fileURLToPath(new URL('../..', import.meta.url))];
                 const compilerPath = _require.resolve('@vue/compiler-sfc', { paths: searchPaths });
-                const compilerUrl = pathToFileURL(compilerPath).href;
-                compiler = await import(compilerUrl);
+                // require(), not import(): it is CommonJS, and import() makes Node scan
+                // the whole 1 MB file for its export names on every load (~100 ms).
+                compiler = _require(compilerPath);
             } catch {
                 log.warn('No Vue 3 compiler found; serving the template uncompiled');
                 return { code: `export default { template: \`${code.replace(/`/g, '\\`')}\` };` };
@@ -302,7 +306,8 @@ if (import.meta.hot && __lunx_refresh) {
 
             if (!compiler.parse) return { code };
 
-            const { descriptor } = compiler.parse(code, { filename: filePath });
+            // Production output is not mapped back (map: null), so skip building source maps.
+            const { descriptor } = compiler.parse(code, { filename: filePath, sourceMap: isDev });
             // Deterministic, as in Vite: the same file builds to the same output (reproducible
             // builds, stable cache keys). Dev keys on the path alone so an edit keeps its scope.
             const relative = path.relative(this.root, filePath).split(path.sep).join('/');
@@ -313,14 +318,18 @@ if (import.meta.hot && __lunx_refresh) {
             if (descriptor.script || descriptor.scriptSetup) {
                 const compiledScript = compiler.compileScript(descriptor, {
                     id: scopeId,
+                    isProd: !isDev,
+                    sourceMap: isDev,
                     inlineTemplate: hasTemplate,
                     templateOptions: hasTemplate ? {
                         source: descriptor.template!.content,
                         filename: filePath,
                         id: scopeId,
+                        isProd: !isDev,
                         scoped: descriptor.styles.some((s: any) => s.scoped),
                         compilerOptions: {
-                            scopeId: descriptor.styles.some((s: any) => s.scoped) ? scopeId : undefined
+                            scopeId: descriptor.styles.some((s: any) => s.scoped) ? scopeId : undefined,
+                            sourceMap: isDev,
                         }
                     } : undefined
                 });
@@ -352,9 +361,11 @@ if (import.meta.hot && __lunx_refresh) {
                             source: descriptor.template!.content,
                             filename: filePath,
                             id: scopeId,
+                            isProd: !isDev,
                             scoped: descriptor.styles.some((s: any) => s.scoped),
                             compilerOptions: {
-                                scopeId: descriptor.styles.some((s: any) => s.scoped) ? scopeId : undefined
+                                scopeId: descriptor.styles.some((s: any) => s.scoped) ? scopeId : undefined,
+                                sourceMap: isDev,
                             }
                         });
                         templateCode = templateResult.code.replace('export function render', 'const _sfc_render = function render');
@@ -374,7 +385,8 @@ if (import.meta.hot && __lunx_refresh) {
                     source: style.content,
                     filename: filePath,
                     id: scopeId,
-                    scoped: style.scoped
+                    scoped: style.scoped,
+                    isProd: !isDev,
                 });
                 cssCode += styleResult.code;
             }
@@ -396,7 +408,7 @@ if (import.meta.hot && __lunx_refresh) {
                 ` : ''}
 
                 ${descriptor.styles.some((s: any) => s.scoped) ? `_sfc_main.__scopeId = "${scopeId}";` : ''}
-                _sfc_main.__file = "${filePath.replace(/\\/g, '/')}";
+                ${isDev ? `_sfc_main.__file = "${filePath.replace(/\\/g, '/')}";` : ''}
                 
                 export default _sfc_main;
             `;
@@ -417,7 +429,10 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
                 `;
             }
 
-            return { code: output };
+            // A production build without <script lang="ts"> is plain JavaScript already
+            // (the bundler applies defines), so the final Oxc pass has nothing to do.
+            const usesTs = [descriptor.script, descriptor.scriptSetup].some((b: any) => b?.lang && /^tsx?$/.test(b.lang));
+            return { code: output, plain: !isDev && !usesTs };
         } catch (error: any) {
             log.error(`Vue transform failed for ${filePath}:`, error.message);
             return { code };
@@ -677,25 +692,14 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
     }
 
     /**
-     * Lit Transformer - Works with all Lit versions
+     * Lit: TypeScript's experimentalDecorators with `useDefineForClassFields:
+     * false`, which Lit's decorated reactive properties need, compiled by Oxc
+     * (no TypeScript install required).
      */
     private async transformLit(code: string, filePath: string, isDev: boolean): Promise<TransformResult> {
         try {
-            const ts = await import('typescript');
-            const result = ts.transpileModule(code, {
-                compilerOptions: {
-                    target: ts.ScriptTarget.ES2020,
-                    module: ts.ModuleKind.ESNext,
-                    experimentalDecorators: true,
-                    useDefineForClassFields: false,
-                    moduleResolution: ts.ModuleResolutionKind.NodeJs
-                },
-                fileName: filePath
-            });
-
-            let finalCode = result.outputText;
-
-            return { code: finalCode, map: result.sourceMapText };
+            const out = compile(filePath, code, { legacyDecorators: true, classFields: 'assign', sourcemap: isDev });
+            return { code: out.code, map: out.map };
         } catch (error: any) {
             log.error(`Lit transform failed for ${filePath}:`, error.message);
             return this.transformVanilla(code, filePath, isDev);

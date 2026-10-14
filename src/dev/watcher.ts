@@ -29,7 +29,7 @@ export class DevWatcher extends EventEmitter {
     private timer: NodeJS.Timeout | null = null;
     private engine: 'rust-notify' | 'chokidar' | 'unknown' = 'unknown';
 
-    constructor(private rootDir: string, private debounceMs: number = 10) {
+    constructor(private rootDir: string, private debounceMs: number = 0) {
         super();
         this.start();
     }
@@ -37,6 +37,8 @@ export class DevWatcher extends EventEmitter {
     private start() {
         const ignoredPatterns = [
             '**/node_modules/**', '**/.git/**', '**/dist/**', '**/.lunx/**', '**/.lunx_cache/**',
+            // Electron's main / preload, rebuilt by vite-plugin-electron while the renderer is served.
+            '**/dist-electron/**',
             // Logs, editor swap files and tool output: never part of the app,
             // and a dev server writing its log into the root reloaded forever.
             '**/coverage/**', '**/*.log', '**/*.swp', '**/*.tsbuildinfo', '**/.DS_Store',
@@ -108,6 +110,8 @@ export class DevWatcher extends EventEmitter {
         this.batch.add(filePath);
         if (this.timer) clearTimeout(this.timer);
 
+        // Both backends already coalesce the events of one write (the native watcher in
+        // Rust, the JS watcher per path), so 0 just gathers what arrives together.
         this.timer = setTimeout(() => {
             const sortedBatch = Array.from(this.batch).sort();
             this.batch.clear();

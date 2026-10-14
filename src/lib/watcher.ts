@@ -129,7 +129,8 @@ export class FSWatcher extends EventEmitter {
         this.options = {
             ignoreInitial: options.ignoreInitial ?? true,
             persistent: options.persistent ?? true,
-            debounce: options.debounce ?? 10,
+            // One write fires 2–3 fs.watch events within a millisecond or two.
+            debounce: options.debounce ?? 5,
             depth: options.depth ?? Infinity,
         };
         this.ignoredByOptions = compileIgnored(options.ignored);

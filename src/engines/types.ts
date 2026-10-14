@@ -30,6 +30,13 @@ export interface CompileOptions {
     legacyDecorators?: boolean;
     /** Emit decorator metadata (Angular DI). */
     decoratorMetadata?: boolean;
+    /**
+     * 'assign': class fields become constructor assignments, and fields
+     * without an initializer are dropped (TypeScript's
+     * `useDefineForClassFields: false`), which decorated reactive properties
+     * (Lit, MobX) need. 'define' (default): standard class fields.
+     */
+    classFields?: 'define' | 'assign';
     define?: Record<string, string>;
     /** 'inline' appends a data-URL map comment. */
     sourcemap?: boolean | 'inline';

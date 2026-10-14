@@ -8,7 +8,6 @@
  * Opt out with `delegate: false` in lunx.config or LUNX_NO_DELEGATE=1.
  */
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -22,6 +21,8 @@ interface MetaFramework {
     args: Record<Command, string[]>;
     /** How the CLI takes a port, if it does. */
     port?: (port: number) => string[];
+    /** A production server that is not `bin`'s (it reads the port from PORT). */
+    preview?: { bin: string; args: string[] };
 }
 
 const viteLike = (name: string, packages: string[]): MetaFramework => ({
@@ -40,8 +41,8 @@ export const META_FRAMEWORKS: MetaFramework[] = [
     { name: 'Gatsby', packages: ['gatsby'], bin: 'gatsby', args: { dev: ['develop'], build: ['build'], preview: ['serve'] }, port: (p) => ['-p', String(p)] },
     { name: 'Docusaurus', packages: ['@docusaurus/core'], bin: 'docusaurus', args: { dev: ['start'], build: ['build'], preview: ['serve'] }, port: (p) => ['--port', String(p)] },
     { name: 'RedwoodJS', packages: ['@redwoodjs/core'], bin: 'rw', args: { dev: ['dev'], build: ['build'], preview: ['serve'] } },
-    { name: 'React Router (framework)', packages: ['@react-router/dev'], bin: 'react-router', args: { dev: ['dev'], build: ['build'], preview: ['start'] }, port: (p) => ['--port', String(p)] },
-    { name: 'Remix', packages: ['@remix-run/dev'], bin: 'remix', args: { dev: ['vite:dev'], build: ['vite:build'], preview: ['vite:dev'] }, port: (p) => ['--port', String(p)] },
+    { name: 'React Router (framework)', packages: ['@react-router/dev'], bin: 'react-router', args: { dev: ['dev'], build: ['build'], preview: [] }, port: (p) => ['--port', String(p)], preview: { bin: 'react-router-serve', args: ['./build/server/index.js'] } },
+    { name: 'Remix', packages: ['@remix-run/dev'], bin: 'remix', args: { dev: ['vite:dev'], build: ['vite:build'], preview: [] }, port: (p) => ['--port', String(p)], preview: { bin: 'remix-serve', args: ['./build/server/index.js'] } },
     { name: 'SolidStart', packages: ['@solidjs/start'], bin: 'vinxi', args: { dev: ['dev'], build: ['build'], preview: ['start'] }, port: (p) => ['--port', String(p)] },
     { name: 'TanStack Start', packages: ['@tanstack/react-start', '@tanstack/solid-start', '@tanstack/start'], bin: 'vite', args: { dev: ['dev'], build: ['build'], preview: ['preview'] }, port: (p) => ['--port', String(p)] },
     { name: 'Waku', packages: ['waku'], bin: 'waku', args: { dev: ['dev'], build: ['build'], preview: ['start'] }, port: (p) => ['--port', String(p)] },
@@ -83,16 +84,23 @@ function findBin(root: string, bin: string): string | null {
  * code once it exits (dev and preview keep running until stopped).
  */
 export async function delegate(meta: MetaFramework, command: Command, root: string, opts: { port?: number; extraArgs?: string[] } = {}): Promise<number> {
-    const bin = findBin(root, meta.bin);
+    const server = command === 'preview' ? meta.preview : undefined;
+    const binName = server?.bin ?? meta.bin;
+    const bin = findBin(root, binName);
     if (!bin) {
-        console.error(`[lunx] ${meta.name} project, but its CLI (${meta.bin}) is not installed. Run your package manager's install first.`);
+        console.error(`[lunx] ${meta.name} project, but its CLI (${binName}) is not installed. Run your package manager's install first.`);
         return 1;
     }
-    const args = [...meta.args[command], ...(opts.port && meta.port ? meta.port(opts.port) : []), ...(opts.extraArgs ?? [])];
-    console.log(`[lunx] ${meta.name} project → ${meta.bin} ${args.join(' ')}`);
+    const args = server
+        ? [...server.args, ...(opts.extraArgs ?? [])]
+        : [...meta.args[command], ...(opts.port && meta.port ? meta.port(opts.port) : []), ...(opts.extraArgs ?? [])];
+    const env = server && opts.port ? { ...process.env, PORT: String(opts.port) } : process.env;
+    console.log(`[lunx] ${meta.name} project → ${binName} ${args.join(' ')}`);
     console.log(`[lunx] ${meta.name} compiles with its own toolchain; lunx test, check, security and analyze still apply. (delegate: false to opt out)`);
+    // Loaded here: child_process (with net) costs ~10ms, and most builds never delegate.
+    const { spawn } = await import('node:child_process');
     return new Promise((resolve) => {
-        const child = spawn(bin, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: process.env });
+        const child = spawn(bin, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env });
         const stop = () => child.kill('SIGTERM');
         process.once('SIGINT', stop);
         process.once('SIGTERM', stop);
@@ -155,6 +163,9 @@ export async function maybeDelegate(command: Command, root: string, port?: numbe
         } else if (command === 'build') {
             try {
                 await host.runHostBuild(root);
+                // `qwik build` also builds the preview server (src/entry.preview), which `vite preview` serves.
+                const preview = meta.name === 'Qwik City' ? ['tsx', 'ts', 'jsx', 'js'].map((e) => `src/entry.preview.${e}`).find((f) => fs.existsSync(path.join(root, f))) : undefined;
+                if (preview) await host.runHostBuild(root, { ssr: preview });
             } catch (err: any) {
                 console.error(`[lunx] build failed: ${err?.stack ?? err}`);
                 process.exitCode = 1;

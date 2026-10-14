@@ -63,7 +63,7 @@ const MIGRATIONS: Migration[] = [
       if (!foreign) return;
       const comments = [`Migrated from ${foreign.file} by \`lunx migrate\`.`];
       if (foreign.plugins.length) {
-        comments.push(`Vite plugins to port by hand (Rollup-compatible, add to plugins: []): ${foreign.plugins.map(p => p.name).join(', ')}`);
+        comments.push(`Vite plugins: add them to plugins: [] as they are (they run with Vite's lifecycle): ${foreign.plugins.map(p => p.name).join(', ')}`);
       }
       for (const note of foreign.notes) comments.push(note);
       writeLunxConfig(root, foreign.config, comments);

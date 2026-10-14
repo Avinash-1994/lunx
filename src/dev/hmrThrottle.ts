@@ -16,10 +16,7 @@ interface ClientState {
 export class HMRThrottle {
     private pendingUpdates = new Map<string, HMRUpdate>();
     private clientStates = new Map<WebSocket, ClientState>();
-    private debounceTimer: NodeJS.Timeout | null = null;
-    // Coalesces the files of one save (the watcher already batched them); kept short
-    // because every ms here is HMR latency.
-    private readonly DEBOUNCE_MS = 5;
+    private flushScheduled = false;
 
     constructor(private broadcast: (msg: string) => void) { }
 
@@ -43,21 +40,23 @@ export class HMRThrottle {
             timestamp: Date.now()
         });
 
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
+        // The watcher already coalesced one save into one batch: flush once this
+        // batch is queued, without a timer (every ms here is HMR latency).
+        if (!this.flushScheduled) {
+            this.flushScheduled = true;
+            setImmediate(() => this.flushUpdates());
         }
-
-        this.debounceTimer = setTimeout(() => {
-            this.flushUpdates();
-        }, this.DEBOUNCE_MS);
     }
 
     private flushUpdates() {
-        if (this.pendingUpdates.size === 0) return;
+        if (this.pendingUpdates.size === 0) {
+            this.flushScheduled = false;
+            return;
+        }
 
         const updates = Array.from(this.pendingUpdates.values());
         this.pendingUpdates.clear();
-        this.debounceTimer = null;
+        this.flushScheduled = false;
 
         log.info(`Flushing ${updates.length} HMR updates`, { category: 'hmr' });
 

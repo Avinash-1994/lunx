@@ -23,7 +23,7 @@ const INPUT_KEYS = new Set([
     'moduleTypes', 'experimental', 'checks', 'makeAbsoluteExternalsRelative', 'context', 'jsx', 'transform', 'watch',
 ]);
 
-const OUTPUT_DROP = new Set(['hoistTransitiveImports', 'experimentalMinChunkSize', 'generatedCode', 'interop', 'compact', 'dynamicImportInCjs', 'freeze', 'indent', 'noConflict', 'sanitizeFileName', 'validate', 'experimentalDeepDynamicChunkOptimization', 'manualChunks', 'inlineDynamicImports']);
+const OUTPUT_DROP = new Set(['hoistTransitiveImports', 'experimentalMinChunkSize', 'generatedCode', 'interop', 'compact', 'dynamicImportInCjs', 'freeze', 'indent', 'noConflict', 'sanitizeFileName', 'validate', 'experimentalDeepDynamicChunkOptimization', 'manualChunks', 'onlyExplicitManualChunks', 'inlineDynamicImports']);
 
 const JS_LIKE = /\.(m?[jt]sx?|c[jt]s|json)$/;
 
@@ -35,7 +35,7 @@ function withModuleType(result: any, id: string): any {
     return result;
 }
 
-function contextWithEnvironment(ctx: any, environment: any): any {
+export function contextWithEnvironment(ctx: any, environment: any): any {
     return new Proxy(ctx, {
         get(target, prop) {
             if (prop === 'environment') return environment;
@@ -87,7 +87,7 @@ async function generateBundleWithAssignments(ctx: any, handler: (...a: any[]) =>
 /** Hook argument that carries Vite's options object (`{ ssr }` for resolveId / load / transform). */
 const OPTIONS_ARG: Record<string, number> = { resolveId: 2, load: 1, transform: 2 };
 
-function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => void = () => {}): any {
+export function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => void = () => {}): any {
     const out: any = { name: plugin.name };
     const ssr = environment.config?.consumer === 'server';
     for (const key of Object.keys(plugin)) {
@@ -138,7 +138,7 @@ function copyDir(src: string, dest: string): void {
     }
 }
 
-function makeEnvironment(config: any, name: string): any {
+export function makeEnvironment(config: any, name: string): any {
     return {
         name,
         mode: 'build',
@@ -182,6 +182,23 @@ export async function createBuilder(inlineConfig: InlineConfig = {}): Promise<an
     return builder;
 }
 
+/** `build.lib` outputs, as Vite names them: one per format, `fileName` as given or `[name]` with the format's extension. */
+function libOutputs(lib: any, root: string): Array<Record<string, any>> {
+    let isModule = false;
+    try {
+        isModule = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).type === 'module';
+    } catch {}
+    const formats: string[] = lib.formats ?? (lib.name ? ['es', 'umd'] : ['es', 'cjs']);
+    return formats.map((format) => {
+        const ext = format === 'es' ? (isModule ? 'js' : 'mjs') : format === 'cjs' ? (isModule ? 'cjs' : 'js') : `${format}.${isModule ? 'cjs' : 'js'}`;
+        const fileName = lib.fileName;
+        const entryFileNames = typeof fileName === 'function'
+            ? (chunk: any) => fileName(format, chunk.name)
+            : typeof fileName === 'string' ? `${fileName}.${ext}` : `[name].${ext}`;
+        return { format, entryFileNames, chunkFileNames: `[name]-[hash].${ext}`, ...(lib.name ? { name: lib.name } : {}) };
+    });
+}
+
 /** Build one environment of a resolved config on Rolldown. */
 export async function buildEnvironment(config: any, environment: any): Promise<any> {
     const envConfig = environment.config;
@@ -195,7 +212,13 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
 
     // rolldown-vite's name and Rollup's: plugins that detect Rolldown set rolldownOptions.
     const ro = { ...buildOptions.rollupOptions, ...buildOptions.rolldownOptions };
+    // Library mode (`build.lib`): its entries, one output per format, no page.
+    const lib = buildOptions.lib || null;
     let input = ssr && typeof buildOptions.ssr === 'string' ? buildOptions.ssr : ro.input;
+    if (!input && lib) {
+        const entry = lib.entry;
+        input = typeof entry === 'string' ? path.resolve(root, entry) : Array.isArray(entry) ? entry.map((e: string) => path.resolve(root, e)) : Object.fromEntries(Object.entries(entry ?? {}).map(([k, v]) => [k, path.resolve(root, v as string)]));
+    }
     if (!input) {
         if (ssr) throw new Error('rollupOptions.input or build.ssr must be set for an SSR build');
         input = path.join(root, 'index.html');
@@ -232,7 +255,7 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
         ...userInput,
         input,
         cwd: root,
-        platform: ssr ? 'node' : 'browser',
+        platform: ro.platform ?? (ssr ? 'node' : 'browser'),
         plugins,
         resolve: {
             conditionNames: [...resolve.conditions, 'import', 'default'],
@@ -243,18 +266,19 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
         logLevel: config.logLevel === 'silent' ? 'silent' : 'warn',
     };
 
-    const outputs = arraify(ro.output ?? {});
+    const outputs = ro.output ? arraify(ro.output) : lib ? libOutputs(lib, root) : [{}];
     const assetsDir = buildOptions.assetsDir;
     const results: any[] = [];
     for (const userOutput of outputs) {
         const output: Record<string, any> = {};
         for (const [k, v] of Object.entries(userOutput as Record<string, any>)) if (!OUTPUT_DROP.has(k)) output[k] = v;
         const inline = (userOutput as any).inlineDynamicImports;
+        const flat = ssr || !!lib;
         const outputOptions: Record<string, any> = {
             dir: outDir,
             format: 'es',
-            entryFileNames: ssr ? '[name].js' : `${assetsDir}/[name]-[hash].js`,
-            chunkFileNames: ssr ? '[name]-[hash].js' : `${assetsDir}/[name]-[hash].js`,
+            entryFileNames: flat ? '[name].js' : `${assetsDir}/[name]-[hash].js`,
+            chunkFileNames: flat ? '[name]-[hash].js' : `${assetsDir}/[name]-[hash].js`,
             assetFileNames: `${assetsDir}/[name]-[hash][extname]`,
             minify: !ssr && buildOptions.minify !== false,
             ...(!ssr && buildOptions.minify !== false ? { comments: { legal: true, annotation: false, jsdoc: false } } : {}),
@@ -263,6 +287,17 @@ export async function buildEnvironment(config: any, environment: any): Promise<a
             ...(inline ? { codeSplitting: false } : {}),
         };
         if (outputOptions.format === 'esm' || outputOptions.format === 'module') outputOptions.format = 'es';
+        // `build.watch`: a Rolldown watcher, rebuilding (and calling the plugins' hooks) on every change, as Vite returns.
+        if (buildOptions.watch) {
+            const { watch } = await import('rolldown');
+            environment.isBuilt = true;
+            const watcher = watch({ ...inputOptions, output: outputOptions, watch: { ...buildOptions.watch, skipWrite: !write } } as any);
+            // As Vite: each build's result is closed, so closeBundle runs after every rebuild (vite-plugin-electron restarts Electron there).
+            watcher.on('event', (event: any) => {
+                if (event.code === 'BUNDLE_END') void event.result?.close?.();
+            });
+            return watcher;
+        }
         const started = Date.now();
         const result = await rollupCompatibleBuild(inputOptions, outputOptions, write);
         for (const item of result.output) decorate(item);

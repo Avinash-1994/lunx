@@ -323,11 +323,7 @@ async function detectFramework(root: string): Promise<string | undefined> {
     if (deps['@tanstack/start'])                   return 'tanstack-start';
     if (deps['waku'])                              return 'waku';
 
-    // Desktop frameworks
-    if (deps['electron'])                          return 'electron';
-    if (deps['@tauri-apps/api'])                   return 'tauri';
-
-    // SPA frameworks
+    // SPA frameworks (a desktop app's renderer is one of these)
     if (deps['react'] || deps['react-dom'])        return 'react';
     if (deps['vue'])                               return 'vue';
     if (deps['svelte'])                            return 'svelte';
@@ -336,6 +332,10 @@ async function detectFramework(root: string): Promise<string | undefined> {
     if (deps['preact'])                            return 'preact';
     if (deps['lit'])                               return 'lit';
     if (deps['@builder.io/qwik'])                  return 'qwik';
+
+    // Desktop shells around a vanilla renderer
+    if (deps['electron'])                          return 'electron';
+    if (deps['@tauri-apps/api'])                   return 'tauri';
   } catch {
     // No package.json or unreadable — continue without auto-detection
   }
@@ -361,6 +361,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
   try {
     if (await fs.access(lunxTsPath).then(() => true).catch(() => false)) {
+      await (await import('./vite-compat.js')).redirectViteForPlugins(lunxTsPath);
       rawConfig = await loadModuleConfig(lunxTsPath, cwd);
       loadedConfigPath = 'lunx.config.ts';
     } else if (await fs.access(lunxCjsPath).then(() => true).catch(() => false)) {
@@ -402,7 +403,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
       rawConfig = foreign.config;
       loadedConfigPath = foreign.file;
       log.info(`[lunx] Using ${foreign.file} (Vite-compatible). Run \`lunx migrate\` to convert it.`);
-      for (const note of foreign.notes) log.info(`[lunx]   ${note}`);
+      for (const note of foreign.notes) (note.startsWith('could not evaluate') ? log.warn : log.info)(`[lunx]   ${note}`);
     } else {
       // Return default config if file not found, with auto-detection
       log.info('No config file found, using defaults...');
@@ -439,6 +440,10 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
       validateConfigKeys(rawConfig as Record<string, unknown>);
     }
 
+    // As Vite: `plugins` may hold promises (vite-plugin-electron/simple), nested arrays and falsy entries.
+    if (rawConfig && typeof rawConfig === 'object' && rawConfig.plugins) {
+      rawConfig.plugins = await (await import('./vite-compat.js')).resolvePlugins(rawConfig.plugins);
+    }
     const result = BuildConfigSchema.safeParse(rawConfig);
 
     if (!result.success) {
@@ -453,7 +458,10 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
     const config = result.data as BuildConfig;
     const root = config.root || cwd;
-    if (foreign?.plugins.length) (config as any).__rollupPlugins = foreign.plugins;
+    if (foreign?.plugins.length) {
+      (config as any).__vitePlugins = foreign.plugins;
+      (config as any).__viteConfig = foreign.vite;
+    }
 
     // CFG-02: normalise entry (handles string, array, or auto-detect)
     config.entry = normaliseEntry(config.entry as any, root);

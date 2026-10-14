@@ -10,6 +10,7 @@
 
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import { isBuiltin } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -19,8 +20,10 @@ export interface ForeignConfig {
     file: string;
     /** lunx config fields, ready for schema validation */
     config: Record<string, any>;
-    /** non-framework plugins, passed to the Rolldown build */
+    /** Non-framework plugins: they run with Vite's lifecycle (plugin-host/app-plugins). */
     plugins: any[];
+    /** The config as the file exports it. */
+    vite?: Record<string, any>;
     notes: string[];
 }
 
@@ -49,6 +52,7 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
         // them (and vite's helpers) instead of importing Babel, Vite and the
         // plugin -- ~100ms per command. Any surprise falls back to the real
         // modules.
+        await redirectViteForPlugins(path.join(root, file));
         try {
             vite = await loadConfigModule(path.join(root, file), root, true);
         } catch {
@@ -58,7 +62,7 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
             vite = await vite({ command, mode: command === 'build' ? 'production' : 'development', isSsrBuild: false, isPreview: false });
         }
     } catch (err: any) {
-        notes.push(`could not evaluate ${file} (${String(err?.message ?? err).split('\n')[0]}); read it statically instead`);
+        notes.push(`could not evaluate ${file} (${String(err?.message ?? err).split('\n')[0]}); read it statically instead, without its plugins`);
         return { file, ...staticRead(await fsp.readFile(path.join(root, file), 'utf8')), notes };
     }
     vite = vite ?? {};
@@ -135,12 +139,10 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
             config.framework ??= framework;
             continue;
         }
-        if (plugin.apply === 'serve') continue;
-        if (typeof plugin.apply === 'function' && !plugin.apply({}, { command: 'build', mode: 'production' })) continue;
         plugins.push(plugin);
     }
-    if (plugins.length) notes.push(`using ${plugins.length} Vite plugin(s) in the build: ${plugins.map((p) => p.name).join(', ')}`);
-    return { file, config, plugins, notes };
+    if (plugins.length) notes.push(`using ${plugins.length} Vite plugin(s): ${plugins.map((p) => p.name).join(', ')}`);
+    return { file, config, plugins, vite, notes };
 }
 
 /** Best effort when the config cannot run (e.g. vite itself was uninstalled). */
@@ -185,8 +187,21 @@ async function loadConfigModule(file: string, root: string, stubFrameworks: bool
     return importBundled(file, { root, stubs: stubFrameworks ? STUBS : {} });
 }
 
+/**
+ * A config that imports plugins (anything beyond `vite` and the framework
+ * plugins lunx replaces): those plugins import `vite` for its helpers, so
+ * point it at lunx's stand-in first. No Vite code runs, and none needs to be installed.
+ */
+export async function redirectViteForPlugins(file: string): Promise<void> {
+    const source = await fsp.readFile(file, 'utf8').catch(() => '');
+    const imported = [...source.matchAll(/\b(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)].map((m) => m[1]!);
+    const isPlugin = (id: string) =>
+        !/^(\.|\/|node:)/.test(id) && !isBuiltin(id) && id !== 'vite' && id !== 'lunx-dev' && !Object.keys(STUBS).some((s) => id === s || id.startsWith(s + '/'));
+    if (imported.some(isPlugin)) (await import('../plugin-host/loader.js')).installRedirects(['vite']);
+}
+
 /** Vite allows nested arrays, falsy entries and promises in `plugins`. */
-async function resolvePlugins(list: unknown): Promise<any[]> {
+export async function resolvePlugins(list: unknown): Promise<any[]> {
     const out: any[] = [];
     for (const item of await Promise.all(Array.isArray(list) ? list : [list])) {
         if (Array.isArray(item)) out.push(...(await resolvePlugins(item)));

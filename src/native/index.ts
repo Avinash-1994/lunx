@@ -2,6 +2,7 @@ import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { lightningcss as loadLightningcss } from '../lib/lightningcss.js';
 
 /**
  * Inlined JS fallback graph analyzer.
@@ -168,7 +169,7 @@ function jsTransformJs(
 
 function jsTransformCss(code: string, filename: string, minify: boolean): string {
     try {
-        const lightningcss = _require('lightningcss');
+        const lightningcss = loadLightningcss();
         const res = lightningcss.transform({
             filename,
             code: Buffer.from(code),

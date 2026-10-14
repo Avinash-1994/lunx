@@ -2,7 +2,6 @@ import path from 'path';
 import { performance } from 'perf_hooks';
 import { createRequire } from 'module';
 import fs from 'fs';
-import { gzipSync } from 'zlib';
 
 const require = createRequire(import.meta.url);
 
@@ -25,8 +24,10 @@ async function printBuildSummary(outDir: string, elapsed: number) {
       try {
         const stat = fs.statSync(full);
         if (!stat.isFile()) return null;
-        const content = fs.readFileSync(full);
-        const gz = gzipSync(content).length;
+        // The build already wrote a .gz copy of most files: read its size instead of compressing again.
+        const gzFile = full + '.gz';
+        // zlib is loaded only for this fallback: ~8ms at startup otherwise.
+        const gz = fs.existsSync(gzFile) ? fs.statSync(gzFile).size : (require('node:zlib') as typeof import('node:zlib')).gzipSync(fs.readFileSync(full)).length;
         return { name: f, size: stat.size, gz };
       } catch { return null; }
     })
@@ -193,7 +194,7 @@ export default {
         if (args.name) libOption.name = args.name;
         libOption.outDir ??= (config as any).outDir || 'dist';
         await runLibraryBuild(root, libOption, config);
-        if (cached) buildCache.recordBuild(root, cached.pending, path.resolve(root, libOption.outDir), (config as any).build?.cache !== false);
+        if (cached) await buildCache.recordBuild(root, cached.pending, path.resolve(root, libOption.outDir), (config as any).build?.cache !== false);
         await telemetry.stop(true);
         if (args.watch) {
           const { watch } = await import('../../lib/watcher.js');
@@ -248,7 +249,7 @@ export default {
       const elapsed = Math.round(performance.now() - t0);
 
       const outDir = path.resolve(root, (config as any).outDir || 'dist');
-      if (cached) buildCache.recordBuild(root, cached.pending, outDir, (config as any).build?.cache !== false);
+      if (cached) await buildCache.recordBuild(root, cached.pending, outDir, (config as any).build?.cache !== false);
       const tSummary = performance.now();
       await printBuildSummary(outDir, elapsed);
       if (process.env.LUNX_TIMINGS) console.log(`  [lunx:timings] ${'size summary'.padEnd(32)} ${(performance.now() - tSummary).toFixed(1).padStart(7)} ms`);

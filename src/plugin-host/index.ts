@@ -22,11 +22,16 @@ export async function startHostDev(root: string, options: { port?: number; host?
     return server;
 }
 
-export async function runHostBuild(root: string, options: { mode?: string } = {}): Promise<void> {
+export async function runHostBuild(root: string, options: { mode?: string; ssr?: string } = {}): Promise<void> {
     installRedirects();
     if (process.cwd() !== root) process.chdir(root);
+    const { build, createBuilder } = await import('./build.js');
+    // `vite build --ssr <entry>`: that one server bundle.
+    if (options.ssr) {
+        await build({ root, mode: options.mode, build: { ssr: options.ssr } } as any);
+        return;
+    }
     // As the Vite CLI: a builder; without a `buildApp` it builds the one environment `vite build` would.
-    const { createBuilder } = await import('./build.js');
     await (await createBuilder({ root, mode: options.mode })).buildApp();
 }
 

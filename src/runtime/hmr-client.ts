@@ -32,6 +32,7 @@ interface ServerError {
 type HmrMessage =
     | { type: 'connected' }
     | { type: 'update'; modules: string[] }
+    | { type: 'custom'; event: string; data?: unknown }
     | { type: 'css-update'; href: string }
     | { type: 'full-reload' }
     | { type: 'reload' }
@@ -169,6 +170,10 @@ function onMessage(raw: string): void {
             break;
         case 'error-fixed':
             clearError();
+            break;
+        case 'custom':
+            // A plugin's server.hot.send(event, data): import.meta.hot.on(event) listeners.
+            emit(msg.event, msg.data);
             break;
     }
 }

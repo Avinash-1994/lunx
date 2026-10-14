@@ -9,6 +9,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { lightningcss } from '../lib/lightningcss.js';
 
 export interface CompiledCss {
     code: string;
@@ -92,7 +93,7 @@ export async function compileCss(opts: CompileCssOptions): Promise<CompiledCss> 
         dependencies.push(...result.dependencies);
     }
 
-    const { transform } = await import('lightningcss');
+    const { transform } = lightningcss();
     const result = transform({
         filename: opts.file,
         code: Buffer.from(input),

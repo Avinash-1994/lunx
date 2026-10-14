@@ -121,10 +121,13 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
     const normalPlugins = rawPlugins.filter((p) => p.enforce !== 'pre' && p.enforce !== 'post');
     const userPlugins = [...prePlugins, ...normalPlugins, ...postPlugins];
 
+    // What `this` is in config-time hooks: Vite gives them `this.meta`.
+    const hookContext = { meta: { viteVersion: '7.1.9', rollupVersion: '4.40.0', watchMode: command === 'serve' } };
+
     // `config` hooks may mutate the config or return a partial one to merge.
     for (const plugin of sortByHook(userPlugins, 'config')) {
         const handler = getHookHandler(plugin.config)!;
-        const result = await handler.call({ meta: { viteVersion: '7.1.9', rollupVersion: '4.40.0', watchMode: command === 'serve' } }, config, configEnv);
+        const result = await handler.call(hookContext, config, configEnv);
         if (result) config = mergeConfig(config, result);
     }
 
@@ -227,7 +230,7 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
     // Vite 6 `configEnvironment`: plugins add per-environment options (resolve.noExternal, conditions…).
     for (const name of Object.keys(userEnvironments)) {
         for (const plugin of sortByHook(userPlugins, 'configEnvironment')) {
-            const result = await getHookHandler(plugin.configEnvironment)!.call({}, name, userEnvironments[name], { ...configEnv, isSsrTargetWebworker: false });
+            const result = await getHookHandler(plugin.configEnvironment)!.call(hookContext, name, userEnvironments[name], { ...configEnv, isSsrTargetWebworker: false });
             if (result) userEnvironments[name] = mergeConfig(userEnvironments[name], result);
         }
     }
@@ -314,12 +317,16 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
         additionalAllowedHosts: [],
     };
 
+    // The config as the plugins left it, before defaults: what lunx's own app build maps from.
+    Object.defineProperty(resolved, 'userConfig', { value: config, enumerable: false });
+    Object.defineProperty(resolved, 'userPlugins', { value: userPlugins, enumerable: false });
+
     // The plugin chain, in Vite's order, with lunx's built-ins in place of Vite's.
     resolved.plugins = corePlugins(resolved, { pre: prePlugins, normal: normalPlugins, post: postPlugins });
     resolved.getSortedPlugins = (hook: string) => sortByHook(resolved.plugins, hook);
     resolved.getSortedPluginHooks = (hook: string) => sortByHook(resolved.plugins, hook).map((p) => getHookHandler(p[hook]));
 
-    await Promise.all(sortByHook(resolved.plugins, 'configResolved').map((p) => getHookHandler(p.configResolved)!.call({}, resolved)));
+    await Promise.all(sortByHook(resolved.plugins, 'configResolved').map((p) => getHookHandler(p.configResolved)!.call(hookContext, resolved)));
     return resolved as ResolvedConfig;
 }
 

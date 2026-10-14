@@ -1,7 +1,7 @@
 # ⚡ Lunx
 
 > **One tool for web apps: dev server, production bundler, test runner, type check, security — for any framework.**
-> Production builds run on [Rolldown](https://rolldown.rs) (Rust); dev runs on SWC + LightningCSS with an optional Rust engine (`@lunx/native-*`).
+> Builds on [Rolldown](https://rolldown.rs) and [Oxc](https://oxc.rs) (Rust) with LightningCSS for CSS; the dev server compiles on demand with the same compilers.
 > Verified on 17 stacks in a real browser (React, Preact, Vue, Svelte, Solid, Lit, Angular, Alpine, Mithril, jQuery, three.js, Tailwind, styled-components, React Router, Vue Router, Sass, vanilla TS) — `npm run test:browser-matrix`.
 > Runs existing Vite and Create React App projects unchanged — see [Migrating](#-migrating-to-lunx).
 
@@ -17,9 +17,9 @@
 - [Framework Setup Guides](#-framework-setup-guides)
   - [React SPA](#1-react-spa)
   - [Vue 3](#2-vue-3)
-  - [Svelte 5 / Svelte 4](#3-svelte)
+  - [Svelte](#3-svelte)
   - [SolidJS](#4-solidjs)
-  - [Angular (v2–v18+)](#5-angular)
+  - [Angular](#5-angular)
   - [SSR / meta-frameworks](#6-ssr--meta-frameworks)
   - [Desktop Apps (Electron & Tauri)](#7-desktop-apps-electron--tauri)
 - [Configuration & Auto-Detection](#-configuration--auto-detection)
@@ -27,7 +27,7 @@
 - [Library Mode](#-library-mode)
 - [Server, Edge and SSR Builds](#%EF%B8%8F-server-edge-and-ssr-builds)
 - [Built-in Security CLI Suite](#-built-in-security-cli-suite)
-- [Official Plugins](#-official-plugins)
+- [Plugins](#-plugins)
 - [Performance Benchmarks](#-performance-benchmarks)
 - [Migrating to Lunx](#-migrating-to-lunx)
   - [From Vite](#migrating-from-vite)
@@ -39,29 +39,22 @@
 
 ## 🚀 Quickstart Tutorial
 
-You can get a project running with Lunx in under **60 seconds**.
-
-### Step 1 — Scaffold a Project
-
-Use your preferred package manager:
+### Step 1 — Create a project
 
 ```bash
-# npm
-npm create lunx@latest my-app
-
-# pnpm
-pnpm create lunx my-app
-
-# bun
-bun create lunx my-app
-
-# yarn
-yarn create lunx my-app
+npx lunx-dev create my-app                      # pick a template
+npx lunx-dev create my-app --template react     # or name it
 ```
 
-Follow the interactive prompts to choose your framework (React, Vue, Svelte, Solid, Angular, Vanilla) and language (TypeScript / JavaScript).
+Templates (all built, served and opened in a browser by `npm run test:templates`):
 
-### Step 2 — Start the Dev Server
+| | Templates |
+|---|---|
+| Apps | `react` `vue` `svelte` `solid` `preact` `lit` `alpine` `angular` `qwik` `vanilla` — TypeScript, or JavaScript with `--no-ts`; most take `--tailwind` |
+| Frameworks | `next` `nuxt` `sveltekit` `astro` `react-router` `tanstack-start` `solidstart` `qwik-city` `vitepress` `waku` `analog` `remix` `docusaurus` `marko-run` |
+| Other | `library` (npm package with `lunx build --lib`), `edge` (fetch handler for edge runtimes), `electron` (desktop app: React renderer, main process and preload) |
+
+### Step 2 — Start the dev server
 
 ```bash
 cd my-app
@@ -69,137 +62,108 @@ npm install
 npm run dev
 ```
 
-You will see the dev server startup banner:
-```
-⚡ Lunx v1.0.0 — Dev Server
-  ➜  Local:   http://localhost:5173/
-  ➜  Network: http://192.168.1.10:5173/
+Edit any file in `src/`: the change is in the browser in tens of milliseconds, with component state kept for React, Vue, Svelte, Solid and Preact.
 
-  ✔ Ready in 18ms (HMR active)
-```
-
-Edit any file in `src/` — changes hot-reload via the native watcher and SWC transform when the Rust binary is loaded.
-
-### Step 3 — Production Build & Preview
+### Step 3 — Build and preview
 
 ```bash
-# Build for production
-npx lunx build
-
-# Preview the dist/ output locally
-npx lunx preview
+npm run build      # dist/: minified, tree-shaken, .gz/.br copies, SBOM, SRI
+npm run preview    # serve dist/ locally
 ```
 
-Your production bundle will be created in `./dist/`, minified, tree-shaken, and validated by Lunx's automated security scanner.
+### Adding lunx to an existing project
+
+```bash
+npm install -D lunx-dev
+npx lunx dev
+```
+
+No config file is needed: lunx detects the framework from `package.json` and the entry from `index.html` (or `src/main.*`). An existing `vite.config.*` is read as it is — see [Migrating](#-migrating-to-lunx).
 
 ---
 
 ## 🛠 Framework Setup Guides
 
-Lunx supports **16+ framework adapters** out of the box. No complex plugin assembly required.
+Each framework works with a `package.json` dependency and an `index.html`; `lunx create --template <name>` writes the files below.
 
 ### 1. React SPA
 
-**Installation:**
 ```bash
 npm install react react-dom
-npm install -D lunx typescript @types/react @types/react-dom
+npm install -D lunx-dev typescript @types/react @types/react-dom
 ```
 
-**Project Structure:**
 ```
-├── index.html
+├── index.html          <script type="module" src="/src/main.tsx"></script>
 ├── src/
 │   ├── main.tsx
 │   └── App.tsx
-└── lunx.config.ts  (Optional - zero config auto-detects React)
+└── lunx.config.ts      optional
 ```
 
-**`index.html`:**
-```html
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Lunx React App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-```
+React Fast Refresh is built in; `@vitejs/plugin-react` is not needed.
 
 ---
 
 ### 2. Vue 3
 
-**Installation:**
 ```bash
 npm install vue
-npm install -D lunx @vue/compiler-sfc
+npm install -D lunx-dev
 ```
 
-**`src/App.vue`:**
 ```vue
+<!-- src/App.vue -->
 <script setup>
 import { ref } from 'vue';
 const count = ref(0);
 </script>
 
 <template>
-  <button @click="count++">Count is: {{ count }}</button>
+  <button @click="count++">count is {{ count }}</button>
 </template>
 ```
 
-Lunx handles Single File Components (`.vue`), `<script setup>`, and scoped CSS automatically.
+Single File Components, `<script setup>` (TypeScript too), scoped CSS and CSS modules work without plugins.
 
 ---
 
 ### 3. Svelte
 
-**Installation:**
 ```bash
-npm install svelte
-npm install -D lunx svelte-preprocess
+npm install -D lunx-dev svelte
 ```
 
-Lunx automatically compiles `.svelte` components with state preservation during hot module replacement.
+Svelte 5 components (runes, `<script lang="ts">`) compile with Svelte's own compiler; state is kept on hot updates.
 
 ---
 
 ### 4. SolidJS
 
-**Installation:**
 ```bash
 npm install solid-js
-npm install -D lunx babel-preset-solid
+npm install -D lunx-dev babel-preset-solid @babel/core
 ```
 
-**`lunx.config.ts`:**
-```typescript
-import { defineConfig } from 'lunx';
+Solid's JSX compiles with its Babel preset (`babel-preset-solid`) to fine-grained updates. Lunx detects Solid from `package.json`; to be explicit:
 
-export default defineConfig({
-  framework: 'solid'
-});
+```typescript
+// lunx.config.ts
+import { defineConfig } from 'lunx-dev';
+
+export default defineConfig({ framework: 'solid' });
 ```
 
 ---
 
 ### 5. Angular
 
-Lunx features an AOT-compatible Angular compiler adapter supporting Angular v2 through v18+.
-
-**`lunx.config.ts`:**
-```typescript
-import { defineConfig } from 'lunx';
-
-export default defineConfig({
-  framework: 'angular',
-  entry: 'src/main.ts'
-});
+```bash
+npm install @angular/core @angular/common @angular/compiler @angular/platform-browser rxjs tslib
+npm install -D lunx-dev typescript
 ```
+
+Standalone components with `templateUrl` / `styleUrl` and signals; `lunx create --template angular` writes a zoneless starter. Angular projects built with the Angular CLI keep using it, or use [Analog](https://analogjs.org) (`--template analog`), which lunx builds.
 
 ---
 
@@ -219,30 +183,15 @@ Set `LUNX_PLUGIN_HOST=0` to use a framework's own CLI instead. `npm run test:met
 ### 7. Desktop Apps (Electron & Tauri)
 
 #### Electron
-Dual-bundle compilation for Electron Main, Preload, and Renderer processes:
-```typescript
-// lunx.config.ts
-import { defineConfig } from 'lunx';
+`npx lunx-dev create my-app --template electron` sets up a React renderer, `electron/main.ts` and `electron/preload.ts`, built by [`vite-plugin-electron`](https://github.com/electron-vite/vite-plugin-electron) on lunx:
 
-export default defineConfig({
-  framework: 'electron',
-  mainEntry: 'src/main/index.ts',
-  rendererEntry: 'src/renderer/index.tsx',
-  preloadEntry: 'src/preload/index.ts'
-});
-```
+- `lunx dev` serves the renderer with HMR, builds the main process and the preload into `dist-electron/` (rebuilt on change), and starts Electron on the dev server (`VITE_DEV_SERVER_URL`).
+- `lunx build` writes the renderer to `dist/` with relative URLs (it loads from disk) and the main process and the preload to `dist-electron/`. `package.json` `main` points at `dist-electron/main.js`, ready for electron-builder or Electron Forge.
+
+An existing Vite + `vite-plugin-electron` project runs on lunx unchanged. `npm run test:templates` builds both starters, runs them in Electron and checks the window, the preload and `lunx dev`.
 
 #### Tauri
-WebView-frontend compilation integrated with Rust Tauri apps:
-```typescript
-// lunx.config.ts
-import { defineConfig } from 'lunx';
-
-export default defineConfig({
-  framework: 'tauri',
-  tauriSrc: 'src-tauri/'
-});
-```
+With `@tauri-apps/api` in `package.json`, lunx builds the web frontend for Tauri's WebView (set `devUrl` / `frontendDist` in `tauri.conf.json` to lunx's dev server and `dist/`); the Rust side in `src-tauri/` builds with the Tauri CLI.
 
 ---
 
@@ -261,7 +210,7 @@ Lunx automatically:
 For custom builds, create a `lunx.config.ts` file and wrap it with `defineConfig` for full TypeScript auto-completion:
 
 ```typescript
-import { defineConfig } from 'lunx';
+import { defineConfig } from 'lunx-dev';
 
 export default defineConfig({
   // Framework auto-detect overrides
@@ -306,7 +255,7 @@ Lunx features native support for **Module Federation** (Webpack 5 syntax), enabl
 ### Host Application (`lunx.config.ts`)
 
 ```typescript
-import { defineConfig } from 'lunx';
+import { defineConfig } from 'lunx-dev';
 
 export default defineConfig({
   framework: 'react',
@@ -327,7 +276,7 @@ export default defineConfig({
 ### Remote Application (`lunx.config.ts`)
 
 ```typescript
-import { defineConfig } from 'lunx';
+import { defineConfig } from 'lunx-dev';
 
 export default defineConfig({
   framework: 'react',
@@ -450,53 +399,60 @@ lunx security report
 
 ---
 
-## 🔌 Official Plugins
+## 🔌 Plugins
 
-| Package | Purpose |
-|---|---|
-| `@lunx/plugin-env` | Injects `LUNX_` environment variables and generates `.d.ts` definitions |
-| `@lunx/plugin-pwa` | Progressive Web App manifest generator & service worker compilation |
-| `@lunx/plugin-icons` | On-demand icon loading (Material Design, FontAwesome, Tabler, etc.) |
-| `@lunx/plugin-svg` | Import SVG files as URLs, raw strings, or React/Vue components |
-| `@lunx/plugin-legacy` | Legacy browser polyfills via SWC downlevel compilation |
-| `@lunx/plugin-compression` | Rust Brotli (69.5% reduction) + Gzip compression |
-| `@lunx/plugin-auto-import` | Auto-inject component/utility imports with TypeScript declarations |
-| `@lunx/plugin-inspect` | Visualise build dependency graph at `http://localhost:5173/__lunx_inspect__` |
-| `@lunx/plugin-checker` | Async TypeScript typechecking & ESLint in worker threads |
-| `@lunx/plugin-mock` | Built-in REST & GraphQL mock server |
-| `@lunx/plugin-image` | Automatic AVIF / WebP conversion & responsive `srcset` generation |
+Vite and Rollup plugins go in `plugins` (in `lunx.config.ts`, or an existing `vite.config.*`) and run with Vite's lifecycle in dev and in the build: `apply`, `enforce`, `config`, `configResolved`, `resolveId` / `load` / `transform` (virtual modules included), `transformIndexHtml`, `configureServer`, `renderChunk`, `generateBundle`, `writeBundle` and `closeBundle` (once the whole app is on disk). Plugins that import `vite` get lunx's stand-in, so Vite does not need to be installed. Framework projects (SvelteKit, Nuxt, Astro, React Router…) run on lunx's Vite-compatible plugin host. esbuild plugins in `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
+
+`npm run test:vite-plugins` builds, previews and runs on the dev server, in Chromium, a React app with each of: `vite-plugin-pwa`, `@tailwindcss/vite`, `unocss`, `vite-plugin-svgr`, `vite-tsconfig-paths`, `unplugin-auto-import`, `unplugin-icons`, `vite-plugin-html`, `vite-plugin-static-copy`, `rollup-plugin-visualizer`, `@mdx-js/rollup`, `vite-plugin-glsl`, `vite-imagetools`, `vite-plugin-wasm`, `vite-plugin-node-polyfills`, `vite-plugin-checker` and `vite-plugin-inspect` ([report](reports/VITE_PLUGINS_MATRIX.json)). Not supported: `@vitejs/plugin-legacy`, whose legacy chunks need a SystemJS build that Rolldown does not write.
+
+```typescript
+import { defineConfig } from 'lunx-dev';
+
+export default defineConfig({
+  plugins: [
+    {
+      name: 'banner',
+      transform(code, id) {
+        if (id.endsWith('/src/main.ts')) return `console.log('built ${new Date().toISOString()}');\n${code}`;
+      },
+    },
+  ],
+});
+```
+
+Framework plugins (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`, `@preact/preset-vite`) are not needed: their compilers are built in. Plugins that ask for permissions (`fs:write`, `env:read`, network) run in lunx's permission sandbox (`lunx security plugins`).
 
 ---
 
 ## 📊 Performance Benchmarks
 
-Every tool installed from npm, same React + TypeScript app, median of 3 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
+Every tool installed from npm, same React + TypeScript app, median of 7 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr --runs 7 [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
 
 **Small app**
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | **338 ms** | **341 ms** | 53 ms | 416 ms | 425 ms | 221 KB |
-| Vite 8 | 416 ms | 530 ms | 46 ms | 444 ms | 459 ms | 220 KB |
-| Rspack | 376 ms | 408 ms | 217 ms | 323 ms | 327 ms | 219 KB |
-| Parcel | 1406 ms | 1419 ms | 30 ms | 1673 ms | 1515 ms | 222 KB |
-| webpack | 1451 ms | 1557 ms | 264 ms | 3992 ms | 3972 ms | 225 KB |
-| esbuild (bundler only) | – | – | – | 57 ms | 57 ms | 223 KB |
-| Bun (bundler only) | – | – | – | 37 ms | 43 ms | 212 KB |
+| **lunx** | 229 ms | 234 ms | 39 ms | 341 ms | 322 ms | 221 KB |
+| Vite 8 | 437 ms | 511 ms | 42 ms | 548 ms | 461 ms | 220 KB |
+| Rspack | 378 ms | 409 ms | 188 ms | 323 ms | 368 ms | 219 KB |
+| Parcel | 1317 ms | 1326 ms | 34 ms | 1640 ms | 1569 ms | 222 KB |
+| webpack | 1599 ms | 1749 ms | 265 ms | 4009 ms | 3891 ms | 225 KB |
+| esbuild (bundler only) | – | – | – | 63 ms | 56 ms | 223 KB |
+| Bun (bundler only) | – | – | – | 38 ms | 39 ms | 212 KB |
 
 **Large app: 2,000 components** (`--scale 2000`)
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | **315 ms** | **320 ms** | **183 ms** | 947 ms | **692 ms** | 470 KB |
-| Vite 8 | 367 ms | 653 ms | 183 ms | 742 ms | 720 ms | 470 KB |
-| Rspack | 612 ms | 739 ms | 627 ms | 739 ms | 794 ms | 493 KB |
-| Parcel | 5194 ms | 5227 ms | 198 ms | 5524 ms | 5606 ms | 455 KB |
-| webpack | 4077 ms | 4333 ms | 1007 ms | 8260 ms | 8864 ms | 516 KB |
-| esbuild (bundler only) | – | – | – | 163 ms | 150 ms | 493 KB |
-| Bun (bundler only) | – | – | – | 96 ms | 96 ms | 430 KB |
+| **lunx** | 250 ms | 255 ms | 161 ms | 626 ms | 545 ms | 470 KB |
+| Vite 8 | 400 ms | 706 ms | 178 ms | 918 ms | 718 ms | 470 KB |
+| Rspack | 693 ms | 829 ms | 677 ms | 823 ms | 842 ms | 493 KB |
+| Parcel | 4855 ms | 4895 ms | 189 ms | 5358 ms | 5143 ms | 455 KB |
+| webpack | 4374 ms | 4608 ms | 1165 ms | 9115 ms | 8860 ms | 516 KB |
+| esbuild (bundler only) | – | – | – | 141 ms | 148 ms | 493 KB |
+| Bun (bundler only) | – | – | – | 92 ms | 97 ms | 430 KB |
 
-Where lunx is behind: cold builds (the first build after a cache clear) trail Vite and Rspack, and esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data, which the others do not.
+Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support; on the small app Rspack's cold build (323 vs 341 ms) and Parcel's HMR (34 vs 39 ms) are within run-to-run noise (±30% on shared cores) of lunx's. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
 
 ---
 
@@ -504,9 +460,10 @@ Where lunx is behind: cold builds (the first build after a cache clear) trail Vi
 
 ### From Vite — zero changes
 
-Run lunx in the project as it is:
+Install lunx and run it in the project as it is:
 
 ```bash
+npm install -D lunx-dev
 npx lunx dev      # reads vite.config.* when there is no lunx.config
 npx lunx build
 ```
@@ -554,7 +511,7 @@ keep working.
 | `lunx build --lib [entry]` | Build a library: ES/CJS (`--formats es,cjs,umd,iife`, `--name`), `.d.ts`, `--watch` |
 | `lunx build --force` | Rebuild even when nothing changed (builds are cached in `.lunx/`) |
 | `lunx preview` | Serve production build locally for verification |
-| `lunx create` | Interactive project scaffolding |
+| `lunx create [name]` | Scaffold a project: interactive, or `--template <name>` with `--no-ts` / `--tailwind` |
 | `lunx migrate` | Auto-migrate project configuration |
 | `lunx check` | Run TypeScript typecheck & circular dependency detection |
 | `lunx doctor` | Run environment and project health diagnostics |

@@ -49,9 +49,11 @@ function compile(file: string, code: string, opts: CompileOptions = {}): Compile
                   }
                 : undefined,
         decorator: opts.legacyDecorators ? { legacy: true, emitDecoratorMetadata: !!opts.decoratorMetadata } : undefined,
-        typescript: { onlyRemoveTypeImports: false },
+        typescript: { onlyRemoveTypeImports: false, removeClassFieldsWithoutInitializer: opts.classFields === 'assign' },
         define: opts.define && Object.keys(opts.define).length ? opts.define : undefined,
-        target: opts.target ?? 'esnext',
+        // Assigned fields come from Oxc's class-fields transform, which runs below ES2022.
+        target: opts.target ?? (opts.classFields === 'assign' ? 'es2021' : 'esnext'),
+        assumptions: opts.classFields === 'assign' ? { setPublicClassFields: true } : undefined,
         // Helpers are referenced as babelHelpers.x and defined inline below,
         // so output never imports a runtime package the project may not have.
         helpers: { mode: 'External' },
@@ -84,8 +86,21 @@ function parse(file: string, code: string, lang?: Lang, sourceType: 'module' | '
     return result.program;
 }
 
-/** TypeScript's own decorator helpers (tslib), inlined when used. */
+/**
+ * Helpers compiled code calls as babelHelpers.x, inlined when used:
+ * TypeScript's decorator helpers (tslib) and Babel's private-member ones
+ * (classes compiled below ES2022 keep #private members in WeakMaps).
+ */
 const HELPERS: Record<string, string> = {
+    assertClassBrand: `function (e, t, n) { if (typeof e === "function" ? e === t : e.has(t)) return arguments.length < 3 ? t : n; throw new TypeError("Private element is not present on this object"); }`,
+    checkPrivateRedeclaration: `function (e, t) { if (t.has(e)) throw new TypeError("Cannot initialize the same private elements twice on an object"); }`,
+    classPrivateFieldInitSpec: `function (e, t, a) { babelHelpers.checkPrivateRedeclaration(e, t); t.set(e, a); }`,
+    classPrivateMethodInitSpec: `function (e, a) { babelHelpers.checkPrivateRedeclaration(e, a); a.add(e); }`,
+    classPrivateFieldGet2: `function (s, a) { return s.get(babelHelpers.assertClassBrand(s, a)); }`,
+    classPrivateFieldSet2: `function (s, a, r) { return s.set(babelHelpers.assertClassBrand(s, a), r), r; }`,
+    classPrivateGetter: `function (s, r, a) { return a(babelHelpers.assertClassBrand(s, r)); }`,
+    classPrivateSetter: `function (s, r, a, t) { return r(babelHelpers.assertClassBrand(s, a), t), t; }`,
+    checkInRHS: `function (e) { if (Object(e) !== e) throw TypeError("right-hand side of 'in' should be an object, got " + (e !== null ? typeof e : "null")); return e; }`,
     decorate: `function (decorators, target, key, desc) { var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d; if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc); else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r; return c > 3 && r && Object.defineProperty(target, key, r), r; }`,
     decorateMetadata: `function (k, v) { if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v); }`,
     decorateParam: `function (paramIndex, decorator) { return function (target, key) { decorator(target, key, paramIndex); }; }`,
@@ -93,10 +108,14 @@ const HELPERS: Record<string, string> = {
 
 function withHelpers(code: string): string {
     if (!code.includes('babelHelpers.')) return code;
-    const used = [...new Set([...code.matchAll(/babelHelpers\.(\w+)/g)].map((m) => m[1]!))];
-    const missing = used.filter((h) => !HELPERS[h]);
+    // Compiled before (a framework transform, then the final pass): its helpers are already there.
+    if (/^const babelHelpers = \{/m.test(code)) return code;
+    const used = new Set([...code.matchAll(/babelHelpers\.(\w+)/g)].map((m) => m[1]!));
+    // Helpers that call other helpers.
+    for (const h of [...used]) for (const dep of HELPERS[h]?.matchAll(/babelHelpers\.(\w+)/g) ?? []) used.add(dep[1]!);
+    const missing = [...used].filter((h) => !HELPERS[h]);
     if (missing.length) throw new Error(`unsupported compiler helper(s): ${missing.join(', ')}`);
-    return `const babelHelpers = { ${used.map((h) => `${h}: ${HELPERS[h]}`).join(', ')} };\n${code}`;
+    return `const babelHelpers = { ${[...used].map((h) => `${h}: ${HELPERS[h]}`).join(', ')} };\n${code}`;
 }
 
 function lineOf(code: string, offset: number): number {

@@ -405,8 +405,8 @@ export async function runCVEScan(
   console.log(`  Scanning ${packages.length} packages against OSV.dev...`);
 
   try {
-    const cacheDir = path.join(PROJECT_ROOT, '.lunx', 'security');
-    const { scanCVE } = await import('@lunx/security');
+    const { scanCVE, advisoryCacheDir } = await import('@lunx/security');
+    const cacheDir = advisoryCacheDir(PROJECT_ROOT);
     const result = await scanCVE(packages, { cacheDir, distDir: DIST_DIR });
     if (args.json) {
       console.log(JSON.stringify(result, null, 2));

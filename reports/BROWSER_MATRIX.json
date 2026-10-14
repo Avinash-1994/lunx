@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-06T11:56:11.260Z",
+  "generatedAt": "2026-10-08T04:36:26.589Z",
   "results": [
     {
       "framework": "vanilla-ts",
@@ -10,9 +10,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 226,
-      "paintMs": 141,
-      "buildMs": 249,
+      "bootMs": 941,
+      "paintMs": 635,
+      "buildMs": 758,
       "notes": []
     },
     {
@@ -24,9 +24,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 245,
-      "paintMs": 901,
-      "buildMs": 346,
+      "bootMs": 438,
+      "paintMs": 1287,
+      "buildMs": 715,
       "notes": []
     },
     {
@@ -38,9 +38,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 235,
-      "paintMs": 372,
-      "buildMs": 292,
+      "bootMs": 488,
+      "paintMs": 757,
+      "buildMs": 879,
       "notes": []
     },
     {
@@ -52,9 +52,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 232,
-      "paintMs": 409,
-      "buildMs": 526,
+      "bootMs": 523,
+      "paintMs": 1298,
+      "buildMs": 965,
       "notes": []
     },
     {
@@ -66,9 +66,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 212,
-      "paintMs": 641,
-      "buildMs": 470,
+      "bootMs": 483,
+      "paintMs": 1126,
+      "buildMs": 993,
       "notes": []
     },
     {
@@ -80,9 +80,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 217,
-      "paintMs": 439,
-      "buildMs": 603,
+      "bootMs": 524,
+      "paintMs": 1866,
+      "buildMs": 1196,
       "notes": []
     },
     {
@@ -94,9 +94,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 194,
-      "paintMs": 753,
-      "buildMs": 328,
+      "bootMs": 542,
+      "paintMs": 1787,
+      "buildMs": 789,
       "notes": []
     },
     {
@@ -108,9 +108,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 195,
-      "paintMs": 221,
-      "buildMs": 287,
+      "bootMs": 477,
+      "paintMs": 1225,
+      "buildMs": 1905,
       "notes": []
     },
     {
@@ -122,9 +122,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 237,
-      "paintMs": 422,
-      "buildMs": 329,
+      "bootMs": 453,
+      "paintMs": 812,
+      "buildMs": 692,
       "notes": []
     },
     {
@@ -136,9 +136,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 276,
-      "paintMs": 539,
-      "buildMs": 458,
+      "bootMs": 456,
+      "paintMs": 1029,
+      "buildMs": 695,
       "notes": []
     },
     {
@@ -150,9 +150,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 233,
-      "paintMs": 642,
-      "buildMs": 481,
+      "bootMs": 482,
+      "paintMs": 2293,
+      "buildMs": 852,
       "notes": []
     },
     {
@@ -164,9 +164,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 197,
-      "paintMs": 1070,
-      "buildMs": 977,
+      "bootMs": 454,
+      "paintMs": 4227,
+      "buildMs": 1070,
       "notes": []
     },
     {
@@ -178,9 +178,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 204,
-      "paintMs": 872,
-      "buildMs": 542,
+      "bootMs": 547,
+      "paintMs": 1385,
+      "buildMs": 853,
       "notes": []
     },
     {
@@ -192,9 +192,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 212,
-      "paintMs": 718,
-      "buildMs": 730,
+      "bootMs": 467,
+      "paintMs": 1332,
+      "buildMs": 908,
       "notes": []
     },
     {
@@ -206,9 +206,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 204,
-      "paintMs": 599,
-      "buildMs": 561,
+      "bootMs": 563,
+      "paintMs": 1612,
+      "buildMs": 1541,
       "notes": []
     },
     {
@@ -220,9 +220,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 211,
-      "paintMs": 422,
-      "buildMs": 599,
+      "bootMs": 511,
+      "paintMs": 874,
+      "buildMs": 1107,
       "notes": []
     },
     {
@@ -234,9 +234,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 254,
-      "paintMs": 1678,
-      "buildMs": 1362,
+      "bootMs": 452,
+      "paintMs": 4235,
+      "buildMs": 2268,
       "notes": []
     },
     {
@@ -248,9 +248,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 287,
-      "paintMs": 1866,
-      "buildMs": 1220,
+      "bootMs": 543,
+      "paintMs": 2457,
+      "buildMs": 2174,
       "notes": []
     },
     {
@@ -262,9 +262,9 @@
       "hmr": "pass",
       "build": "pass",
       "preview": "pass",
-      "bootMs": 321,
-      "paintMs": 513,
-      "buildMs": 672,
+      "bootMs": 467,
+      "paintMs": 1150,
+      "buildMs": 962,
       "notes": []
     }
   ]
