@@ -456,7 +456,8 @@ const angular: Starter = {
         rxjs: '^7.8.2',
         tslib: '^2.8.1',
     }),
-    devDependencies: () => ({ typescript: '~5.9.3' }),
+    // Ahead-of-time compilation in `lunx build`, as `ng build` does.
+    devDependencies: () => ({ '@angular/compiler-cli': ANGULAR, typescript: '~5.9.3' }),
     files: (o) => ({
         'index.html': html(o, 'src/main.ts', '<app-root></app-root>'),
         'src/main.ts': lines(

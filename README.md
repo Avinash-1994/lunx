@@ -160,10 +160,10 @@ export default defineConfig({ framework: 'solid' });
 
 ```bash
 npm install @angular/core @angular/common @angular/compiler @angular/platform-browser rxjs tslib
-npm install -D lunx-dev typescript
+npm install -D lunx-dev typescript @angular/compiler-cli
 ```
 
-Standalone components with `templateUrl` / `styleUrl` and signals; `lunx create --template angular` writes a zoneless starter. Angular projects built with the Angular CLI keep using it, or use [Analog](https://analogjs.org) (`--template analog`), which lunx builds.
+Standalone components with `templateUrl` / `styleUrl` and signals; `lunx create --template angular` writes a zoneless starter. With `@angular/compiler-cli` installed, `lunx build` compiles ahead of time as `ng build` does (the project's Angular compiler, Angular's linker for libraries, Angular's build optimizations), so the runtime template compiler is not shipped: the starter's bundle is 31.7 kB gzip against 31.9 kB from `ng build` (281 kB compiled at runtime), built in 3.8 s cold against 4.9 s. `lunx dev` compiles at runtime (JIT). Angular projects built with the Angular CLI keep using it, or use [Analog](https://analogjs.org) (`--template analog`), which lunx builds.
 
 ---
 
@@ -479,6 +479,8 @@ Every tool installed from npm, same React + TypeScript app, median of 7 runs, al
 |---|---|---|---|---|---|---|---|---|
 | **lunx** | 0.6 KB | 66.7 KB | 5.8 KB | 24.8 KB | 10.1 KB | 4.3 KB | 6.2 KB | 67.6 KB |
 | Vite 8 | 1.5 KB | 67.2 KB | 6.7 KB | 24.9 KB | 10.9 KB | 5.3 KB | 7.0 KB | 68.1 KB |
+
+**Meta-frameworks against their own CLI** (the client build, JS gzip; `npm run test:meta-parity`, `reports/META_PARITY.json`): SvelteKit 27.7 vs 30.2 KB, Nuxt 53.8 vs 53.5, React Router 93.9 vs 96.7, Remix 80.9 vs 83.4, VitePress 52.7 vs 55.6, SolidStart 16.8 vs 17.6, Waku 84.1 vs 83.5, TanStack Start 96.8 vs 101.0, Qwik City 35.5 vs 36.0, Analog 67.3 vs 70.4 (Astro and Marko Run pages ship no JS with either). Next.js and Docusaurus run their own CLI under lunx.
 
 CSS is within a few bytes of Vite's in every app, and CSS that only lazy chunks import loads with them (`build.cssCodeSplit: false` for one file). Vite's extra kilobyte in the small apps is its modulepreload polyfill, which lunx leaves out (every browser that runs ES modules supports modulepreload).
 

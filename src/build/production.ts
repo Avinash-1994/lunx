@@ -28,6 +28,7 @@ import { wasmInitModule } from './wasm-init.js';
 import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from './svg-component.js';
 import { pwaFiles, pwaHeadTags, pwaOptions, writeServiceWorker } from './pwa.js';
 import type { AppPlugins } from '../plugin-host/app-plugins.js';
+import { log } from '../utils/logger.js';
 
 // zlib (~8ms to load) is first needed after the bundle; the engine-busy hook loads it while Rolldown works.
 let zlibModule: Promise<typeof import('node:zlib')> | null = null;
@@ -271,6 +272,21 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return pool;
     }
 
+    // Angular: compiled ahead of time with the project's @angular/compiler-cli, as `ng build` does.
+    const ngAot = framework === 'angular' && config.mode === 'production' ? await prepareAngular() : null;
+    async function prepareAngular() {
+        const { prepareAngularAot } = await import('./angular/aot.js');
+        const aot = await prepareAngularAot({
+            root,
+            entries: Object.values(input),
+            sourcemap: !!build.sourcemap,
+            cache: compileCache !== null,
+            compileStyle: async (file, source) => (await compileCss({ root, file, source, modules: false, minify, resolveUrl: (_from, url) => url })).code,
+        });
+        if (!aot) log.warn('Angular: @angular/compiler-cli is not installed, so the app is compiled at runtime (JIT) and ships @angular/compiler. Install it for an ahead-of-time build.');
+        return aot;
+    }
+
     /** Vue / Svelte components' CSS, by the module id each component imports it under. */
     const componentCss = new Map<string, string>();
 
@@ -327,6 +343,10 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 const isFrameworkJsx = compileJsx && !file.includes('node_modules') && (/\.[jt]sx$/.test(file) || (/\.m?js$/.test(file) && looksLikeJsx(code)));
                 const isAngular = framework === 'angular' && /\.ts$/.test(file) && !file.includes('node_modules');
                 if (!isSfc && !isFrameworkJsx && !isAngular) return null;
+                if (isAngular && ngAot) {
+                    const aot = ngAot.output(file);
+                    if (aot) return { code: aot.code, map: aot.map, moduleType: 'js' };
+                }
                 const fw = frameworkOf(file);
                 const cacheable = compileCache && !isAngular && selfContained(code);
                 const parts = [file, fw, code];
@@ -355,6 +375,19 @@ export async function productionBuild(config: BuildConfig, framework: string, op
               },
             },
         },
+        ...(ngAot
+            ? [{
+                  // Angular's linker and build optimizations on the packages.
+                  name: 'lunx:angular',
+                  transform: {
+                      filter: { id: /[\\/]node_modules[\\/].*\.[mc]?js(\?.*)?$/ },
+                      async handler(code: string, id: string) {
+                          const out = await ngAot.optimize(cleanId(id), code);
+                          return out === null ? null : { code: out, map: null };
+                      },
+                  },
+              }]
+            : []),
         {
             name: 'lunx:glob-import',
             transform: {
@@ -650,6 +683,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     delete envDefines['import.meta.env'];
     const define: Record<string, string> = {
         ...envDefines,
+        ...(ngAot?.defines ?? {}),
         'process.env.NODE_ENV': JSON.stringify(config.mode === 'production' ? 'production' : config.mode),
         'import.meta.env': JSON.stringify(metaEnv),
         ...Object.fromEntries(Object.entries(metaEnv).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)])),
@@ -693,7 +727,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                   test: new RegExp(`[\\\\/]node_modules[\\\\/](${pkgs.map(escapeRe).join('|')})[\\\\/]`),
               }))
             : undefined,
-    }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush()]));
+    }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush(), ngAot?.flush()]));
 
     // ── CSS ──────────────────────────────────────────────────────────────────
     // Emitted in the bundle (lunx:css-emit); a page with only stylesheets has no bundle.

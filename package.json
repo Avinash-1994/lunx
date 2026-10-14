@@ -88,6 +88,7 @@
     "test:templates": "node scripts/template-matrix.mjs",
     "test:vite-plugins": "node scripts/vite-plugins-matrix.mjs",
     "test:parity": "node scripts/output-parity.mjs",
+    "test:meta-parity": "node scripts/meta-parity.mjs",
     "test:mf-interop": "node scripts/federation-interop.mjs",
     "test:federation-e2e": "node scripts/federation-e2e.mjs"
   },
