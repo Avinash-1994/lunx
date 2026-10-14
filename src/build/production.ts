@@ -210,7 +210,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         cssPost.transform = {
             async handler(this: any, code: string, id: string) {
                 const file = cleanId(id);
-                css.add(file, (await css.process(this, file, code, false)).code);
+                css.add(file, (await css.process(this, file, code, false)).code, id);
                 return { code: '', map: null };
             },
         };
@@ -232,7 +232,18 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const selfContained = (code: string): boolean => !/<(?:template|script|style)\b[^>]*\bsrc=/.test(code);
     // Many components to compile: start worker threads on them now, before Rolldown asks.
     // Angular stays on the main thread (its compiler reads other files itself).
-    const compilePool = framework === 'angular' ? null : await startCompilePool();
+    const compilePool = framework === 'angular' || !compilesInJs() ? null : await startCompilePool();
+    /** Whether any source can need the JS compilers (React, Lit… compile in Rolldown): else no file scan. */
+    function compilesInJs(): boolean {
+        if (compileJsx || framework === 'vue' || framework === 'svelte') return true;
+        try {
+            const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+            const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+            return 'vue' in deps || 'svelte' in deps;
+        } catch {
+            return true;
+        }
+    }
     async function startCompilePool(): Promise<CompilePool | null> {
         const files = CompilePool.candidates(fs.realpathSync(root), compileJsx ? /\.(vue|svelte|[jt]sx)$/ : /\.(vue|svelte)$/, config.outDir);
         if (!files || files.length < MIN_POOL_FILES) return null;
@@ -257,7 +268,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         const result = await css.process(ctx, file, raw, isCssModule(file));
         if (vp) result.code = await vp.transformCss(app!, 'post', ctx, result.code, id);
         if (/[?&]inline\b/.test(query)) return { code: `export default ${JSON.stringify(result.code)};`, moduleType: 'js' };
-        css.add(file, result.code);
+        css.add(file, result.code, id);
         const exports = result.exports ? `export default ${JSON.stringify(result.exports)};` : 'export {};';
         return { code: exports, moduleType: 'js', moduleSideEffects: true };
     };
@@ -459,16 +470,30 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 // Extracted CSS modules are empty JS, so they vanish from
                 // chunk.moduleIds; walk the import graph instead. Depth-first
                 // in import order is exactly the cascade order of the source.
-                const order: string[] = [];
+                // Only through the modules that lead to a stylesheet: in a big
+                // app most import none, and each getModuleInfo is a call into Rust.
+                const leadsToCss = new Set<string>();
+                const climb = [...css.ids];
+                while (climb.length) {
+                    const info = this.getModuleInfo(climb.pop()!);
+                    for (const importer of [...(info?.importers ?? []), ...(info?.dynamicImporters ?? [])]) {
+                        if (!leadsToCss.has(importer)) {
+                            leadsToCss.add(importer);
+                            climb.push(importer);
+                        }
+                    }
+                }
+                const order = new Set<string>();
                 const visited = new Set<string>();
                 const visit = (id: string) => {
                     if (visited.has(id)) return;
                     visited.add(id);
                     const file = cleanId(id);
                     if (css.has(file)) {
-                        if (!order.includes(file)) order.push(file);
+                        order.add(file);
                         return;
                     }
+                    if (!leadsToCss.has(id)) return;
                     const info = this.getModuleInfo(id);
                     for (const dep of info?.importedIds ?? []) visit(dep);
                     for (const dep of info?.dynamicallyImportedIds ?? []) visit(dep);
@@ -476,7 +501,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 const chunks = Object.values(bundle).filter((c) => c.type === 'chunk');
                 chunks.sort((x, y) => Number(y.isEntry) - Number(x.isEntry));
                 for (const chunk of chunks) if (chunk.facadeModuleId) visit(chunk.facadeModuleId);
-                css.order = order;
+                css.order = [...order];
                 // Emitted here, so the plugins' generateBundle sees (and may rewrite) it, as Vite's CSS.
                 const all = await collectCss(this);
                 if (all.trim()) {
@@ -726,13 +751,18 @@ async function resolveVitePlugins(config: BuildConfig, root: string, outDir: str
 class CssCollector {
     private sheets = new Map<string, string>();
     order: string[] = [];
+    /** The module ids the stylesheets were collected under. */
+    ids = new Set<string>();
     emitAsset!: (ctx: any, file: string, data: Buffer) => string;
 
     constructor(private root: string, private base: string, private minify: boolean, private inlineLimit: number) {}
 
     has(file: string) { return this.sheets.has(file); }
     get(file: string) { return this.sheets.get(file); }
-    add(file: string, code: string) { this.sheets.set(file, code); }
+    add(file: string, code: string, id?: string) {
+        this.sheets.set(file, code);
+        if (id) this.ids.add(id);
+    }
 
     process(ctx: any, file: string, source: string, modules: boolean): Promise<CompiledCss> {
         return compileCss({
