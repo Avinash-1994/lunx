@@ -30,6 +30,8 @@ export interface Starter {
     type?: 'module' | null;
     /** Scripts other than dev / build / preview. */
     scripts?: Record<string, string>;
+    /** Other package.json fields (Electron's `main`). */
+    packageJson?: Record<string, unknown>;
     dependencies(o: StarterOptions): Record<string, string>;
     devDependencies?(o: StarterOptions): Record<string, string>;
     files(o: StarterOptions): Record<string, string>;
@@ -958,10 +960,75 @@ const edge: Starter = {
     }),
 };
 
+/** A desktop app: the React starter's renderer, Electron's main process and preload, built by vite-plugin-electron. */
+const electron: Starter = {
+    id: 'electron',
+    label: 'Electron (React)',
+    group: 'Other',
+    aliases: ['electron-app', 'desktop'],
+    js: true,
+    tailwind: true,
+    packageJson: { main: 'dist-electron/main.js' },
+    dependencies: () => ({ react: REACT, 'react-dom': REACT }),
+    devDependencies: (o) => ({
+        electron: '^44.7.2',
+        '@types/node': '^24.10.1',
+        'vite-plugin-electron': '^1.1.2',
+        ...(o.ts ? { '@types/react': '^19.2.2', '@types/react-dom': '^19.2.2' } : {}),
+        ...typescript(o),
+        ...tailwindDeps(o),
+    }),
+    files: (o) => {
+        const files = react.files(o);
+        delete files[`lunx.config.${o.ts ? 'ts' : 'js'}`];
+        return {
+            ...files,
+            [`electron/main.${ext(o)}`]: lines(
+                "import { app, BrowserWindow } from 'electron';",
+                "import path from 'node:path';",
+                "import { fileURLToPath } from 'node:url';",
+                '',
+                'const dir = path.dirname(fileURLToPath(import.meta.url));',
+                '',
+                'function createWindow() {',
+                "  const win = new BrowserWindow({ width: 900, height: 700, webPreferences: { preload: path.join(dir, 'preload.mjs') } });",
+                '  // `lunx dev` serves the renderer; a build loads it from disk.',
+                "  if (process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL);",
+                "  else win.loadFile(path.join(dir, '../dist/index.html'));",
+                '}',
+                '',
+                'app.whenReady().then(createWindow);',
+                "app.on('window-all-closed', () => {",
+                "  if (process.platform !== 'darwin') app.quit();",
+                '});',
+                "app.on('activate', () => {",
+                '  if (BrowserWindow.getAllWindows().length === 0) createWindow();',
+                '});',
+            ),
+            [`electron/preload.${ext(o)}`]: lines(
+                "import { contextBridge } from 'electron';",
+                '',
+                "contextBridge.exposeInMainWorld('versions', { electron: process.versions.electron, node: process.versions.node });",
+            ),
+            [`lunx.config.${o.ts ? 'ts' : 'js'}`]: lines(
+                "import { defineConfig } from 'lunx-dev';",
+                "import electron from 'vite-plugin-electron/simple';",
+                '',
+                'export default defineConfig({',
+                '  plugins: [',
+                "    electron({ main: { entry: 'electron/main." + ext(o) + "' }, preload: { input: 'electron/preload." + ext(o) + "' } }),",
+                '  ],',
+                '});',
+            ),
+            ...(o.ts ? tsconfig(o, { jsx: 'react-jsx', types: ['node'] }, ['src', 'electron']) : {}),
+        };
+    },
+};
+
 export const STARTERS: Starter[] = [
     vanilla, react, preact, vue, svelte, solid, lit, alpine, angular, qwik,
     next, nuxt, sveltekit, astro, reactRouter, tanstackStart, solidstart, qwikCity, vitepress, waku, analog, remix, docusaurus, markoRun,
-    library, edge,
+    library, edge, electron,
 ];
 
 export function findStarter(id: string): Starter | undefined {

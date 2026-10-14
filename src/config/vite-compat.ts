@@ -201,7 +201,7 @@ export async function redirectViteForPlugins(file: string): Promise<void> {
 }
 
 /** Vite allows nested arrays, falsy entries and promises in `plugins`. */
-async function resolvePlugins(list: unknown): Promise<any[]> {
+export async function resolvePlugins(list: unknown): Promise<any[]> {
     const out: any[] = [];
     for (const item of await Promise.all(Array.isArray(list) ? list : [list])) {
         if (Array.isArray(item)) out.push(...(await resolvePlugins(item)));

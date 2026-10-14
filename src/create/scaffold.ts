@@ -66,6 +66,7 @@ export function writeStarter(starter: Starter, dir: string, options: StarterOpti
         scripts: { dev: 'lunx dev', build: 'lunx build', preview: 'lunx preview', ...starter.scripts },
         dependencies: sortKeys(starter.dependencies(o)),
         devDependencies: sortKeys({ 'lunx-dev': `^${lunxVersion()}`, ...starter.devDependencies?.(o) }),
+        ...starter.packageJson,
     };
     if (starter.id === 'library') {
         const main = './dist/index.js';

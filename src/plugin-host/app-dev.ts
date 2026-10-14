@@ -55,7 +55,9 @@ export interface AppDev {
     indexHtml(url: string, html: string): Promise<string>;
     /** Tell the plugins; returns the files whose plugin output depends on this one, to update with it. */
     fileChanged(file: string): string[];
+    /** lunx's server, once created; `listening()` once it accepts connections (plugins wait for it: vite-plugin-electron). */
     setHttpServer(server: any): void;
+    listening(): void;
     close(): Promise<void>;
 }
 
@@ -136,11 +138,34 @@ export async function startAppDev(root: string, viteConfig: Record<string, any>,
         return container ? (await container.transform(code, id)).code : code;
     };
 
+    // The HTTP server plugins see: lunx's may not exist yet when configureServer runs, or already be
+    // listening. Its 'listening' event fires once lunx says so; other events go to the real server.
+    let realServer: any = host.httpServer;
+    let isListening = false;
+    const pendingListeners: Array<[string, string, (...a: any[]) => void]> = [];
+    const httpServer: any = Object.assign(new EventEmitter(), {
+        get listening() {
+            return isListening;
+        },
+        address: () => realServer?.address?.() ?? { address: '127.0.0.1', family: 'IPv4', port: host.port },
+        close: (cb?: () => void) => (realServer?.close ? realServer.close(cb) : cb?.()),
+    });
+    for (const method of ['on', 'once', 'addListener', 'off', 'removeListener'] as const) {
+        const own = (EventEmitter.prototype as any)[method];
+        httpServer[method] = (event: string, fn: (...a: any[]) => void) => {
+            if (event === 'listening' || !realServer?.[method]) {
+                own.call(httpServer, event, fn);
+                if (event !== 'listening' && !realServer) pendingListeners.push([method, event, fn]);
+            } else realServer[method](event, fn);
+            return httpServer;
+        };
+    }
+
     const middlewares: Connect = createConnect();
     const server: any = {
         config: app.config,
         middlewares,
-        httpServer: host.httpServer,
+        httpServer,
         watcher,
         ws: hot,
         hot,
@@ -221,8 +246,18 @@ export async function startAppDev(root: string, viteConfig: Record<string, any>,
             void env.pluginContainer.watchChange(file, { event: 'update' });
             return [...(dependents.get(path.resolve(file)) ?? [])].filter((dep) => dep !== path.resolve(file) && path.isAbsolute(dep) && fs.existsSync(dep));
         },
-        setHttpServer(httpServer) {
-            server.httpServer = httpServer;
+        setHttpServer(real) {
+            realServer = real;
+            // Listeners plugins added before it existed ('upgrade' for a socket) move to it.
+            for (const [method, event, fn] of pendingListeners.splice(0)) {
+                (EventEmitter.prototype as any).off.call(httpServer, event, fn);
+                real?.[method]?.(event, fn);
+            }
+        },
+        listening() {
+            if (isListening) return;
+            isListening = true;
+            httpServer.emit('listening');
         },
         close: () => env.pluginContainer.close(),
     };

@@ -323,11 +323,7 @@ async function detectFramework(root: string): Promise<string | undefined> {
     if (deps['@tanstack/start'])                   return 'tanstack-start';
     if (deps['waku'])                              return 'waku';
 
-    // Desktop frameworks
-    if (deps['electron'])                          return 'electron';
-    if (deps['@tauri-apps/api'])                   return 'tauri';
-
-    // SPA frameworks
+    // SPA frameworks (a desktop app's renderer is one of these)
     if (deps['react'] || deps['react-dom'])        return 'react';
     if (deps['vue'])                               return 'vue';
     if (deps['svelte'])                            return 'svelte';
@@ -336,6 +332,10 @@ async function detectFramework(root: string): Promise<string | undefined> {
     if (deps['preact'])                            return 'preact';
     if (deps['lit'])                               return 'lit';
     if (deps['@builder.io/qwik'])                  return 'qwik';
+
+    // Desktop shells around a vanilla renderer
+    if (deps['electron'])                          return 'electron';
+    if (deps['@tauri-apps/api'])                   return 'tauri';
   } catch {
     // No package.json or unreadable — continue without auto-detection
   }
@@ -440,6 +440,10 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
       validateConfigKeys(rawConfig as Record<string, unknown>);
     }
 
+    // As Vite: `plugins` may hold promises (vite-plugin-electron/simple), nested arrays and falsy entries.
+    if (rawConfig && typeof rawConfig === 'object' && rawConfig.plugins) {
+      rawConfig.plugins = await (await import('./vite-compat.js')).resolvePlugins(rawConfig.plugins);
+    }
     const result = BuildConfigSchema.safeParse(rawConfig);
 
     if (!result.success) {

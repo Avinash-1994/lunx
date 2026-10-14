@@ -2183,6 +2183,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
   if (!existingServer) {
     server.listen(port, () => {
+      appDev?.listening();
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;
       // Phase 5.1 — print timing breakdown to stderr
@@ -2193,6 +2194,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   } else {
     // If we're using the minimal server, it already handles port binding and logs.
     // We just handle the 'open' browser request here if needed.
+    appDev?.listening();
     if (cfg.server?.open) {
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;

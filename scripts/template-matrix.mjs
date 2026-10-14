@@ -16,7 +16,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { chromium } from 'playwright';
+import { chromium, _electron } from 'playwright';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flag = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
@@ -38,11 +38,12 @@ const VARIANTS = [
     ['next'], ['nuxt'], ['sveltekit'], ['astro'], ['react-router'], ['tanstack-start'], ['solidstart'], ['qwik-city'],
     ['vitepress'], ['waku'], ['analog'], ['remix'], ['docusaurus'], ['marko-run'],
     ['library'], ['library', '--no-ts'], ['edge'], ['edge', '--no-ts'],
+    ['electron'], ['electron', '--no-ts'],
 ];
-/** No preview server: libraries and edge functions are imported, not served. */
-const NOT_SERVED = new Set(['library', 'edge']);
+/** No preview server: libraries and edge functions are imported, Electron apps run in Electron. */
+const NOT_SERVED = new Set(['library', 'edge', 'electron']);
 /** Starters whose generated TypeScript must type-check before anything runs. */
-const TYPECHECK = new Set(['vanilla', 'react', 'preact', 'vue', 'svelte', 'solid', 'lit', 'alpine', 'angular', 'qwik', 'library', 'edge']);
+const TYPECHECK = new Set(['electron', 'vanilla', 'react', 'preact', 'vue', 'svelte', 'solid', 'lit', 'alpine', 'angular', 'qwik', 'library', 'edge']);
 /** Starters whose page has the counter button. */
 const COUNTER = new Set(['vanilla', 'react', 'preact', 'vue', 'svelte', 'solid', 'lit', 'alpine', 'angular', 'qwik', 'sveltekit']);
 
@@ -66,11 +67,11 @@ function freePort() {
 }
 
 /** A long-running server (dev / preview) in its own process group, so the whole tree stops. */
-function serve(cwd, script, port) {
+function serve(cwd, script, port, env = {}) {
     const child = spawn('npm', ['run', script, '--', '--port', String(port)], {
         cwd,
         detached: true,
-        env: { ...process.env, BROWSER: 'none', NO_COLOR: '1', NEXT_TELEMETRY_DISABLED: '1', ASTRO_TELEMETRY_DISABLED: '1', NUXT_TELEMETRY_DISABLED: '1' },
+        env: { ...process.env, ...env, BROWSER: 'none', NO_COLOR: '1', NEXT_TELEMETRY_DISABLED: '1', ASTRO_TELEMETRY_DISABLED: '1', NUXT_TELEMETRY_DISABLED: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';
@@ -143,6 +144,41 @@ async function checkPage(browser, url, name, counter) {
     }
 }
 
+/** A display for Electron where there is none (Linux CI): Xvfb, when installed. */
+let display = process.env.DISPLAY;
+function ensureDisplay() {
+    if (display || process.platform !== 'linux') return display;
+    const xvfb = spawn('Xvfb', [':97', '-screen', '0', '1280x800x24'], { stdio: 'ignore', detached: true });
+    xvfb.on('error', () => {});
+    xvfb.unref();
+    process.on('exit', () => {
+        try {
+            process.kill(-xvfb.pid);
+        } catch {}
+    });
+    return (display = ':97');
+}
+
+/** The Electron app in Electron: its window shows the page, the counter counts, the preload ran. */
+async function checkElectron(dir, name, env = {}) {
+    const app = await _electron.launch({
+        executablePath: path.join(dir, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : process.platform === 'darwin' ? 'Electron.app/Contents/MacOS/Electron' : 'electron'),
+        args: [dir, '--no-sandbox'],
+        cwd: dir,
+        env: { ...process.env, ...env, ...(ensureDisplay() ? { DISPLAY: display } : {}) },
+        timeout: 60_000,
+    });
+    try {
+        const win = await app.firstWindow();
+        await win.waitForFunction((n) => document.querySelector('h1')?.textContent === n, name, { timeout: 30_000 });
+        await win.click('button');
+        await win.waitForFunction(() => /count is 1/.test(document.querySelector('button')?.textContent ?? ''), null, { timeout: 10_000 });
+        if (!(await win.evaluate(() => !!window.versions?.electron))) throw new Error('the preload did not run');
+    } finally {
+        await app.close();
+    }
+}
+
 // ── The package, as published ────────────────────────────────────────────────
 
 let tarball = flag('tarball') && path.resolve(flag('tarball'));
@@ -184,6 +220,10 @@ for (const [id, ...flags] of VARIANTS) {
 
         const installed = run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], dir, 900_000);
         if (installed.code !== 0) throw Object.assign(new Error(installed.output.trim().split('\n').slice(-6).join(' ')), { step: 'install' });
+        // Electron's binary download can fail once on a slow network: its installer, again.
+        for (let i = 0; id === 'electron' && i < 2 && !fs.existsSync(path.join(dir, 'node_modules', 'electron', 'dist')); i++) {
+            run(process.execPath, [path.join(dir, 'node_modules', 'electron', 'install.js')], dir, 600_000);
+        }
         result.install = 'pass';
 
         // TypeScript starters type-check as generated (meta-frameworks generate their own types first).
@@ -206,7 +246,42 @@ for (const [id, ...flags] of VARIANTS) {
             const body = await (await handler.fetch(new Request('https://example.com/hello'))).json();
             if (body.app !== name || body.pathname !== '/hello') throw Object.assign(new Error(`fetch() answered ${JSON.stringify(body)}`), { step: 'build' });
         }
+        if (id === 'electron') {
+            for (const f of ['dist-electron/main.js', 'dist-electron/preload.mjs', 'dist/index.html']) {
+                if (!fs.existsSync(path.join(dir, f))) throw Object.assign(new Error(`no ${f}`), { step: 'build' });
+            }
+        }
         result.build = 'pass';
+
+        if (id === 'electron') {
+            // The build, loaded from disk; then the dev server, Electron started on it as vite-plugin-electron would.
+            try {
+                await checkElectron(dir, name);
+                result.preview = 'pass';
+            } catch (err) {
+                result.preview = 'fail';
+                result.previewError = err.message;
+            }
+            fs.rmSync(path.join(dir, 'dist-electron'), { recursive: true, force: true });
+            const port = await freePort();
+            const server = serve(dir, 'dev', port, { ELECTRON_STARTUP_PREVENT: '1' });
+            try {
+                await waitForHttp(`http://localhost:${port}/`, 120_000);
+                const deadline = Date.now() + 60_000;
+                while (!fs.existsSync(path.join(dir, 'dist-electron', 'main.js'))) {
+                    if (Date.now() > deadline) throw new Error('lunx dev did not build dist-electron/main.js');
+                    await new Promise((r) => setTimeout(r, 250));
+                }
+                await new Promise((r) => setTimeout(r, 500));
+                await checkElectron(dir, name, { VITE_DEV_SERVER_URL: `http://localhost:${port}/` });
+                result.dev = 'pass';
+            } catch (err) {
+                result.dev = 'fail';
+                result.devError = `${err.message}\n${server.output.trim().split('\n').slice(-6).join('\n')}`;
+            } finally {
+                await server.stop();
+            }
+        }
 
         if (!NOT_SERVED.has(id)) {
             // Preview first: a framework's dev server can overwrite its build (`next dev` rewrites .next).

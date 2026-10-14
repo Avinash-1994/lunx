@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Electron**: `lunx create --template electron` (React renderer, main process, preload) on `vite-plugin-electron`, which now runs on lunx: `build.lib`, `build.watch` and `platform` in the plugin host's `build()`, `closeBundle` after each watch rebuild, the dev server's `listening` event for plugins, a plugin's `config`-hook `base`, and relative `base: './'` (it was rewritten to `/./`). Checked in Electron by the template matrix. The old Electron adapter's process spawning (broken under ESM) is gone.
 - **Vite plugins in apps**, with Vite's lifecycle on lunx's own build and dev server (they used to reach the build as bare Rollup plugins, and dev ignored them): `apply`, `enforce`, `config`, `configResolved`, virtual modules, `transformIndexHtml`, stylesheet transforms around lunx's CSS compiler, `configureServer`, `writeBundle` / `closeBundle` once the app is on disk, Vite's asset placeholders, and HMR for modules a plugin built from other files (Tailwind). `scripts/vite-plugins-matrix.mjs` checks 17 popular plugins in Chromium.
 
 ### Changed
+- A desktop app's framework is its renderer's (React…), not Electron / Tauri.
+- `plugins` in lunx.config may hold promises and nested arrays, as in Vite.
 - **Parallel component compilation**: production builds of projects with 100+ Vue / Svelte / compiled-JSX components compile them on worker threads, starting before Rolldown asks for them. 1,000 Vue SFCs build cold in ~1.6–2.0 s instead of ~3.1 s on 4 cores; output is identical. `LUNX_COMPILE_WORKERS=0` turns it off, `=N` sets the pool size.
 - Vue compiles in production mode without unused source maps, and the compiler loads with `require()`.
 - **Faster HMR**: a save reaches the browser without stacked debounces (small app: 53 → 36 ms; Vite 46 ms).

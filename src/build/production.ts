@@ -106,14 +106,16 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const started = performance.now();
     const root = path.resolve(config.root || process.cwd());
     const outDir = path.resolve(root, config.outDir || 'dist');
-    const base = ensureSlashes((config as any).base ?? '/');
+    let base = ensureSlashes((config as any).base ?? '/');
     const build = config.build ?? {};
     const minify = build.minify !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
 
     // Vite plugins (from vite.config or lunx.config), with Vite's lifecycle.
-    const app = await resolveVitePlugins(config, root, outDir, base);
+    const app = await resolveVitePlugins(config, root, outDir);
     const vp = app && (await import('../plugin-host/app-plugins.js'));
+    // A plugin's `config` hook may set it (vite-plugin-electron: `./`, for pages loaded from disk).
+    if (app?.userConfig.base !== undefined) base = ensureSlashes(app.userConfig.base);
 
     // ── Entries ──────────────────────────────────────────────────────────────
     const entries = (config.entry?.length ? config.entry : ['index.html']).map((e) => path.resolve(root, e));
@@ -702,7 +704,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
  * and lunx.config, resolved as Vite would: `apply`, `enforce`, `config`,
  * `configResolved`. Null when there are none: then nothing of this loads.
  */
-async function resolveVitePlugins(config: BuildConfig, root: string, outDir: string, base: string): Promise<AppPlugins | null> {
+async function resolveVitePlugins(config: BuildConfig, root: string, outDir: string): Promise<AppPlugins | null> {
     const list = [
         ...((config as any).__vitePlugins ?? []),
         ...(config.plugins ?? []).filter((p: any) => p && typeof p === 'object'),
@@ -712,7 +714,8 @@ async function resolveVitePlugins(config: BuildConfig, root: string, outDir: str
     const { resolveAppPlugins } = await import('../plugin-host/app-plugins.js');
     return resolveAppPlugins(root, {
         ...vite,
-        base,
+        // Only a base the user set: plugins' `config` hooks may set one otherwise (`./` for Electron).
+        ...((config as any).base ?? vite.base ? { base: (config as any).base ?? vite.base } : {}),
         publicDir: (config as any).publicDir ?? vite.publicDir,
         build: { ...vite.build, outDir: path.relative(root, outDir) || '.' },
     }, list, 'build', config.mode ?? 'production');
@@ -739,13 +742,16 @@ class CssCollector {
             modules,
             minify: this.minify,
             resolveUrl: (from, url) => {
+                // A relative base: url()s resolve against the CSS file, which is in assets/.
+                const relative = this.base === './';
                 const clean = url.split(/[?#]/)[0]!;
-                if (clean.startsWith('/') && fs.existsSync(path.join(this.root, 'public', clean))) return this.base + clean.slice(1);
+                if (clean.startsWith('/') && fs.existsSync(path.join(this.root, 'public', clean))) return (relative ? '../' : this.base) + clean.slice(1);
                 const target = resolveCssFile(this.root, from, url);
                 if (!target) return url;
                 const data = fs.readFileSync(target);
                 if (data.length < this.inlineLimit && !/\.svg$/i.test(target)) return `data:${mimeOf(target)};base64,${data.toString('base64')}`;
-                return this.emitAsset(ctx, target, data) + url.slice(clean.length);
+                const emitted = this.emitAsset(ctx, target, data);
+                return (relative ? emitted.replace(/^\.\/assets\//, './') : emitted) + url.slice(clean.length);
             },
         });
     }
@@ -787,6 +793,8 @@ function compilerSalt(root: string, framework: string, mode: string): string {
 }
 
 function ensureSlashes(base: string): string {
+    // Relative: assets resolve against the page (a page opened from disk, `file://`).
+    if (base === './' || base === '.' || base === '') return './';
     if (/^(https?:)?\/\//.test(base)) return base.endsWith('/') ? base : `${base}/`;
     let b = base.startsWith('/') ? base : `/${base}`;
     if (!b.endsWith('/')) b += '/';

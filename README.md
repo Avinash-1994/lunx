@@ -52,7 +52,7 @@ Templates (all built, served and opened in a browser by `npm run test:templates`
 |---|---|
 | Apps | `react` `vue` `svelte` `solid` `preact` `lit` `alpine` `angular` `qwik` `vanilla` — TypeScript, or JavaScript with `--no-ts`; most take `--tailwind` |
 | Frameworks | `next` `nuxt` `sveltekit` `astro` `react-router` `tanstack-start` `solidstart` `qwik-city` `vitepress` `waku` `analog` `remix` `docusaurus` `marko-run` |
-| Other | `library` (npm package with `lunx build --lib`), `edge` (fetch handler for edge runtimes) |
+| Other | `library` (npm package with `lunx build --lib`), `edge` (fetch handler for edge runtimes), `electron` (desktop app: React renderer, main process and preload) |
 
 ### Step 2 — Start the dev server
 
@@ -183,7 +183,12 @@ Set `LUNX_PLUGIN_HOST=0` to use a framework's own CLI instead. `npm run test:met
 ### 7. Desktop Apps (Electron & Tauri)
 
 #### Electron
-With `electron` in `package.json`, lunx builds the renderer, the web app Electron's window loads: `lunx dev` serves it with HMR (point `BrowserWindow.loadURL` at the dev server URL) and `lunx build` writes it to `dist/` (`loadFile('dist/index.html')`). The main and preload scripts run in Electron's Node as they are.
+`npx lunx-dev create my-app --template electron` sets up a React renderer, `electron/main.ts` and `electron/preload.ts`, built by [`vite-plugin-electron`](https://github.com/electron-vite/vite-plugin-electron) on lunx:
+
+- `lunx dev` serves the renderer with HMR, builds the main process and the preload into `dist-electron/` (rebuilt on change), and starts Electron on the dev server (`VITE_DEV_SERVER_URL`).
+- `lunx build` writes the renderer to `dist/` with relative URLs (it loads from disk) and the main process and the preload to `dist-electron/`. `package.json` `main` points at `dist-electron/main.js`, ready for electron-builder or Electron Forge.
+
+An existing Vite + `vite-plugin-electron` project runs on lunx unchanged. `npm run test:templates` builds both starters, runs them in Electron and checks the window, the preload and `lunx dev`.
 
 #### Tauri
 With `@tauri-apps/api` in `package.json`, lunx builds the web frontend for Tauri's WebView (set `devUrl` / `frontendDist` in `tauri.conf.json` to lunx's dev server and `dist/`); the Rust side in `src-tauri/` builds with the Tauri CLI.
