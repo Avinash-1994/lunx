@@ -1,0 +1,309 @@
+{
+  "lunx": "1.1.0",
+  "vite": "8.3.4",
+  "node": "v22.22.0",
+  "results": [
+    {
+      "framework": "vanilla",
+      "lunx": {
+        "buildMs": 457,
+        "jsFiles": 3,
+        "jsBytes": 929,
+        "jsGzip": 617,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 508,
+        "jsFiles": 3,
+        "jsBytes": 3123,
+        "jsGzip": 1574,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "react",
+      "lunx": {
+        "buildMs": 676,
+        "jsFiles": 3,
+        "jsBytes": 220943,
+        "jsGzip": 68339,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 802,
+        "jsFiles": 3,
+        "jsBytes": 221984,
+        "jsGzip": 68846,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "preact",
+      "lunx": {
+        "buildMs": 309,
+        "jsFiles": 3,
+        "jsBytes": 13866,
+        "jsGzip": 5962,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 670,
+        "jsFiles": 3,
+        "jsBytes": 16078,
+        "jsGzip": 6881,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "vue",
+      "lunx": {
+        "buildMs": 1190,
+        "jsFiles": 3,
+        "jsBytes": 65262,
+        "jsGzip": 25443,
+        "cssFiles": 1,
+        "cssBytes": 181,
+        "cssGzip": 163,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 846,
+        "jsFiles": 3,
+        "jsBytes": 65019,
+        "jsGzip": 25482,
+        "cssFiles": 1,
+        "cssBytes": 184,
+        "cssGzip": 162,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "svelte",
+      "lunx": {
+        "buildMs": 681,
+        "jsFiles": 3,
+        "jsBytes": 25576,
+        "jsGzip": 10301,
+        "cssFiles": 1,
+        "cssBytes": 132,
+        "cssGzip": 130,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 1154,
+        "jsFiles": 3,
+        "jsBytes": 27814,
+        "jsGzip": 11198,
+        "cssFiles": 1,
+        "cssBytes": 135,
+        "cssGzip": 129,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "solid",
+      "lunx": {
+        "buildMs": 603,
+        "jsFiles": 3,
+        "jsBytes": 10825,
+        "jsGzip": 4428,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 702,
+        "jsFiles": 3,
+        "jsBytes": 13191,
+        "jsGzip": 5383,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "lit",
+      "lunx": {
+        "buildMs": 258,
+        "jsFiles": 3,
+        "jsBytes": 16292,
+        "jsGzip": 6371,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 514,
+        "jsFiles": 3,
+        "jsBytes": 18118,
+        "jsGzip": 7132,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "app",
+      "lunx": {
+        "buildMs": 1478,
+        "jsFiles": 6,
+        "jsBytes": 222163,
+        "jsGzip": 69231,
+        "cssFiles": 3,
+        "cssBytes": 151,
+        "cssGzip": 203,
+        "assets": [
+          "assets/bg.0176aa64.png",
+          "robots.txt"
+        ],
+        "htmlBytes": 645,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "sharedModuleCopies": 1,
+        "routeCssInInitialCss": false,
+        "initialCssGzip": 117,
+        "jsWithoutMap": 0,
+        "jsWithoutMapComment": 0,
+        "aboutPage": true,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 2111,
+        "jsFiles": 7,
+        "jsBytes": 222971,
+        "jsGzip": 69727,
+        "cssFiles": 3,
+        "cssBytes": 151,
+        "cssGzip": 206,
+        "assets": [
+          "assets/bg-DyNdNJJq.png",
+          "robots.txt"
+        ],
+        "htmlBytes": 778,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "sharedModuleCopies": 1,
+        "routeCssInInitialCss": false,
+        "initialCssGzip": 118,
+        "jsWithoutMap": 1,
+        "jsWithoutMapComment": 1,
+        "aboutPage": true,
+        "failures": []
+      },
+      "losses": []
+    }
+  ]
+}

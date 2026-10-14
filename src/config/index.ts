@@ -97,6 +97,8 @@ export const BuildConfigSchema = z.object({
     bundler: z.enum(['rolldown', 'legacy']).optional(),
     /** Assets smaller than this many bytes are inlined as data URLs (default 4096; 0 disables). */
     assetsInlineLimit: z.number().optional(),
+    /** CSS imported only by lazy chunks loads with them (default true); false puts all CSS in one file. */
+    cssCodeSplit: z.boolean().optional(),
   }).optional(),
   /** Public base path the app is served from, e.g. '/my-app/'. */
   base: z.string().optional(),

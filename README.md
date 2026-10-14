@@ -324,6 +324,7 @@ export function App() {
 - **Shared** packages go through a webpack-format share scope: `singleton`, `requiredVersion` (defaults to your package.json range), `strictVersion` and `eager`. Each app's own copy is a separate chunk, downloaded only if the scope picks it, so a remote using the host's React never fetches its own.
 - **Dev and build mix freely**: a dev host can load a built remote and the other way round. In dev, a remote's modules fast-refresh inside the host page, state kept.
 - `npm run test:federation-e2e` runs all four dev/build pairings in Chromium.
+- **With webpack 5 and Rspack**, both ways (`npm run test:mf-interop`, production builds in Chromium, React shared as a singleton): a lunx host loads their remotes as `name@url`; their hosts load a lunx remote, an ES module, with `remoteType: 'import'` (or `'import <url>'` beside script remotes) and, for webpack, `target: ['web', 'es2020']`. A shell mixing lunx, webpack and Rspack remotes shares one React across all of them.
 
 ---
 
@@ -471,6 +472,15 @@ Every tool installed from npm, same React + TypeScript app, median of 7 runs, al
 | webpack | 4374 ms | 4608 ms | 1165 ms | 9115 ms | 8860 ms | 516 KB |
 | esbuild (bundler only) | – | – | – | 141 ms | 148 ms | 493 KB |
 | Bun (bundler only) | – | – | – | 92 ms | 97 ms | 430 KB |
+
+**Build output against Vite 8** (same app per framework, both built and run in Chromium; `npm run test:parity`, `reports/OUTPUT_PARITY.json`). Each app has a component with state, global CSS, a CSS module, an emitted image, a JSON named import, a lazy chunk, a worker, an env value and dev-only code; the `app` row adds two pages, base `/sub/`, source maps, lazy routes with their own CSS, CSS `@import` / `url()` and `public/`. Every probe passes for both tools.
+
+| JS, gzip | vanilla | React | Preact | Vue | Svelte | Solid | Lit | app |
+|---|---|---|---|---|---|---|---|---|
+| **lunx** | 0.6 KB | 66.7 KB | 5.8 KB | 24.8 KB | 10.1 KB | 4.3 KB | 6.2 KB | 67.6 KB |
+| Vite 8 | 1.5 KB | 67.2 KB | 6.7 KB | 24.9 KB | 10.9 KB | 5.3 KB | 7.0 KB | 68.1 KB |
+
+CSS is within a few bytes of Vite's in every app, and CSS that only lazy chunks import loads with them (`build.cssCodeSplit: false` for one file). Vite's extra kilobyte in the small apps is its modulepreload polyfill, which lunx leaves out (every browser that runs ES modules supports modulepreload).
 
 Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support; on the small app Rspack's cold build (323 vs 341 ms) and Parcel's HMR (34 vs 39 ms) are within run-to-run noise (±30% on shared cores) of lunx's. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
 

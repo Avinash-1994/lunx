@@ -148,6 +148,8 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
     const compileJsx = framework === 'solid' || framework === 'preact' || framework === 'qwik';
 
     const sheets = new Map<string, string>();
+    /** Vue / Svelte components' CSS, by the module id each component imports it under. */
+    const componentCss = new Map<string, string>();
     const sheetOrder: string[] = [];
     const minify = options.minify;
 
@@ -155,13 +157,20 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
         {
             name: 'lunx-lib:framework',
             transform: {
-                filter: { id: { include: compileJsx ? /\.(vue|svelte|[jt]sx)(\?.*)?$/ : /\.(vue|svelte)(\?.*)?$/, exclude: /node_modules/ } },
+                filter: { id: { include: compileJsx ? /\.(vue|svelte|[jt]sx)(\?.*)?$/ : /\.(vue|svelte)(\?.*)?$/, exclude: [/node_modules/, /[?&]lunx-component\.css$/] } },
                 async handler(code: string, id: string) {
                     const file = id.split('?')[0]!;
                     const fw = file.endsWith('.vue') ? 'vue' : file.endsWith('.svelte') ? 'svelte' : framework;
                     const out = await (await getTransformer()).transform({ filePath: file, code, framework: fw, root, isDev: false });
                     // A published package must not carry the author's file paths.
-                    return { code: out.code.replace(/^.*\.__file\s*=\s*["'][^"']*["'];?\s*$/m, ''), map: null, moduleType: 'js' };
+                    let compiled = out.code.replace(/^.*\.__file\s*=\s*["'][^"']*["'];?\s*$/m, '');
+                    // The component's own CSS (Vue, Svelte) goes to the extracted stylesheet, as in Vite's library mode.
+                    if (out.css) {
+                        const cssId = `${file}?lunx-component.css`;
+                        componentCss.set(cssId, out.css);
+                        compiled += `\nimport ${JSON.stringify(cssId)};`;
+                    }
+                    return { code: compiled, map: null, moduleType: 'js' };
                 },
             },
         },
@@ -171,9 +180,10 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
                 filter: { id: /\.(css|pcss|postcss|scss|sass|less|styl|stylus)(\?.*)?$/ },
                 async handler(id: string) {
                     const file = id.split('?')[0]!;
-                    if (!CSS_LANGS.test(file)) return null;
+                    const component = componentCss.get(id);
+                    if (component === undefined && !CSS_LANGS.test(file)) return null;
                     const query = id.slice(file.length);
-                    const raw = await fsp.readFile(file, 'utf8');
+                    const raw = component ?? (await fsp.readFile(file, 'utf8'));
                     if (/[?&]raw\b/.test(query)) return { code: `export default ${JSON.stringify(raw)};`, moduleType: 'js' };
                     const result = await compileCss({
                         root, file, source: raw, modules: isCssModule(file), minify: !!minify,

@@ -184,11 +184,18 @@ if (typeof globalThis.$RefreshReg$ === 'undefined') {
     globalThis.$RefreshSig$ = () => (type) => type;
 }
 
+// webpack and Rspack hosts treat exports without __esModule as CommonJS: mark them (live bindings kept).
+function asExports(mod) {
+    const out = { __esModule: true };
+    for (const key of Object.keys(mod)) Object.defineProperty(out, key, { enumerable: true, get: () => mod[key] });
+    return out;
+}
+
 export async function get(request) {
     const load = exposes[request] || exposes['./' + String(request).replace(/^\\.?\\//, '')];
     if (!load) throw new Error('[lunx mf] module "' + request + '" is not exposed by ${this.options.name}; exposed: ' + Object.keys(exposes).join(', '));
     await ensureShared();
-    const mod = await load();
+    const mod = asExports(await load());
     return () => mod;
 }
 

@@ -1,0 +1,39 @@
+{
+  "lunx": "1.1.0",
+  "webpack": "5.111.1",
+  "rspack": "2.2.9",
+  "react": "19.3.1",
+  "node": "v22.22.0",
+  "results": [
+    {
+      "pair": "lunx-host+webpack-remote",
+      "status": "pass",
+      "errors": []
+    },
+    {
+      "pair": "lunx-host+rspack-remote",
+      "status": "pass",
+      "errors": []
+    },
+    {
+      "pair": "webpack-host+lunx-remote",
+      "status": "pass",
+      "errors": []
+    },
+    {
+      "pair": "rspack-host+lunx-remote",
+      "status": "pass",
+      "errors": []
+    },
+    {
+      "pair": "lunx-host+lunx,webpack,rspack-remotes",
+      "status": "pass",
+      "errors": []
+    },
+    {
+      "pair": "webpack-host+lunx,rspack-remotes",
+      "status": "pass",
+      "errors": []
+    }
+  ]
+}

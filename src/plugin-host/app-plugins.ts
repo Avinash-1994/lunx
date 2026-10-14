@@ -45,7 +45,7 @@ export async function resolveAppPlugins(root: string, userConfig: Record<string,
 
 /** Stylesheets lunx compiles itself: plugins transform them through `transformCss`. */
 const CSS_FILE = /\.(css|pcss|postcss|scss|sass|less|styl|stylus)$/;
-export const isStylesheet = (id: string): boolean => CSS_FILE.test(cleanUrl(id));
+export const isStylesheet = (id: string): boolean => CSS_FILE.test(cleanUrl(id)) || /[?&]lunx-component\.css$/.test(id);
 
 export interface LunxCss {
     /** A stylesheet a plugin loads, compiled by lunx's CSS as Vite's CSS plugin would take it. */

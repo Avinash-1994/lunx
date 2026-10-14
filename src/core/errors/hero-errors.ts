@@ -325,6 +325,18 @@ export function wrapError(error: Error, context?: Partial<ErrorContext>): HeroEr
         return error;
     }
 
+    // An error in the project's code (a compiler's or the bundler's report on a source file), not in lunx.
+    if (/Build failed with \d+ error|\b(CompileError|ParseError|PARSE_ERROR|SyntaxError|UNRESOLVED_IMPORT|MISSING_EXPORT|INVALID_EXPORT)\b/.test(error.message)) {
+        return new HeroError({
+            code: 'BUILD_ERROR',
+            message: error.message,
+            severity: 'error',
+            suggestedFix: 'Fix the error reported above in your source, then build again.',
+            relatedDocs: ['https://lunx.dev/docs/troubleshooting'],
+            ...context
+        });
+    }
+
     return new HeroError({
         code: 'UNKNOWN_ERROR',
         message: error.message,

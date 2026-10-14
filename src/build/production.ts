@@ -17,7 +17,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
-import { CompilePool, MIN_POOL_FILES } from './compile-pool.js';
+import { CompilePool, MIN_POOL_FILES, type Compiled } from './compile-pool.js';
 import { transformGlobImports } from './glob-import.js';
 import { TransformCache } from './build-cache.js';
 import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
@@ -94,6 +94,8 @@ async function precompress(file: string, data: Buffer, brotliQuality: number): P
 }
 
 const hash8 = (data: string | Uint8Array) => crypto.createHash('sha256').update(data).digest('hex').slice(0, 8);
+/** The stylesheet module a Vue / Svelte component's CSS is imported under (`App.vue?lunx-component.css`). */
+export const COMPONENT_CSS = /[?&]lunx-component\.css$/;
 const cleanId = (id: string) => id.split('?')[0]!;
 const toPosix = (p: string) => p.split(path.sep).join('/');
 
@@ -113,6 +115,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     let base = ensureSlashes((config as any).base ?? '/');
     const build = config.build ?? {};
     const minify = build.minify !== false;
+    const cssCodeSplit = (build as any).cssCodeSplit !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
 
     // Vite plugins (from vite.config or lunx.config), with Vite's lifecycle.
@@ -268,6 +271,9 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return pool;
     }
 
+    /** Vue / Svelte components' CSS, by the module id each component imports it under. */
+    const componentCss = new Map<string, string>();
+
     /** A stylesheet as a module: compiled (plugins' transforms around lunx's compiler), collected for the CSS file. */
     const stylesheetModule = async (ctx: any, id: string, raw: string) => {
         const file = cleanId(id);
@@ -301,7 +307,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 pages.push(vp ? await vp.transformCss(app!, 'post', ctx, result.code, file) : result.code);
             }
         }
-        return [pages.join('\n'), css.order.map((f) => css.get(f)!).join('\n')].filter(Boolean).join('\n');
+        const sep = minify ? '' : '\n';
+        return [...pages, ...css.order.map((f) => css.get(f)!)].filter(Boolean).join(sep);
     };
     let cssFile: string | null = null;
 
@@ -313,7 +320,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             // Hook filters keep Rolldown from calling into JS for modules a
             // plugin would ignore anyway (one Rust<->JS round trip per module).
             transform: {
-              filter: { id: { include: compileJsx || framework === 'angular' ? /\.(vue|svelte|[mc]?[jt]sx?)(\?.*)?$/ : /\.(vue|svelte)(\?.*)?$/, exclude: /node_modules/ } },
+              filter: { id: { include: compileJsx || framework === 'angular' ? /\.(vue|svelte|[mc]?[jt]sx?)(\?.*)?$/ : /\.(vue|svelte)(\?.*)?$/, exclude: [/node_modules/, COMPONENT_CSS] } },
               async handler(code: string, id: string) {
                 const file = cleanId(id);
                 const isSfc = /\.(vue|svelte)$/.test(file);
@@ -323,20 +330,28 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 const fw = frameworkOf(file);
                 const cacheable = compileCache && !isAngular && selfContained(code);
                 const parts = [file, fw, code];
+                // A component's own CSS (Vue, Svelte) goes to the app's stylesheet, through a module
+                // the component imports, so it lands in the cascade where the component does.
+                const withCss = (out: Compiled) => {
+                    if (!out.css) return { code: out.code, map: null, moduleType: 'js' };
+                    const cssId = `${file}?lunx-component.css`;
+                    componentCss.set(cssId, out.css);
+                    return { code: `${out.code}\nimport ${JSON.stringify(cssId)};`, map: null, moduleType: 'js' };
+                };
                 if (cacheable) {
                     const hit = await compileCache!.get(parts);
-                    if (hit) return { code: hit.code, map: null, moduleType: 'js' };
+                    if (hit) return withCss(hit as Compiled);
                 }
                 const pool = isAngular ? null : compilePool;
-                const compiled = pool && !pool.failed
+                const pooled = pool && !pool.failed
                     ? await pool.compile(file, code, fw).catch((err) => {
                           if (!pool.failed) throw err; // a compile error, as on the main thread
                           return null; // the worker died: compile here instead
                       })
                     : null;
-                const outCode = compiled ?? (await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false })).code;
-                if (cacheable) await compileCache!.set(parts, { code: outCode });
-                return { code: outCode, map: null, moduleType: 'js' };
+                const out: Compiled = pooled ?? (await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false }));
+                if (cacheable) await compileCache!.set(parts, { code: out.code, ...(out.css ? { css: out.css } : {}) });
+                return withCss(out);
               },
             },
         },
@@ -368,6 +383,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             load: {
               filter: { id: /\.(css|pcss|postcss|scss|sass|less|styl|stylus)(\?.*)?$/ },
               async handler(this: any, id: string) {
+                const component = componentCss.get(id);
+                if (component !== undefined) return stylesheetModule(this, id, component);
                 const file = cleanId(id);
                 // Not a file: a virtual stylesheet some plugin loads.
                 if (!CSS_EXT.test(file) || !fs.existsSync(file)) return null;
@@ -515,7 +532,59 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 const chunks = Object.values(bundle).filter((c) => c.type === 'chunk');
                 chunks.sort((x, y) => Number(y.isEntry) - Number(x.isEntry));
                 for (const chunk of chunks) if (chunk.facadeModuleId) visit(chunk.facadeModuleId);
-                css.order = [...order];
+                const rank = new Map([...order].map((file, i) => [file, i]));
+
+                // CSS code splitting, as Vite: a chunk loaded only through import() brings its own
+                // stylesheet, and the page's stylesheet holds only what the pages load up front.
+                const split = cssCodeSplit && !federation;
+                const initial = new Set<string>();
+                const ownSheets = (chunk: any): string[] => {
+                    const found: string[] = [];
+                    for (const id of chunk.moduleIds ?? []) {
+                        if (!leadsToCss.has(id)) continue;
+                        for (const dep of this.getModuleInfo(id)?.importedIds ?? []) if (css.has(cleanId(dep))) found.push(cleanId(dep));
+                    }
+                    return found;
+                };
+                const byName = new Map(chunks.map((c) => [c.fileName, c]));
+                const statically = (from: any[]): Set<any> => {
+                    const seen = new Set<any>(from);
+                    const queue = [...from];
+                    while (queue.length) for (const f of queue.pop().imports ?? []) {
+                        const dep = byName.get(f);
+                        if (dep && !seen.has(dep)) {
+                            seen.add(dep);
+                            queue.push(dep);
+                        }
+                    }
+                    return seen;
+                };
+                const sorted = (files: Iterable<string>) => [...new Set(files)].sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+                if (split) {
+                    const upFront = statically(chunks.filter((c) => c.isEntry));
+                    for (const chunk of upFront) for (const file of ownSheets(chunk)) initial.add(file);
+                    // Sheets no chunk claims (a page's script that imports nothing else) stay up front.
+                    const claimed = new Set<string>(initial);
+                    const lazy = chunks.filter((c) => !upFront.has(c) && c.isDynamicEntry);
+                    for (const chunk of lazy) {
+                        const sheets = sorted([...statically([chunk])].flatMap(ownSheets)).filter((f) => !initial.has(f));
+                        for (const f of sheets) claimed.add(f);
+                        if (!sheets.length) continue;
+                        const sep = minify ? '' : '\n';
+                        const text = sheets.map((f) => css.get(f)!).join(sep);
+                        const fileName = `assets/${chunk.name}.${hash8(text)}.css`;
+                        this.emitFile({ type: 'asset', fileName, source: text });
+                        // The chunk's module finishes evaluating once its stylesheet has loaded, so
+                        // import() resolves with the CSS in place (no flash of unstyled content).
+                        // Appended, so the chunk's source map is unaffected.
+                        const href = path.posix.relative(path.posix.dirname(chunk.fileName), fileName);
+                        const loader = `\nawait new Promise((r)=>{const h=new URL(${JSON.stringify(href.startsWith('.') ? href : './' + href)},import.meta.url).href;if(document.querySelector('link[rel="stylesheet"][href="'+h+'"]'))return r();const l=document.createElement("link");l.rel="stylesheet";l.href=h;l.onload=l.onerror=()=>r();document.head.appendChild(l)});\n`;
+                        const mapComment = chunk.code.lastIndexOf('\n//# sourceMappingURL=');
+                        chunk.code = mapComment === -1 ? chunk.code + loader : chunk.code.slice(0, mapComment) + loader + chunk.code.slice(mapComment);
+                    }
+                    for (const file of order) if (!claimed.has(file)) initial.add(file);
+                }
+                css.order = split ? sorted(initial) : [...order];
                 // Emitted here, so the plugins' generateBundle sees (and may rewrite) it, as Vite's CSS.
                 const all = await collectCss(this);
                 if (all.trim()) {
