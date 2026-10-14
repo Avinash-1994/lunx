@@ -60,7 +60,7 @@ const WASM = Buffer.from('0061736d0100000001070160027f7f017f03020100070701036164
  *
  * name, packages, vite.config imports and plugin calls, project files, and
  * what the page must show: `{ sel, text | tag | style: [prop, value] }`,
- * `{ fetch: url, contains }`, `{ sw: true }` (preview only); `dist` / `root`:
+ * `{ fetch: url, contains }`, `{ sw: true, offline: sel }` (preview only: an active service worker, and `sel` rendered with the network off); `dist` / `root`:
  * files the build must write.
  */
 const SCENARIOS = [
@@ -71,7 +71,7 @@ const SCENARIOS = [
         plugins: [`VitePWA({ registerType: 'autoUpdate', manifest: { name: 'Matrix', short_name: 'M', icons: [] } })`],
         main: `import { registerSW } from 'virtual:pwa-register';\nregisterSW({ immediate: true });`,
         app: `<p id="check">pwa ok</p>`,
-        expect: [{ sel: '#check', text: 'pwa ok' }, { sw: true }],
+        expect: [{ sel: '#check', text: 'pwa ok' }, { sw: true, offline: '#check' }],
         dist: ['sw.js', 'manifest.webmanifest'],
         html: /rel="manifest"/,
     },
@@ -226,6 +226,60 @@ const SCENARIOS = [
         app: `<p id="check">inspect ok</p>`,
         expect: [{ sel: '#check', text: 'inspect ok' }, { fetch: '/__inspect/', contains: '<', dev: true }],
     },
+    // Built into lunx: the same features with no plugin installed.
+    {
+        name: 'builtin-svg',
+        packages: [],
+        imports: [],
+        plugins: [],
+        files: { 'src/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" stroke-width="2"><circle cx="5" cy="5" r="4"/></svg>' },
+        appImports: `// @ts-ignore\nimport Logo from './logo.svg?react';`,
+        app: `<Logo id="check" className="logo" />`,
+        expect: [{ sel: '#check.logo', tag: 'svg' }, { sel: '#check circle', tag: 'circle' }],
+    },
+    {
+        name: 'builtin-wasm-init',
+        packages: [],
+        imports: [],
+        plugins: [],
+        files: { 'src/add.wasm': WASM },
+        appImports: `import { useEffect, useState } from 'react';\n// @ts-ignore\nimport init from './add.wasm?init';`,
+        appBody: `const [sum, setSum] = useState(0);\n  useEffect(() => { init().then((instance: any) => setSum(instance.exports.add(2, 3))); }, []);`,
+        app: `{sum ? <p id="check">wasm {sum}</p> : null}`,
+        expect: [{ sel: '#check', text: 'wasm 5' }],
+    },
+    {
+        name: 'builtin-pwa',
+        packages: [],
+        imports: [],
+        plugins: [],
+        files: { 'lunx.config.ts': `export default { pwa: { manifest: { name: 'Matrix', short_name: 'M', icons: [] } } };\n` },
+        app: `<p id="check">pwa ok</p>`,
+        expect: [{ sel: '#check', text: 'pwa ok' }, { sw: true, offline: '#check' }],
+        dist: ['sw.js', 'manifest.webmanifest', 'registerSW.js'],
+        html: /rel="manifest"/,
+    },
+    {
+        name: 'builtin-typecheck',
+        packages: [],
+        imports: [],
+        plugins: [],
+        files: { 'lunx.config.ts': `export default { server: { typecheck: true } };\n` },
+        appBody: `// A type error: the page still runs, and in dev the overlay lists it.\n  const label: number = 'typed';`,
+        app: `<p id="check">{label}</p>`,
+        expect: [{ sel: '#check', text: 'typed' }, { sel: 'lunx-error-overlay .error-item .message', text: "TS2322: Type 'string' is not assignable to type 'number'.", dev: true }],
+    },
+    {
+        name: 'builtin-html-env',
+        packages: [],
+        imports: [],
+        plugins: [],
+        title: '%VITE_APP_TITLE%',
+        files: { '.env': 'VITE_APP_TITLE=env ok\n' },
+        app: `<p id="check">html env</p>`,
+        expect: [{ title: 'env ok' }],
+        html: /<title>env ok<\/title>/,
+    },
 ];
 
 const BASE_PACKAGES = ['react', 'react-dom', '@types/react', '@types/react-dom', 'typescript', '@vitejs/plugin-react'];
@@ -323,6 +377,17 @@ async function checkPage(browser, origin, s, mode) {
                 if (mode !== 'preview') continue;
                 const active = await page.evaluate(() => Promise.race([navigator.serviceWorker.ready.then((r) => !!r.active), new Promise((ok) => setTimeout(() => ok(false), 15_000))]));
                 if (!active) throw new Error('no active service worker');
+                if (want.offline) {
+                    // Controlled once claimed; then the app must load with the network gone.
+                    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 15_000 }).catch(() => {});
+                    await page.context().setOffline(true);
+                    try {
+                        await page.reload({ waitUntil: 'load', timeout: 15_000 });
+                        if (!(await page.waitForSelector(want.offline, { timeout: 10_000 }).catch(() => null))) throw new Error(`offline: ${want.offline} not rendered`);
+                    } finally {
+                        await page.context().setOffline(false);
+                    }
+                }
                 continue;
             }
             if (want.fetch) {

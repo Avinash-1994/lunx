@@ -23,6 +23,10 @@ import { TransformCache } from './build-cache.js';
 import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
+import { metaEnvFrom, replaceHtmlEnv } from './html-env.js';
+import { wasmInitModule } from './wasm-init.js';
+import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from './svg-component.js';
+import { pwaFiles, pwaHeadTags, pwaOptions, writeServiceWorker } from './pwa.js';
 import type { AppPlugins } from '../plugin-host/app-plugins.js';
 
 // zlib (~8ms to load) is first needed after the bundle; the engine-busy hook loads it while Rolldown works.
@@ -146,13 +150,17 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         }
     }
 
+    // A web app manifest and service worker (an installed vite-plugin-pwa keeps them).
+    const pwa = app?.plugins.some((p: any) => typeof p.name === 'string' && p.name.startsWith('vite-plugin-pwa')) ? null : pwaOptions((config as any).pwa);
+    // `%VITE_APP_TITLE%`, `%MODE%`… in the pages.
+    const htmlEnv = { ...metaEnvFrom((config as any).__envDefines), MODE: config.mode, PROD: config.mode === 'production', DEV: config.mode !== 'production', BASE_URL: base };
     for (const entry of entries) {
         if (!fs.existsSync(entry)) throw new Error(`Entry not found: ${path.relative(root, entry) || entry}`);
         if (!entry.endsWith('.html')) {
             input[nameFor(entry)] = entry;
             continue;
         }
-        let source = await fsp.readFile(entry, 'utf8');
+        let source = replaceHtmlEnv(await fsp.readFile(entry, 'utf8'), htmlEnv);
         if (vp) source = await vp.transformIndexHtml(app!, 'pre', source, { path: '/' + toPosix(path.relative(root, entry)), filename: entry });
         const html: HtmlEntry = { file: entry, source, scripts: new Map(), styles: [] };
         for (const m of source.matchAll(/<script\b[^>]*\btype=["']module["'][^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi)) {
@@ -372,10 +380,16 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         {
             name: 'lunx:assets',
             load: {
-              filter: { id: /(\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)|[?&](url|raw)\b.*)$/i },
+              filter: { id: /(\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)|[?&](url|raw|init|react|component)\b.*)$/i },
               async handler(this: any, id: string) {
                 const file = cleanId(id);
                 const query = id.slice(file.length);
+                // `./logo.svg?react`: a component (vite-plugin-svgr, when installed, keeps it).
+                const svgRuntime = /\.svg$/i.test(file) && SVG_COMPONENT_QUERY.test(query) && !app?.plugins.some((p: any) => p.name === 'vite-plugin-svgr') ? svgRuntimeFor(framework, query) : null;
+                if (svgRuntime) return { code: svgComponent(await fsp.readFile(file, 'utf8'), svgRuntime), moduleType: 'js' };
+                if (/\.wasm$/i.test(file) && /[?&]init\b/.test(query)) {
+                    return { code: wasmInitModule(JSON.stringify(emitAsset(this, file, await fsp.readFile(file)))), moduleType: 'js' };
+                }
                 const wantsUrl = /[?&]url\b/.test(query);
                 const wantsRaw = /[?&]raw\b/.test(query);
                 if (!wantsUrl && !wantsRaw && !ASSET_EXT.test(file)) return null;
@@ -644,6 +658,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         const head = [
             ...[...preloads].map((f) => `<link rel="modulepreload" crossorigin href="${base}${f}">`),
             ...(cssFile ? [`<link rel="stylesheet" crossorigin href="${base}${cssFile}">`] : []),
+            ...(pwa ? pwaHeadTags(pwa, base) : []),
         ];
         if (head.length) {
             const tags = head.map((t) => `    ${t}\n`).join('');
@@ -662,6 +677,11 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         await fsp.mkdir(path.dirname(target), { recursive: true });
         await fsp.writeFile(target, page);
         emittedAssets.push({ fileName: toPosix(path.relative(outDir, target)), type: 'asset', source: page });
+    }
+
+    for (const file of pwa ? pwaFiles(pwa, base) : []) {
+        await fsp.writeFile(path.join(outDir, file.fileName), file.source);
+        emittedAssets.push({ ...file, type: 'asset' });
     }
 
     // ── Module federation container ──────────────────────────────────────────
@@ -714,8 +734,13 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const modules = new Set<string>();
     for (const o of output) if (o.type === 'chunk') for (const id of o.moduleIds as string[]) if (path.isAbsolute(cleanId(id))) modules.add(cleanId(id));
 
-    // Plugins' writeBundle / closeBundle (a service worker over the finished app…).
-    const afterWrite = vp ? () => vp.runAfterWrite(app!, outDir, artifacts) : undefined;
+    // Plugins' writeBundle / closeBundle (a service worker over the finished app…), then lunx's own service worker.
+    const afterWrite = vp || pwa
+        ? async () => {
+              if (vp) await vp.runAfterWrite(app!, outDir, artifacts);
+              if (pwa) writeServiceWorker(outDir, pwa);
+          }
+        : undefined;
     if (afterWrite && !options.deferAfterWrite) await afterWrite();
 
     return {

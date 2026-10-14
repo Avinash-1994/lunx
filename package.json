@@ -12,6 +12,9 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./client": {
+      "types": "./client.d.ts"
+    },
     "./package.json": "./package.json",
     "./dist/*": "./dist/*"
   },
@@ -24,6 +27,7 @@
   },
   "files": [
     "dist",
+    "client.d.ts",
     "README.md",
     "LICENSE",
     "packages/lunx-adapter-core/package.json",

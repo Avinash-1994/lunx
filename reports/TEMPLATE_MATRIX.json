@@ -10,7 +10,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 9
+      "seconds": 12
     },
     {
       "template": "vanilla --no-ts",
@@ -20,7 +20,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 8
+      "seconds": 7
     },
     {
       "template": "vanilla --tailwind",
@@ -30,7 +30,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 11
+      "seconds": 16
     },
     {
       "template": "react",
@@ -40,7 +40,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 11
+      "seconds": 13
     },
     {
       "template": "react --no-ts",
@@ -50,7 +50,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 8
     },
     {
       "template": "react --tailwind",
@@ -60,7 +60,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 15
+      "seconds": 11
     },
     {
       "template": "preact",
@@ -70,7 +70,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 11
+      "seconds": 9
     },
     {
       "template": "preact --no-ts",
@@ -80,7 +80,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 8
+      "seconds": 7
     },
     {
       "template": "vue",
@@ -100,7 +100,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 12
+      "seconds": 10
     },
     {
       "template": "svelte",
@@ -110,7 +110,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 13
+      "seconds": 21
     },
     {
       "template": "svelte --no-ts",
@@ -120,7 +120,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 9
     },
     {
       "template": "svelte --tailwind",
@@ -130,7 +130,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 13
+      "seconds": 11
     },
     {
       "template": "solid",
@@ -140,7 +140,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 14
+      "seconds": 21
     },
     {
       "template": "solid --no-ts",
@@ -150,7 +150,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 12
+      "seconds": 9
     },
     {
       "template": "lit",
@@ -160,7 +160,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 12
+      "seconds": 10
     },
     {
       "template": "lit --no-ts",
@@ -170,7 +170,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 9
+      "seconds": 8
     },
     {
       "template": "alpine",
@@ -190,7 +190,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 9
+      "seconds": 7
     },
     {
       "template": "angular",
@@ -200,7 +200,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 21
+      "seconds": 16
     },
     {
       "template": "qwik",
@@ -210,7 +210,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 16
+      "seconds": 23
     },
     {
       "template": "next",
@@ -370,7 +370,7 @@
       "build": "pass",
       "dev": "skip",
       "preview": "skip",
-      "seconds": 3
+      "seconds": 2
     },
     {
       "template": "edge",
@@ -380,7 +380,7 @@
       "build": "pass",
       "dev": "skip",
       "preview": "skip",
-      "seconds": 4
+      "seconds": 3
     },
     {
       "template": "edge --no-ts",
@@ -390,7 +390,7 @@
       "build": "pass",
       "dev": "skip",
       "preview": "skip",
-      "seconds": 3
+      "seconds": 2
     },
     {
       "template": "electron",
@@ -400,7 +400,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 18
+      "seconds": 41
     },
     {
       "template": "electron --no-ts",
@@ -410,7 +410,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 16
+      "seconds": 13
     }
   ]
 }

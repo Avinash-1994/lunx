@@ -403,9 +403,9 @@ lunx security report
 
 ## 🔌 Plugins
 
-Vite and Rollup plugins go in `plugins` (in `lunx.config.ts`, or an existing `vite.config.*`) and run with Vite's lifecycle in dev and in the build: `apply`, `enforce`, `config`, `configResolved`, `resolveId` / `load` / `transform` (virtual modules included), `transformIndexHtml`, `configureServer`, `renderChunk`, `generateBundle`, `writeBundle` and `closeBundle` (once the whole app is on disk). Plugins that import `vite` get lunx's stand-in, so Vite does not need to be installed. Framework projects (SvelteKit, Nuxt, Astro, React Router…) run on lunx's Vite-compatible plugin host. esbuild plugins in `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
+Vite and Rollup plugins go in `plugins` (in `lunx.config.ts`, or an existing `vite.config.*`; with both, `lunx.config` applies on top of the Vite config) and run with Vite's lifecycle in dev and in the build: `apply`, `enforce`, `config`, `configResolved`, `resolveId` / `load` / `transform` (virtual modules included), `transformIndexHtml`, `configureServer`, `renderChunk`, `generateBundle`, `writeBundle` and `closeBundle` (once the whole app is on disk). Plugins that import `vite` get lunx's stand-in, so Vite does not need to be installed. Framework projects (SvelteKit, Nuxt, Astro, React Router…) run on lunx's Vite-compatible plugin host. esbuild plugins in `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
 
-`npm run test:vite-plugins` builds, previews and runs on the dev server, in Chromium, a React app with each of: `vite-plugin-pwa`, `@tailwindcss/vite`, `unocss`, `vite-plugin-svgr`, `vite-tsconfig-paths`, `unplugin-auto-import`, `unplugin-icons`, `vite-plugin-html`, `vite-plugin-static-copy`, `rollup-plugin-visualizer`, `@mdx-js/rollup`, `vite-plugin-glsl`, `vite-imagetools`, `vite-plugin-wasm`, `vite-plugin-node-polyfills`, `vite-plugin-checker` and `vite-plugin-inspect` ([report](reports/VITE_PLUGINS_MATRIX.json)). Not supported: `@vitejs/plugin-legacy`, whose legacy chunks need a SystemJS build that Rolldown does not write.
+`npm run test:vite-plugins` builds, previews and runs on the dev server, in Chromium, a React app with each of: `vite-plugin-pwa`, `@tailwindcss/vite`, `unocss`, `vite-plugin-svgr`, `vite-tsconfig-paths`, `unplugin-auto-import`, `unplugin-icons`, `vite-plugin-html`, `vite-plugin-static-copy`, `rollup-plugin-visualizer`, `@mdx-js/rollup`, `vite-plugin-glsl`, `vite-imagetools`, `vite-plugin-wasm`, `vite-plugin-node-polyfills`, `vite-plugin-checker` and `vite-plugin-inspect`, then the built-ins below with no plugin installed ([report](reports/VITE_PLUGINS_MATRIX.json)). Not supported: `@vitejs/plugin-legacy`, whose legacy chunks need a SystemJS build that Rolldown does not write.
 
 ```typescript
 import { defineConfig } from 'lunx-dev';
@@ -422,7 +422,25 @@ export default defineConfig({
 });
 ```
 
-Framework plugins (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`, `@preact/preset-vite`) are not needed: their compilers are built in. Plugins that ask for permissions (`fs:write`, `env:read`, network) run in lunx's permission sandbox (`lunx security plugins`).
+### Built in: no plugin needed
+
+| You'd install | lunx has it built in |
+|---|---|
+| `@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`, `@preact/preset-vite` | Framework compilers (Oxc, Vue, Svelte, Solid) |
+| `vite-plugin-svgr`, `vite-svg-loader` | `import Logo from './logo.svg?react'` (React, Preact) or `?component` (React, Preact, Vue): the root `<svg>`'s attributes are props you can override |
+| `vite-plugin-wasm` (for `?init`) | `import init from './module.wasm?init'`, then `const instance = await init(imports)`, as in Vite |
+| `vite-tsconfig-paths` | `compilerOptions.paths` from `tsconfig.json` / `jsconfig.json` |
+| `vite-plugin-electron` | Electron apps ([above](#electron)) |
+| `rollup-plugin-visualizer` | `lunx analyze` |
+| `vite-plugin-checker` | `server: { typecheck: true }`: `lunx dev` runs your TypeScript (`vue-tsc` in Vue projects that have it) in watch mode and lists type errors in the terminal and in the overlay's Type Errors tab |
+| `vite-plugin-pwa` | `pwa: { manifest: { name, short_name, icons… } }` in lunx.config: `manifest.webmanifest`, a service worker that precaches the build (cache-first, offline navigations fall back to `index.html`, old caches dropped on deploy) and its registration, linked from every page |
+| — | `%VITE_APP_TITLE%`, `%MODE%`… (any `import.meta.env` value) in `index.html`, as in Vite |
+
+An installed plugin still wins: with `vite-plugin-svgr` in the config, `?react` imports go to it; with `vite-plugin-pwa`, lunx writes no service worker.
+
+TypeScript types for all of these (assets, `?raw`, `?url`, `?react`, `.wasm?init`, CSS modules, `import.meta.env`, `import.meta.hot`, `import.meta.glob`) come with lunx: `/// <reference types="lunx-dev/client" />` in a `.d.ts` file (the TypeScript starters have it in `src/lunx-env.d.ts`), or `"types": ["lunx-dev/client"]` in tsconfig.json.
+
+Plugins that ask for permissions (`fs:write`, `env:read`, network) run in lunx's permission sandbox (`lunx security plugins`).
 
 ---
 

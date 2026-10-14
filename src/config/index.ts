@@ -34,6 +34,13 @@ export const BuildConfigSchema = z.object({
   preset: z.enum(['spa', 'ssr', 'ssg']).default('spa'),
   // Library mode (src/build/library.ts): `lunx build` writes a package instead of an app.
   lib: z.any().optional(),
+  // A web app manifest and precaching service worker (src/build/pwa.ts).
+  pwa: z.union([z.boolean(), z.object({
+    manifest: z.union([z.record(z.string(), z.any()), z.literal(false)]).optional(),
+    register: z.boolean().optional(),
+    navigateFallback: z.union([z.string(), z.literal(null)]).optional(),
+    exclude: z.array(z.any()).optional(),
+  })]).optional(),
   // Electron (src/electron): the main process and preload lunx builds, or `false` to leave Electron alone.
   electron: z.union([z.literal(false), z.object({
     main: z.string().optional(),
@@ -110,6 +117,8 @@ export const BuildConfigSchema = z.object({
     proxy: z.record(z.string(), z.union([z.string(), z.any()])).optional(),
     https: z.union([z.boolean(), z.object({ key: z.string(), cert: z.string() })]).optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    /** Type errors in the terminal and the browser overlay, from the project's tsc / vue-tsc in watch mode. */
+    typecheck: z.boolean().optional(),
   }).optional(),
   cacheDir: z.string().optional(),
   prebundle: z.object({
@@ -145,6 +154,7 @@ export type BuildConfig = {
   preset: 'spa' | 'ssr' | 'ssg';
   lib?: import('../build/library.js').LibraryOptions;
   electron?: import('../electron/index.js').ElectronOptions | false;
+  pwa?: import('../build/pwa.js').PwaOptions | boolean;
   federation?: {
     name: string;
     filename?: string;
@@ -229,7 +239,8 @@ const VALID_TOP_LEVEL_KEYS = [
   'entry', 'outDir', 'framework', 'preset', 'mode', 'platform', 'port',
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
-  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib'
+  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib',
+  'electron', 'pwa',
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {
@@ -350,6 +361,22 @@ async function detectFramework(root: string): Promise<string | undefined> {
 }
 
 
+/** A `{ … }` literal, whatever realm it was made in (a config module's objects may come from another one). */
+const isPlainObject = (v: unknown): v is Record<string, any> => {
+  if (Object.prototype.toString.call(v) !== '[object Object]') return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === null || Object.getPrototypeOf(proto) === null;
+};
+
+/** `override` on top of `base`: objects merge key by key, anything else (arrays included) is replaced. */
+function mergeConfig(base: Record<string, any>, override: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    out[key] = isPlainObject(value) && isPlainObject(out[key]) ? mergeConfig(out[key], value) : value;
+  }
+  return out;
+}
+
 export async function loadConfig(cwd: string): Promise<BuildConfig> {
   const lunxTsPath = path.join(cwd, 'lunx.config.ts');
   const lunxJsPath = path.join(cwd, 'lunx.config.js');
@@ -423,6 +450,16 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
         platform: 'browser',
         preset: 'spa',
       };
+    }
+
+    // lunx.config beside a vite.config (added for lunx-only options such as pwa or electron, or
+    // kept by `lunx migrate`): the Vite config still applies underneath, and its plugins still run.
+    if (!foreign && /^lunx\.config\./.test(loadedConfigPath) && rawConfig && typeof rawConfig === 'object'
+      && (foreign = await (await import('./vite-compat.js')).readViteConfig(cwd))) {
+      const own = new Set(((rawConfig.plugins ?? []) as any[]).flat(Infinity).map((p: any) => p?.name).filter(Boolean));
+      foreign.plugins = foreign.plugins.filter((p: any) => !own.has(p?.name));
+      rawConfig = mergeConfig(foreign.config, rawConfig);
+      log.info(`[lunx] ${loadedConfigPath} on top of ${foreign.file}`);
     }
 
     if (rawConfig && typeof rawConfig === 'object') {

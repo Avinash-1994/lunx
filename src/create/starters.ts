@@ -108,9 +108,11 @@ function config(o: StarterOptions, options = ''): Record<string, string> {
     };
 }
 
-function tsconfig(o: StarterOptions, compilerOptions: Record<string, unknown> = {}, include = ['src']): Record<string, string> {
+function tsconfig(o: StarterOptions, compilerOptions: Record<string, unknown> = {}, include = ['src'], app = true): Record<string, string> {
     if (!o.ts) return {};
     return {
+        // Types for asset imports, `?raw` / `?react` / `.wasm?init`, `import.meta.env` and `import.meta.hot`.
+        ...(app ? { 'src/lunx-env.d.ts': lines('/// <reference types="lunx-dev/client" />') } : {}),
         'tsconfig.json': json({
             compilerOptions: {
                 target: 'ES2022',
@@ -935,7 +937,7 @@ const library: Starter = {
             '  return `Hello, ${name}!`;',
             '}',
         ),
-        ...tsconfig(o, { declaration: true }),
+        ...tsconfig(o, { declaration: true }, ['src'], false),
     }),
 };
 
@@ -958,7 +960,7 @@ const edge: Starter = {
             '};',
         ),
         ...config(o, `platform: 'edge', entry: ['src/index.${ext(o)}']`),
-        ...tsconfig(o, { lib: ['ES2022', 'WebWorker'] }),
+        ...tsconfig(o, { lib: ['ES2022', 'WebWorker'] }, ['src'], false),
     }),
 };
 
