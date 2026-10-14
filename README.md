@@ -183,12 +183,14 @@ Set `LUNX_PLUGIN_HOST=0` to use a framework's own CLI instead. `npm run test:met
 ### 7. Desktop Apps (Electron & Tauri)
 
 #### Electron
-`npx lunx-dev create my-app --template electron` sets up a React renderer, `electron/main.ts` and `electron/preload.ts`, built by [`vite-plugin-electron`](https://github.com/electron-vite/vite-plugin-electron) on lunx:
+lunx builds Electron apps itself, with no plugin and nothing to configure. `npx lunx-dev create my-app --template electron` sets up a React renderer, `electron/main.ts` and `electron/preload.ts`. Any project with `electron` installed and an `electron/main.*` gets the same:
 
-- `lunx dev` serves the renderer with HMR, builds the main process and the preload into `dist-electron/` (rebuilt on change), and starts Electron on the dev server (`VITE_DEV_SERVER_URL`).
-- `lunx build` writes the renderer to `dist/` with relative URLs (it loads from disk) and the main process and the preload to `dist-electron/`. `package.json` `main` points at `dist-electron/main.js`, ready for electron-builder or Electron Forge.
+- `lunx dev` serves the renderer with HMR, builds the main process and the preload into `dist-electron/`, and starts Electron with the dev server's URL in `LUNX_DEV_SERVER_URL` (also `VITE_DEV_SERVER_URL`). An edit to the main process restarts Electron; an edit to the preload reloads the window. Quitting the app ends `lunx dev`.
+- `lunx build` writes the renderer to `dist/` with relative URLs (Electron loads it from disk), and, in parallel, the main process (`dist-electron/main.js`, ESM or CommonJS like the package; `dependencies` stay external) and the preload (`dist-electron/preload.cjs`, one CommonJS file, which sandboxed preloads require). `package.json` `main` points at `dist-electron/main.js`, ready for electron-builder or Electron Forge.
+- `lunx preview` starts the build in Electron.
+- Other entries or output folder: `electron: { main, preload, outDir }` in lunx.config; `electron: false` turns it off. `LUNX_ELECTRON_ARGS="--inspect=5858"` passes switches to Electron.
 
-An existing Vite + `vite-plugin-electron` project runs on lunx unchanged. `npm run test:templates` builds both starters, runs them in Electron and checks the window, the preload and `lunx dev`.
+An existing Vite + `vite-plugin-electron` project runs on lunx unchanged; lunx leaves Electron to the plugin. `npm run test:templates` builds both starters and checks them in Electron: the window, the counter and the preload, after `lunx preview`, after `lunx dev`, and after a main-process edit restarts it.
 
 #### Tauri
 With `@tauri-apps/api` in `package.json`, lunx builds the web frontend for Tauri's WebView (set `devUrl` / `frontendDist` in `tauri.conf.json` to lunx's dev server and `dist/`); the Rust side in `src-tauri/` builds with the Tauri CLI.

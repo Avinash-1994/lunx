@@ -2181,9 +2181,26 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     }
   });
 
+  // An Electron app: lunx builds its main process and preload, and runs Electron on this server.
+  const startElectron = async () => {
+    const electron = await import('../electron/index.js');
+    const app = electron.resolveElectron(cfg.root, cfg);
+    if (!app) return;
+    try {
+      await electron.devElectron(app, `${httpsOptions ? 'https' : 'http'}://localhost:${port}/`, {
+        reload: () => broadcast(JSON.stringify({ type: 'full-reload' })),
+        log: (message) => log.info(message, { category: 'server' }),
+        error: (message) => log.error(message),
+      });
+    } catch (e: any) {
+      log.error(`[electron] ${e.message}`);
+    }
+  };
+
   if (!existingServer) {
     server.listen(port, () => {
       appDev?.listening();
+      void startElectron();
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;
       // Phase 5.1 — print timing breakdown to stderr
@@ -2195,6 +2212,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     // If we're using the minimal server, it already handles port binding and logs.
     // We just handle the 'open' browser request here if needed.
     appDev?.listening();
+    void startElectron();
     if (cfg.server?.open) {
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;

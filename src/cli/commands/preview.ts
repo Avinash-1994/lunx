@@ -45,17 +45,22 @@ export default {
       const { maybeDelegate } = await import('../../meta-frameworks/delegate.js');
       if (await maybeDelegate('preview', root, args.port)) return;
 
-    // Read outDir from config if not provided via CLI arg
-    let outDir = args.outDir;
-    if (!outDir) {
-      try {
-        const { loadConfig } = await import('../../config/index.js');
-        const config = await loadConfig(root);
-        outDir = (config as any).outDir ?? 'dist';
-      } catch {
-        outDir = 'dist';
-      }
+    let config: any = {};
+    try {
+      const { loadConfig } = await import('../../config/index.js');
+      config = await loadConfig(root);
+    } catch {}
+
+    // An Electron app previews in Electron, from its build.
+    const electron = await import('../../electron/index.js');
+    const app = electron.resolveElectron(root, config);
+    if (app) {
+      process.exitCode = await electron.previewElectron(app);
+      return;
     }
+
+    // Read outDir from config if not provided via CLI arg
+    const outDir = args.outDir ?? config.outDir ?? 'dist';
 
     await preview({
       port: args.port,

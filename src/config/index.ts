@@ -34,6 +34,12 @@ export const BuildConfigSchema = z.object({
   preset: z.enum(['spa', 'ssr', 'ssg']).default('spa'),
   // Library mode (src/build/library.ts): `lunx build` writes a package instead of an app.
   lib: z.any().optional(),
+  // Electron (src/electron): the main process and preload lunx builds, or `false` to leave Electron alone.
+  electron: z.union([z.literal(false), z.object({
+    main: z.string().optional(),
+    preload: z.union([z.string(), z.literal(false)]).optional(),
+    outDir: z.string().optional(),
+  })]).optional(),
   federation: z.object({
     name: z.string(),
     filename: z.string().optional(),
@@ -138,6 +144,7 @@ export type BuildConfig = {
   platform: 'browser' | 'node' | 'edge';
   preset: 'spa' | 'ssr' | 'ssg';
   lib?: import('../build/library.js').LibraryOptions;
+  electron?: import('../electron/index.js').ElectronOptions | false;
   federation?: {
     name: string;
     filename?: string;

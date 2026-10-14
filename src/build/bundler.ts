@@ -191,6 +191,17 @@ export async function build(rawConfig: BuildConfig) {
   const useEngine = (config.build as any)?.bundler !== 'legacy' && (await bundlerAvailable());
   const serverTarget = config.preset === 'ssr' || (config.platform ?? 'browser') !== 'browser';
 
+  // An Electron app: its main process and preload build alongside the renderer, which loads from disk.
+  const electronApp = !serverTarget && !config.lib && !(config as any).federation
+    ? (await import('../electron/index.js')).resolveElectron(config.root, config)
+    : null;
+  let electronBuild: Promise<string[]> | undefined;
+  if (electronApp) {
+    if (config.base === undefined && (config as any).__viteConfig?.base === undefined) config.base = './';
+    electronBuild = import('../electron/index.js').then((m) => m.buildElectron(electronApp));
+    electronBuild.catch(() => {}); // observed below
+  }
+
   let pipeline: any = null;
   try {
     let result: any;
@@ -220,6 +231,10 @@ export async function build(rawConfig: BuildConfig) {
       }
     }
 
+    if (electronBuild) {
+      const files = await electronBuild;
+      console.log(`[lunx] electron: ${files.join(', ')}`);
+    }
   phase('bundle');
     await startSecurityGate();
     phase('security gate (lockfile, CVE)');

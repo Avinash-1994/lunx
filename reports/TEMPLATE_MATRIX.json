@@ -400,7 +400,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 16
+      "seconds": 18
     },
     {
       "template": "electron --no-ts",
@@ -410,7 +410,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 13
+      "seconds": 16
     }
   ]
 }
