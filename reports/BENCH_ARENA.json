@@ -1,69 +1,69 @@
 {
   "scale": null,
-  "runs": 5,
+  "runs": 7,
   "results": {
     "lunx": {
       "kind": "module server",
-      "devBootMs": 238,
-      "devAppCodeMs": 242,
-      "hmrMs": 37,
-      "buildColdMs": 331,
-      "buildWarmMs": 356,
+      "devBootMs": 229,
+      "devAppCodeMs": 234,
+      "hmrMs": 39,
+      "buildColdMs": 341,
+      "buildWarmMs": 322,
       "jsBytes": 220745,
       "cssBytes": 29
     },
     "vite": {
       "kind": "module server",
-      "devBootMs": 402,
-      "devAppCodeMs": 465,
-      "hmrMs": 43,
-      "buildColdMs": 496,
-      "buildWarmMs": 417,
+      "devBootMs": 437,
+      "devAppCodeMs": 511,
+      "hmrMs": 42,
+      "buildColdMs": 548,
+      "buildWarmMs": 461,
       "jsBytes": 220174,
       "cssBytes": 30
     },
     "rspack": {
       "kind": "bundler",
-      "devBootMs": 381,
+      "devBootMs": 378,
       "devAppCodeMs": 409,
-      "hmrMs": 213,
-      "buildColdMs": 347,
-      "buildWarmMs": 342,
+      "hmrMs": 188,
+      "buildColdMs": 323,
+      "buildWarmMs": 368,
       "jsBytes": 219460,
       "cssBytes": 29
     },
     "webpack": {
       "kind": "bundler",
-      "devBootMs": 1509,
-      "devAppCodeMs": 1629,
-      "hmrMs": 283,
-      "buildColdMs": 3875,
-      "buildWarmMs": 3728,
+      "devBootMs": 1599,
+      "devAppCodeMs": 1749,
+      "hmrMs": 265,
+      "buildColdMs": 4009,
+      "buildWarmMs": 3891,
       "jsBytes": 224696,
       "cssBytes": 0
     },
     "parcel": {
       "kind": "bundler",
-      "devBootMs": 1275,
-      "devAppCodeMs": 1285,
-      "hmrMs": 32,
-      "buildColdMs": 1577,
-      "buildWarmMs": 1502,
+      "devBootMs": 1317,
+      "devAppCodeMs": 1326,
+      "hmrMs": 34,
+      "buildColdMs": 1640,
+      "buildWarmMs": 1569,
       "jsBytes": 221951,
       "cssBytes": 96
     },
     "esbuild": {
       "kind": "bundler",
       "devBootMs": null,
-      "buildColdMs": 54,
-      "buildWarmMs": 53,
+      "buildColdMs": 63,
+      "buildWarmMs": 56,
       "jsBytes": 222973,
       "cssBytes": 30
     },
     "bun": {
       "kind": "bundler",
       "devBootMs": null,
-      "buildColdMs": 37,
+      "buildColdMs": 38,
       "buildWarmMs": 39,
       "jsBytes": 211811,
       "cssBytes": 30
@@ -71,8 +71,8 @@
     "rolldown": {
       "kind": "bundler (JS only)",
       "devBootMs": null,
-      "buildColdMs": 411,
-      "buildWarmMs": 220,
+      "buildColdMs": 265,
+      "buildWarmMs": 228,
       "jsBytes": 221375,
       "cssBytes": 0
     }

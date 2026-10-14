@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { createRequire } from 'module';
+import module, { createRequire } from 'module';
+
+// Node's compile cache (as Vite's and Rspack's CLIs): the modules each command loads are
+// compiled once and kept on disk, not parsed again on every run. NODE_DISABLE_COMPILE_CACHE=1 opts out.
+(module as any).enableCompileCache?.();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

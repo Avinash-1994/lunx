@@ -421,33 +421,33 @@ Framework plugins (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite
 
 ## 📊 Performance Benchmarks
 
-Every tool installed from npm, same React + TypeScript app, median of 5 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
+Every tool installed from npm, same React + TypeScript app, median of 7 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr --runs 7 [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
 
 **Small app**
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | 238 ms | 242 ms | 37 ms | 331 ms | 356 ms | 221 KB |
-| Vite 8 | 402 ms | 465 ms | 43 ms | 496 ms | 417 ms | 220 KB |
-| Rspack | 381 ms | 409 ms | 213 ms | 347 ms | 342 ms | 219 KB |
-| Parcel | 1275 ms | 1285 ms | 32 ms | 1577 ms | 1502 ms | 222 KB |
-| webpack | 1509 ms | 1629 ms | 283 ms | 3875 ms | 3728 ms | 225 KB |
-| esbuild (bundler only) | – | – | – | 54 ms | 53 ms | 223 KB |
-| Bun (bundler only) | – | – | – | 37 ms | 39 ms | 212 KB |
+| **lunx** | 229 ms | 234 ms | 39 ms | 341 ms | 322 ms | 221 KB |
+| Vite 8 | 437 ms | 511 ms | 42 ms | 548 ms | 461 ms | 220 KB |
+| Rspack | 378 ms | 409 ms | 188 ms | 323 ms | 368 ms | 219 KB |
+| Parcel | 1317 ms | 1326 ms | 34 ms | 1640 ms | 1569 ms | 222 KB |
+| webpack | 1599 ms | 1749 ms | 265 ms | 4009 ms | 3891 ms | 225 KB |
+| esbuild (bundler only) | – | – | – | 63 ms | 56 ms | 223 KB |
+| Bun (bundler only) | – | – | – | 38 ms | 39 ms | 212 KB |
 
 **Large app: 2,000 components** (`--scale 2000`)
 
 | Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
 |---|---|---|---|---|---|---|
-| **lunx** | 222 ms | 225 ms | 150 ms | 672 ms | 526 ms | 470 KB |
-| Vite 8 | 369 ms | 692 ms | 160 ms | 617 ms | 600 ms | 470 KB |
-| Rspack | 669 ms | 790 ms | 618 ms | 769 ms | 781 ms | 493 KB |
-| Parcel | 4592 ms | 4623 ms | 248 ms | 5194 ms | 4981 ms | 455 KB |
-| webpack | 4043 ms | 4251 ms | 1050 ms | 8670 ms | 8491 ms | 516 KB |
-| esbuild (bundler only) | – | – | – | 125 ms | 128 ms | 493 KB |
-| Bun (bundler only) | – | – | – | 83 ms | 81 ms | 430 KB |
+| **lunx** | 250 ms | 255 ms | 161 ms | 626 ms | 545 ms | 470 KB |
+| Vite 8 | 400 ms | 706 ms | 178 ms | 918 ms | 718 ms | 470 KB |
+| Rspack | 693 ms | 829 ms | 677 ms | 823 ms | 842 ms | 493 KB |
+| Parcel | 4855 ms | 4895 ms | 189 ms | 5358 ms | 5143 ms | 455 KB |
+| webpack | 4374 ms | 4608 ms | 1165 ms | 9115 ms | 8860 ms | 516 KB |
+| esbuild (bundler only) | – | – | – | 141 ms | 148 ms | 493 KB |
+| Bun (bundler only) | – | – | – | 92 ms | 97 ms | 430 KB |
 
-Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support; Parcel's HMR on the small app (32 vs 37 ms), Rspack's warm small-app build (342 vs 356 ms) and Vite's cold 2,000-component build (617 vs 672 ms; both vary ±40% run to run on shared cores) are within noise of lunx's. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
+Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support; on the small app Rspack's cold build (323 vs 341 ms) and Parcel's HMR (34 vs 39 ms) are within run-to-run noise (±30% on shared cores) of lunx's. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
 
 ---
 
