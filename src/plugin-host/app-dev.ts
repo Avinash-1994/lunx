@@ -26,6 +26,8 @@ const urlToId = (url: string) => decodeURIComponent(url.slice(ID_PREFIX.length))
 /** lunx marks CSS, JSON and assets imported from JavaScript with `import`; plugins see the id without it, as in Vite. */
 const stripImportQuery = (url: string) => url.replace(/([?&])import(?:&|$)/, '$1').replace(/[?&]$/, '');
 const stripTimestamp = (url: string) => url.replace(/([?&])t=\d+&?/, '$1').replace(/[?&]$/, '');
+/** Assets: a module only when imported (`?import`); the file itself otherwise (the `.wasm` a module fetches). */
+const ASSET = /\.(json|html?|map|png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 /** Files lunx serves itself; any other kind (`.mdx`, `.frag`…) is a module only if a plugin's transform makes it one. */
 const LUNX_SERVES = /\.(m?[jt]sx?|c[jt]s|vue|svelte|astro|css|pcss|postcss|scss|sass|less|styl|stylus|json|html?|map|png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 
@@ -104,6 +106,7 @@ export async function startAppDev(root: string, viteConfig: Record<string, any>,
     };
 
     const load = async (rawUrl: string): Promise<{ id: string; code: string; transformed?: boolean } | null> => {
+        if (!rawUrl.startsWith(ID_PREFIX) && ASSET.test(rawUrl.split('?')[0]!) && !/[?&]import(?:&|$)/.test(rawUrl)) return null;
         const url = stripTimestamp(stripImportQuery(rawUrl));
         const other = !url.startsWith(ID_PREFIX) && !LUNX_SERVES.test(url.split('?')[0]!) && path.extname(url.split('?')[0]!) !== '';
         if (!loads && !other && !url.startsWith(ID_PREFIX)) return null;

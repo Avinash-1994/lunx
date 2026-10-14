@@ -88,7 +88,9 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
         }
         if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('http')) {
           // Handle relative CSS/JSON 
-          if (CSS_LANGS.test(specifier) || specifier.endsWith('.json') || DEV_ASSET_EXT.test(specifier)) {
+          // By the file's extension, query aside (`./pixel.png?w=4` is an image import too).
+          const bare = specifier.split('?')[0]!;
+          if (CSS_LANGS.test(bare) || bare.endsWith('.json') || DEV_ASSET_EXT.test(bare)) {
             replacements.push({
               start: node.start,
               end: node.end,
