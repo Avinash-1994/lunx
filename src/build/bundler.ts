@@ -200,7 +200,14 @@ export async function build(rawConfig: BuildConfig) {
       if (serverTarget) startSecurityGate();
       result = serverTarget
         ? await (await import('./server-build.js')).serverBuild(config, framework)
-        : await productionBuild(config, framework, { onEngineBusy: startSecurityGate, deferCompression: true, deferAfterWrite: true });
+        : await productionBuild(config, framework, {
+            onEngineBusy: () => {
+              startSecurityGate();
+              void import('./build-cache.js').then((m) => m.startInputScans());
+            },
+            deferCompression: true,
+            deferAfterWrite: true,
+          });
       console.log(`[lunx] bundled ${result.modules.length} modules with ${result.engine} in ${Math.round(result.durationMs)}ms`);
     } else {
       startSecurityGate();

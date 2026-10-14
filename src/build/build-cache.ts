@@ -111,8 +111,21 @@ interface Pending {
     key: string;
     outDir: string;
     inputs: Record<string, Stamp> | null;
-    /** First build: the inputs, read in the background while it runs (output directory not yet known). */
-    scan?: Promise<Record<string, Stamp> | null>;
+    /** First build: the inputs, read while it runs (output directory not yet known). */
+    scan?: () => Promise<Record<string, Stamp> | null>;
+}
+
+/** First builds' input scans not started yet: they start once Rolldown is busy (`startInputScans`). */
+const waitingScans = new Set<() => unknown>();
+
+/**
+ * Start reading the first build's inputs. Called once Rolldown is rendering in
+ * Rust: started earlier, thousands of stats fill libuv's four threads and the
+ * config load and every other file read before the bundle wait behind them.
+ */
+export function startInputScans(): void {
+    for (const start of waitingScans) start();
+    waitingScans.clear();
 }
 
 /**
@@ -134,10 +147,11 @@ export function checkBuild(root: string, options: Record<string, unknown>): { hi
         // no previous build
     }
     if (!entry) {
-        // Nothing to compare against: read the inputs while the build runs (Rolldown bundles in
-        // Rust threads, so the main thread is mostly waiting) instead of before it starts.
-        const scan = inputsOfAsync(root);
-        scan.catch(() => {});
+        // Nothing to compare against: read the inputs while Rolldown renders (in Rust threads, so
+        // the main thread is mostly waiting) instead of before the build starts.
+        let started: Promise<Record<string, Stamp> | null> | null = null;
+        const scan = () => (started ??= inputsOfAsync(root).catch(() => null));
+        waitingScans.add(scan);
         return { hit: false, pending: { file, key, outDir: '', inputs: null, scan } };
     }
     const outDir = entry.outDir;
@@ -213,7 +227,8 @@ export async function recordBuild(root: string, pending: Pending, outDir: string
     let inputs: Record<string, Stamp> | null;
     if (pending.scan) {
         // Read before the output directory was known: drop what the build wrote there.
-        inputs = await pending.scan;
+        waitingScans.delete(pending.scan);
+        inputs = await pending.scan();
         const prefix = path.relative(root, outDir);
         if (inputs && prefix && !prefix.startsWith('..')) {
             for (const k of Object.keys(inputs)) if (k === prefix || k.startsWith(prefix + path.sep)) delete inputs[k];
