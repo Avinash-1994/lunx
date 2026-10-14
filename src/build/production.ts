@@ -202,6 +202,17 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return url;
     };
     css.emitAsset = emitAsset;
+    // CSS a plugin hands to Vite's CSS plugin itself (UnoCSS's generated layers, from renderChunk) goes to lunx's.
+    const cssPost = app?.config.plugins.find((p: any) => p.name === 'vite:css-post');
+    if (cssPost) {
+        cssPost.transform = {
+            async handler(this: any, code: string, id: string) {
+                const file = cleanId(id);
+                css.add(file, (await css.process(this, file, code, false)).code);
+                return { code: '', map: null };
+            },
+        };
+    }
 
     // Loaded on first use: only Vue/Svelte/Solid/Angular/… sources need it,
     // and importing it costs ~50ms that a React or vanilla build never uses.
@@ -236,9 +247,46 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return pool;
     }
 
+    /** A stylesheet as a module: compiled (plugins' transforms around lunx's compiler), collected for the CSS file. */
+    const stylesheetModule = async (ctx: any, id: string, raw: string) => {
+        const file = cleanId(id);
+        const query = id.slice(file.length);
+        if (vp) raw = await vp.transformCss(app!, 'pre', ctx, raw, id);
+        const result = await css.process(ctx, file, raw, isCssModule(file));
+        if (vp) result.code = await vp.transformCss(app!, 'post', ctx, result.code, id);
+        if (/[?&]inline\b/.test(query)) return { code: `export default ${JSON.stringify(result.code)};`, moduleType: 'js' };
+        css.add(file, result.code);
+        const exports = result.exports ? `export default ${JSON.stringify(result.exports)};` : 'export {};';
+        return { code: exports, moduleType: 'js', moduleSideEffects: true };
+    };
+    // Stylesheets a plugin loads (UnoCSS's virtual:uno.css) are compiled and collected like files.
+    const pluginCss = {
+        load: (ctx: any, id: string, code: string) => stylesheetModule(ctx, id, code),
+        of(ctx: any, chunk: any): string[] {
+            const found = new Set<string>();
+            for (const id of chunk.moduleIds ?? []) for (const dep of ctx.getModuleInfo(id)?.importedIds ?? []) if (css.has(cleanId(dep))) found.add(dep);
+            return [...found];
+        },
+    };
+
+    /** The app's CSS file: the pages' stylesheets, then the imported ones in cascade order. */
+    const collectCss = async (ctx: any): Promise<string> => {
+        const pages: string[] = [];
+        for (const html of htmlEntries) {
+            for (const file of html.styles) {
+                let raw = await fsp.readFile(file, 'utf8');
+                if (vp) raw = await vp.transformCss(app!, 'pre', ctx, raw, file);
+                const result = await css.process(ctx, file, raw, false);
+                pages.push(vp ? await vp.transformCss(app!, 'post', ctx, result.code, file) : result.code);
+            }
+        }
+        return [pages.join('\n'), css.order.map((f) => css.get(f)!).join('\n')].filter(Boolean).join('\n');
+    };
+    let cssFile: string | null = null;
+
     const plugins: any[] = [
         // Vite's order: `enforce: 'pre'`, the built-ins, the rest, `enforce: 'post'`.
-        ...(vp ? vp.forRolldown(app!, app!.pre) : []),
+        ...(vp ? vp.forRolldown(app!, app!.pre, pluginCss) : []),
         {
             name: 'lunx:framework',
             // Hook filters keep Rolldown from calling into JS for modules a
@@ -300,17 +348,11 @@ export async function productionBuild(config: BuildConfig, framework: string, op
               filter: { id: /\.(css|pcss|postcss|scss|sass|less|styl|stylus)(\?.*)?$/ },
               async handler(this: any, id: string) {
                 const file = cleanId(id);
-                if (!CSS_EXT.test(file)) return null;
-                const query = id.slice(file.length);
-                let raw = await fsp.readFile(file, 'utf8');
-                if (/[?&]raw\b/.test(query)) return { code: `export default ${JSON.stringify(raw)};`, moduleType: 'js' };
-                if (vp) raw = await vp.transformCss(app!, 'pre', this, raw, id);
-                const result = await css.process(this, file, raw, isCssModule(file));
-                if (vp) result.code = await vp.transformCss(app!, 'post', this, result.code, id);
-                if (/[?&]inline\b/.test(query)) return { code: `export default ${JSON.stringify(result.code)};`, moduleType: 'js' };
-                css.add(file, result.code);
-                const exports = result.exports ? `export default ${JSON.stringify(result.exports)};` : 'export {};';
-                return { code: exports, moduleType: 'js', moduleSideEffects: true };
+                // Not a file: a virtual stylesheet some plugin loads.
+                if (!CSS_EXT.test(file) || !fs.existsSync(file)) return null;
+                const raw = await fsp.readFile(file, 'utf8');
+                if (/[?&]raw\b/.test(id.slice(file.length))) return { code: `export default ${JSON.stringify(raw)};`, moduleType: 'js' };
+                return stylesheetModule(this, id, raw);
               },
             },
         },
@@ -411,7 +453,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         },
         {
             name: 'lunx:css-emit',
-            generateBundle(this: any, _opts: unknown, bundle: Record<string, any>) {
+            async generateBundle(this: any, _opts: unknown, bundle: Record<string, any>) {
                 // Extracted CSS modules are empty JS, so they vanish from
                 // chunk.moduleIds; walk the import graph instead. Depth-first
                 // in import order is exactly the cascade order of the source.
@@ -433,12 +475,34 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 chunks.sort((x, y) => Number(y.isEntry) - Number(x.isEntry));
                 for (const chunk of chunks) if (chunk.facadeModuleId) visit(chunk.facadeModuleId);
                 css.order = order;
+                // Emitted here, so the plugins' generateBundle sees (and may rewrite) it, as Vite's CSS.
+                const all = await collectCss(this);
+                if (all.trim()) {
+                    cssFile = `assets/style.${hash8(all)}.css`;
+                    this.emitFile({ type: 'asset', fileName: cssFile, source: all });
+                }
             },
         },
     ];
 
     if (vp) {
-        plugins.push(...vp.forRolldown(app!, [...app!.normal, ...app!.post]));
+        plugins.push(...vp.forRolldown(app!, [...app!.normal, ...app!.post], pluginCss));
+        // Vite's asset placeholders in plugin output (vite-imagetools' `__VITE_ASSET__<ref>__`).
+        plugins.push({
+            name: 'lunx:vite-asset-urls',
+            renderChunk(this: any, code: string, chunk: any) {
+                if (!code.includes('__VITE_ASSET__')) return null;
+                const dir = path.posix.dirname(chunk.fileName);
+                return {
+                    code: code.replace(/__VITE_ASSET__([\w$]+)__(?:\$_(.*?)__)?/g, (_m: string, ref: string, postfix = '') => {
+                        const fileName = this.getFileName(ref) + postfix;
+                        // A relative base: resolved against the chunk at run time.
+                        return base === './' ? `"+new URL(${JSON.stringify(path.posix.relative(dir, fileName))}, import.meta.url).href+"` : base + fileName;
+                    }),
+                    map: null,
+                };
+            },
+        });
         // As Vite: a plugin's virtual module imports packages from the project root.
         const real = new Map<string, boolean>();
         const rootImporter = path.join(root, 'index.html');
@@ -522,25 +586,13 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush()]));
 
     // ── CSS ──────────────────────────────────────────────────────────────────
-    const htmlCss = new Map<HtmlEntry, string[]>();
-    for (const html of htmlEntries) {
-        const files: string[] = [];
-        for (const file of html.styles) {
-            const ctx = { emitFile: (f: any) => emittedAssets.push({ fileName: f.fileName, type: 'asset', source: f.source }) };
-            let raw = await fsp.readFile(file, 'utf8');
-            if (vp) raw = await vp.transformCss(app!, 'pre', ctx, raw, file);
-            const result = await css.process(ctx, file, raw, false);
-            files.push(vp ? await vp.transformCss(app!, 'post', ctx, result.code, file) : result.code);
+    // Emitted in the bundle (lunx:css-emit); a page with only stylesheets has no bundle.
+    if (Object.keys(input).length === 0) {
+        const allCss = await collectCss({ emitFile: (f: any) => emittedAssets.push({ fileName: f.fileName, type: 'asset', source: f.source }) });
+        if (allCss.trim()) {
+            cssFile = `assets/style.${hash8(allCss)}.css`;
+            emittedAssets.push({ fileName: cssFile, type: 'asset', source: allCss });
         }
-        htmlCss.set(html, files);
-    }
-    const bundledCss = css.order.map((f) => css.get(f)!).join('\n');
-    const pageCss = [...htmlCss.values()].flat().join('\n');
-    let cssFile: string | null = null;
-    const allCss = [pageCss, bundledCss].filter(Boolean).join('\n');
-    if (allCss.trim()) {
-        cssFile = `assets/style.${hash8(allCss)}.css`;
-        emittedAssets.push({ fileName: cssFile, type: 'asset', source: allCss });
     }
     for (const asset of emittedAssets) {
         await fsp.mkdir(path.dirname(path.join(outDir, asset.fileName)), { recursive: true });

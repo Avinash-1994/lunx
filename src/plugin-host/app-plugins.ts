@@ -47,11 +47,42 @@ export async function resolveAppPlugins(root: string, userConfig: Record<string,
 const CSS_FILE = /\.(css|pcss|postcss|scss|sass|less|styl|stylus)$/;
 export const isStylesheet = (id: string): boolean => CSS_FILE.test(cleanUrl(id));
 
+export interface LunxCss {
+    /** A stylesheet a plugin loads, compiled by lunx's CSS as Vite's CSS plugin would take it. */
+    load(ctx: any, id: string, code: string): Promise<any>;
+    /** The stylesheets a chunk's modules import: lunx extracts them, so they are not among its modules. */
+    of(ctx: any, chunk: any): string[];
+}
+
 /** Plugins as Rolldown takes them: Rollup hooks with Vite's `this.environment` and `{ ssr }`. */
-export function forRolldown(app: AppPlugins, plugins: any[]): any[] {
+export function forRolldown(app: AppPlugins, plugins: any[], css?: LunxCss): any[] {
     return plugins.map((plugin) => {
         const wrapped = wrapPlugin(plugin, app.environment);
         for (const hook of AFTER_WRITE) delete wrapped[hook];
+        // In Vite a chunk's modules include its stylesheets (UnoCSS finds its layers there).
+        const render = wrapped.renderChunk;
+        const renderHandler = getHookHandler(render);
+        if (renderHandler && css) {
+            const withStylesheets = function (this: any, code: string, chunk: any, ...rest: any[]) {
+                const extra = css.of(this, chunk).filter((id) => !(id in chunk.modules));
+                if (!extra.length) return renderHandler.call(this, code, chunk, ...rest);
+                const modules = { ...chunk.modules };
+                for (const id of extra) modules[id] = { code: null, originalLength: 0, renderedLength: 0, removedExports: [], renderedExports: [] };
+                const view = new Proxy(chunk, { get: (target, prop) => (prop === 'modules' ? modules : Reflect.get(target, prop, target)) });
+                return renderHandler.call(this, code, view, ...rest);
+            };
+            wrapped.renderChunk = typeof render === 'function' ? withStylesheets : { ...render, handler: withStylesheets };
+        }
+        const load = wrapped.load;
+        const loadHandler = getHookHandler(load);
+        if (loadHandler && css) {
+            const loadCss = async function (this: any, id: string, ...rest: any[]) {
+                const result = await loadHandler.call(this, id, ...rest);
+                const code = typeof result === 'string' ? result : result?.code;
+                return code != null && isStylesheet(id) ? css.load(this, id, code) : result;
+            };
+            wrapped.load = typeof load === 'function' ? loadCss : { ...load, handler: loadCss };
+        }
         // A stylesheet reaches Rolldown as the JavaScript lunx made of it; its CSS went through transformCss.
         const transform = wrapped.transform;
         const handler = getHookHandler(transform);

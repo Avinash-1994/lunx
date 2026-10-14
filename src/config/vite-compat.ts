@@ -62,7 +62,7 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
             vite = await vite({ command, mode: command === 'build' ? 'production' : 'development', isSsrBuild: false, isPreview: false });
         }
     } catch (err: any) {
-        notes.push(`could not evaluate ${file} (${String(err?.message ?? err).split('\n')[0]}); read it statically instead`);
+        notes.push(`could not evaluate ${file} (${String(err?.message ?? err).split('\n')[0]}); read it statically instead, without its plugins`);
         return { file, ...staticRead(await fsp.readFile(path.join(root, file), 'utf8')), notes };
     }
     vite = vite ?? {};

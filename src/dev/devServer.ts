@@ -725,8 +725,15 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     }, vitePluginList, cfg.mode === 'production' ? 'production' : 'development', {
       httpServer: existingServer ?? null,
       port,
-      send: (payload: any) => broadcast(JSON.stringify(payload)),
+      // Vite's HMR payloads in lunx's protocol: updates go through the same queue as lunx's own.
+      send: (payload: any) => {
+        if (payload?.type !== 'update') return broadcast(JSON.stringify(payload));
+        for (const update of payload.updates ?? []) hmrThrottle.queueUpdate(update.path, update.type === 'css-update' ? 'css-update' : 'update');
+      },
     });
+    // What the plugins' `config` hooks added: aliases (node polyfills) and defines.
+    for (const entry of collectAliases(cfg.root, appDev.app.config.resolve.alias)) if (!aliases.some((a) => a.find === entry.find)) aliases.push(entry);
+    for (const [k, v] of Object.entries(appDev.app.config.define ?? {})) devDefines[k] ??= typeof v === 'string' ? v : JSON.stringify(v);
   }
 
   // Initialize Federation Dev

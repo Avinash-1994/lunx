@@ -196,16 +196,18 @@ export async function startAppDev(root: string, viteConfig: Record<string, any>,
         handle: (req, res) => run(middlewares, req, res),
         handleLate: (req, res) => run(late, req, res),
         async resolveImport(specifier, importer) {
-            if (!resolves) return null;
-            const resolved = await env.pluginContainer.resolveId(specifier, importer);
-            if (!resolved || resolved.external) return null;
-            const file = cleanUrl(resolved.id);
-            if (!path.isAbsolute(file) || !fs.existsSync(file)) return idToUrl(resolved.id);
+            const resolved = resolves ? await env.pluginContainer.resolveId(specifier, importer) : null;
+            if (resolved?.external) return null;
+            // A plugin's code may import a file by its path (vite-plugin-wasm's `/abs/x.wasm?url`).
+            const id = resolved?.id ?? (path.isAbsolute(cleanUrl(specifier)) && cleanUrl(specifier).startsWith(root + path.sep) && fs.existsSync(cleanUrl(specifier)) ? specifier : null);
+            if (!id) return null;
+            const file = cleanUrl(id);
+            if (!path.isAbsolute(file) || !fs.existsSync(file)) return idToUrl(id);
             // Packages stay with lunx's dependency pre-bundling.
             if (file.split(path.sep).includes('node_modules')) return null;
             const rel = path.relative(root, file);
             const url = rel.startsWith('..') || path.isAbsolute(rel) ? `/@fs/${file.split(path.sep).join('/').replace(/^\//, '')}` : `/${rel.split(path.sep).join('/')}`;
-            return url + resolved.id.slice(file.length);
+            return url + id.slice(file.length);
         },
         load,
         transform,

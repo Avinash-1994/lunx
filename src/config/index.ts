@@ -403,7 +403,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
       rawConfig = foreign.config;
       loadedConfigPath = foreign.file;
       log.info(`[lunx] Using ${foreign.file} (Vite-compatible). Run \`lunx migrate\` to convert it.`);
-      for (const note of foreign.notes) log.info(`[lunx]   ${note}`);
+      for (const note of foreign.notes) (note.startsWith('could not evaluate') ? log.warn : log.info)(`[lunx]   ${note}`);
     } else {
       // Return default config if file not found, with auto-detection
       log.info('No config file found, using defaults...');

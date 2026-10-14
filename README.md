@@ -396,7 +396,9 @@ lunx security report
 
 ## 🔌 Plugins
 
-Plugins are Rollup-style objects in `plugins` (in `lunx.config.ts`, or an existing `vite.config.*`): `resolveId`, `load` and `transform` run in dev and in the build, `renderChunk` and `generateBundle` in the build, and `configureServer` adds dev-server middleware. Framework projects (SvelteKit, Nuxt, Astro, React Router…) build on lunx's Vite-compatible plugin host, which runs the full Vite plugin lifecycle (`config`, `configResolved`, `transformIndexHtml`, `handleHotUpdate`, `closeBundle`…); plain app builds do not run those Vite-only hooks yet, so plugins built on them (`vite-plugin-pwa`, for example) need a framework project for now. esbuild plugins in `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
+Vite and Rollup plugins go in `plugins` (in `lunx.config.ts`, or an existing `vite.config.*`) and run with Vite's lifecycle in dev and in the build: `apply`, `enforce`, `config`, `configResolved`, `resolveId` / `load` / `transform` (virtual modules included), `transformIndexHtml`, `configureServer`, `renderChunk`, `generateBundle`, `writeBundle` and `closeBundle` (once the whole app is on disk). Plugins that import `vite` get lunx's stand-in, so Vite does not need to be installed. Framework projects (SvelteKit, Nuxt, Astro, React Router…) run on lunx's Vite-compatible plugin host. esbuild plugins in `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
+
+`npm run test:vite-plugins` builds, previews and runs on the dev server, in Chromium, a React app with each of: `vite-plugin-pwa`, `@tailwindcss/vite`, `unocss`, `vite-plugin-svgr`, `vite-tsconfig-paths`, `unplugin-auto-import`, `unplugin-icons`, `vite-plugin-html`, `vite-plugin-static-copy`, `rollup-plugin-visualizer`, `@mdx-js/rollup`, `vite-plugin-glsl`, `vite-imagetools`, `vite-plugin-wasm`, `vite-plugin-node-polyfills`, `vite-plugin-checker` and `vite-plugin-inspect` ([report](reports/VITE_PLUGINS_MATRIX.json)). Not supported: `@vitejs/plugin-legacy`, whose legacy chunks need a SystemJS build that Rolldown does not write.
 
 ```typescript
 import { defineConfig } from 'lunx-dev';

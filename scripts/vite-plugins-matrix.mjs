@@ -15,6 +15,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 import { chromium } from 'playwright';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,11 +24,40 @@ const only = flag('only')?.split(',');
 const keep = process.argv.includes('--keep');
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'lunx-vite-plugins-'));
 
-// A 1×1 PNG and a WebAssembly module exporting add(a, b).
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+/** A grey square PNG, size × size. */
+function png(size) {
+    const crc = (buf) => {
+        let c = ~0;
+        for (const byte of buf) {
+            c ^= byte;
+            for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+        }
+        return ~c >>> 0;
+    };
+    const chunk = (type, data) => {
+        const body = Buffer.concat([Buffer.from(type), data]);
+        const out = Buffer.alloc(body.length + 8);
+        out.writeUInt32BE(data.length, 0);
+        body.copy(out, 4);
+        out.writeUInt32BE(crc(body), body.length + 4);
+        return out;
+    };
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(size, 0);
+    header.writeUInt32BE(size, 4);
+    header[8] = 8; // bit depth
+    header[9] = 0; // greyscale
+    const rows = Buffer.concat(Array.from({ length: size }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(size, 128)])));
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', zlib.deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+const PNG = png(16);
+// A WebAssembly module exporting add(a, b).
 const WASM = Buffer.from('0061736d0100000001070160027f7f017f030201000707010361646400000a09010700200020016a0b', 'hex');
 
 /**
+ * Not here: @vitejs/plugin-legacy, whose legacy chunks are a second build in
+ * SystemJS format, which Rolldown does not write.
+ *
  * name, packages, vite.config imports and plugin calls, project files, and
  * what the page must show: `{ sel, text | tag | style: [prop, value] }`,
  * `{ fetch: url, contains }`, `{ sw: true }` (preview only); `dist` / `root`:
@@ -162,9 +192,10 @@ const SCENARIOS = [
     },
     {
         name: 'wasm',
-        packages: ['vite-plugin-wasm', 'vite-plugin-top-level-await'],
-        imports: [`import wasm from 'vite-plugin-wasm';`, `import topLevelAwait from 'vite-plugin-top-level-await';`],
-        plugins: ['wasm()', 'topLevelAwait()'],
+        // Without vite-plugin-top-level-await: browsers run top-level await, and it needs esbuild, which Vite 8 no longer installs.
+        packages: ['vite-plugin-wasm'],
+        imports: [`import wasm from 'vite-plugin-wasm';`],
+        plugins: ['wasm()'],
         files: { 'src/add.wasm': WASM },
         appImports: `// @ts-ignore\nimport { add } from './add.wasm';`,
         app: `<p id="check">wasm {add(2, 3)}</p>`,
@@ -178,15 +209,6 @@ const SCENARIOS = [
         appImports: `import { Buffer } from 'buffer';`,
         app: `<p id="check">{Buffer.from('cG9seWZpbGwgb2s=', 'base64').toString()}</p>`,
         expect: [{ sel: '#check', text: 'polyfill ok' }],
-    },
-    {
-        name: 'legacy',
-        packages: ['@vitejs/plugin-legacy', 'terser'],
-        imports: [`import legacy from '@vitejs/plugin-legacy';`],
-        plugins: [`legacy({ targets: ['defaults'] })`],
-        app: `<p id="check">legacy ok</p>`,
-        expect: [{ sel: '#check', text: 'legacy ok' }],
-        html: /nomodule/,
     },
     {
         name: 'checker',

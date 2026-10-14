@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Vite plugins in apps**, with Vite's lifecycle on lunx's own build and dev server (they used to reach the build as bare Rollup plugins, and dev ignored them): `apply`, `enforce`, `config`, `configResolved`, virtual modules, `transformIndexHtml`, stylesheet transforms around lunx's CSS compiler, `configureServer`, `writeBundle` / `closeBundle` once the app is on disk, Vite's asset placeholders, and HMR for modules a plugin built from other files (Tailwind). `scripts/vite-plugins-matrix.mjs` checks 17 popular plugins in Chromium.
+
 ### Changed
 - **Parallel component compilation**: production builds of projects with 100+ Vue / Svelte / compiled-JSX components compile them on worker threads, starting before Rolldown asks for them. 1,000 Vue SFCs build cold in ~1.6–2.0 s instead of ~3.1 s on 4 cores; output is identical. `LUNX_COMPILE_WORKERS=0` turns it off, `=N` sets the pool size.
 - Vue compiles in production mode without unused source maps, and the compiler loads with `require()`.
