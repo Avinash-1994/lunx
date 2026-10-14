@@ -35,7 +35,7 @@ function withModuleType(result: any, id: string): any {
     return result;
 }
 
-function contextWithEnvironment(ctx: any, environment: any): any {
+export function contextWithEnvironment(ctx: any, environment: any): any {
     return new Proxy(ctx, {
         get(target, prop) {
             if (prop === 'environment') return environment;
@@ -87,7 +87,7 @@ async function generateBundleWithAssignments(ctx: any, handler: (...a: any[]) =>
 /** Hook argument that carries Vite's options object (`{ ssr }` for resolveId / load / transform). */
 const OPTIONS_ARG: Record<string, number> = { resolveId: 2, load: 1, transform: 2 };
 
-function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => void = () => {}): any {
+export function wrapPlugin(plugin: any, environment: any, decorate: (chunk: any) => void = () => {}): any {
     const out: any = { name: plugin.name };
     const ssr = environment.config?.consumer === 'server';
     for (const key of Object.keys(plugin)) {
@@ -138,7 +138,7 @@ function copyDir(src: string, dest: string): void {
     }
 }
 
-function makeEnvironment(config: any, name: string): any {
+export function makeEnvironment(config: any, name: string): any {
     return {
         name,
         mode: 'build',

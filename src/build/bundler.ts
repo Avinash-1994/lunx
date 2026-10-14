@@ -200,7 +200,7 @@ export async function build(rawConfig: BuildConfig) {
       if (serverTarget) startSecurityGate();
       result = serverTarget
         ? await (await import('./server-build.js')).serverBuild(config, framework)
-        : await productionBuild(config, framework, { onEngineBusy: startSecurityGate, deferCompression: true });
+        : await productionBuild(config, framework, { onEngineBusy: startSecurityGate, deferCompression: true, deferAfterWrite: true });
       console.log(`[lunx] bundled ${result.modules.length} modules with ${result.engine} in ${Math.round(result.durationMs)}ms`);
     } else {
       startSecurityGate();
@@ -338,6 +338,8 @@ export async function build(rawConfig: BuildConfig) {
     }
 
   phase('sri/csp/headers');
+    // Plugins' writeBundle / closeBundle see the pages as served (a service worker precaches them).
+    await result.afterWrite?.();
     // JS and CSS were compressed alongside the steps above; HTML now that they rewrote it.
     await result.finishCompression?.();
   phase('precompression');

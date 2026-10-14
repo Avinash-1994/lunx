@@ -22,6 +22,7 @@ import { fileURLToPath } from 'url';
 import { BuildConfig } from '../config/index.js';
 import { log } from '../utils/logger.js';
 import { PluginManager } from '../plugins/index.js';
+import type { AppDev } from '../plugin-host/app-dev.js';
 import { PluginSandbox } from '../core/sandbox.js';
 import { NativeWorker, engineUsed } from '../native/index.js';
 
@@ -44,15 +45,35 @@ import { LiveConfigManager } from '../config/live-config.js';
  * Rewrite bare module imports to node_modules paths
  * Production-grade AST-based rewriting (Phase C1 Honest)
  */
-async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federation?: DevFederation | null, aliases?: AliasEntry[]): Promise<string> {
+async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Map<string, string>, federation?: DevFederation | null, aliases?: AliasEntry[], plugins?: AppDev | null, importer?: string): Promise<string> {
   try {
     const ast = parseModule('module.js', code);
+
+    // Imports a Vite plugin resolves (virtual modules, its own aliases) go where it says.
+    const byPlugin = new Map<string, string>();
+    if (plugins && importer) {
+      const specifiers = new Set<string>();
+      for (const node of ast.body as any[]) {
+        const source = node.type === 'ImportDeclaration' || ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') && node.source) ? node.source.value : null;
+        if (typeof source === 'string' && !/^(https?:|data:|\/@)/.test(source)) specifiers.add(source);
+      }
+      await Promise.all([...specifiers].map(async (spec) => {
+        const url = await plugins.resolveImport(spec, importer);
+        if (url) byPlugin.set(spec, url);
+      }));
+    }
 
     const replacements: { start: number, end: number, replacement: string }[] = [];
 
     const addReplacement = (node: any) => {
       if (node && node.type === 'Literal' && typeof node.value === 'string') {
         let specifier = node.value;
+        const pluginUrl = byPlugin.get(specifier);
+        if (pluginUrl) {
+          const marked = !pluginUrl.includes('?') && (CSS_LANGS.test(pluginUrl) || /\.json$/.test(pluginUrl) || DEV_ASSET_EXT.test(pluginUrl));
+          replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(marked ? `${pluginUrl}?import` : pluginUrl) });
+          return;
+        }
         // resolve.alias / tsconfig paths ('@/components/x' → '/src/components/x')
         const aliased = aliases?.length && !specifier.startsWith('.') ? applyAlias(specifier, aliases) : null;
         if (aliased) {
@@ -71,7 +92,7 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
             replacements.push({
               start: node.start,
               end: node.end,
-              replacement: `'${specifier}?import'`
+              replacement: `'${specifier}${specifier.includes('?') ? '&' : '?'}import'`
             });
           }
           return;
@@ -346,9 +367,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   const nativeWorker = new NativeWorker(workerThreads);
   const pluginManager = new PluginManager();
   _mark('plugin manager ready');
-  if (cfg.plugins) {
-    cfg.plugins.forEach(p => pluginManager.register(p));
-  }
+  // lunx.config plugins are Vite / Rollup plugins: they run on the Vite bridge below (plugin-host/app-dev).
 
   // Initialize Sandbox
   const { PermissionManager } = await import('../core/permissions.js');
@@ -691,6 +710,25 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
   const hmrThrottle = new HMRThrottle(broadcast);
 
+  // Vite plugins from vite.config / lunx.config, with Vite's dev lifecycle. Nothing of it loads without them.
+  const vitePluginList = [...((cfg as any).__vitePlugins ?? []), ...(cfg.plugins ?? []).filter((p: any) => p && typeof p === 'object')];
+  let appDev: AppDev | null = null;
+  if (vitePluginList.length) {
+    const vite = (cfg as any).__viteConfig ?? {};
+    const { startAppDev } = await import('../plugin-host/app-dev.js');
+    appDev = await startAppDev(cfg.root, {
+      ...vite,
+      base: (cfg as any).base ?? vite.base,
+      publicDir: (cfg as any).publicDir ?? vite.publicDir,
+      build: { ...vite.build, outDir: cfg.outDir ?? vite.build?.outDir },
+      server: { ...vite.server, port },
+    }, vitePluginList, cfg.mode === 'production' ? 'production' : 'development', {
+      httpServer: existingServer ?? null,
+      port,
+      send: (payload: any) => broadcast(JSON.stringify(payload)),
+    });
+  }
+
   // Initialize Federation Dev
   // Federation dev logic is isolated in a dedicated module so runtime
   // functionality and helper generation remain separate from the main server.
@@ -829,7 +867,37 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     });
   };
 
+  /** A module a Vite plugin loaded: compiled like a source file of its kind, then the plugins' later transforms. */
+  const servePluginModule = async (id: string, code: string, transformed = false): Promise<string> => {
+    const file = id.split('?')[0]!;
+    const onDisk = path.isAbsolute(file) && existsSync(file);
+    if (CSS_LANGS.test(file)) {
+      const compiled = await compileCss({ root: cfg.root, file: onDisk ? file : path.join(cfg.root, 'index.css'), source: code, modules: isCssModule(file), minify: false, resolveUrl: (_from, ref) => ref });
+      const css = await appDev!.transform('post', compiled.code, id);
+      return `const id = ${JSON.stringify(id)};
+let el = document.querySelector('style[data-lunx-css="' + CSS.escape(id) + '"]');
+if (!el) { el = document.createElement('style'); el.setAttribute('data-lunx-css', id); document.head.appendChild(el); }
+el.textContent = ${JSON.stringify(css)};
+export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stringify(css)};
+`;
+    }
+    // Compiled as the extension says (a virtual `.jsx`, TypeScript); anything else as JavaScript.
+    const scriptExt = /\.(m?[jt]sx?|vue|svelte)$/.test(file);
+    const base = onDisk ? file : path.join(cfg.root, 'node_modules', '.lunx', 'virtual', file.replace(/[\0:]/g, '_').replace(/^[/\\]+/, ''));
+    const compiled = await universalTransformer.transform({
+      filePath: scriptExt ? base : `${base}.js`,
+      code,
+      framework: primaryFramework,
+      root: cfg.root,
+      isDev: true,
+      define: devDefines,
+    });
+    const out = transformed ? compiled.code : await appDev!.transform('post', compiled.code, id);
+    return rewriteImports(out, cfg.root, preBundledDeps, devFederation, aliases, appDev, onDisk ? file : path.join(cfg.root, 'index.html'));
+  };
+
   const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    if (appDev && await appDev.handle(req, res)) return;
     const reqPath = (req.url || '/').split('?')[0]!;
     if (reqPath !== '/' && !reqPath.endsWith('.html') && !reqPath.startsWith('/@lunx/hmr-client') && !reqPath.startsWith('/__lunx')) {
       await prebundleReady;
@@ -978,6 +1046,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       }
     }
 
+    if (appDev && await appDev.handleLate(req, res)) return;
+
     // SPA Fallback: If route has no extension and it's not a known internal route, serve index.html
     const isInternal = url.startsWith('/@') || url.startsWith('/__') || url.startsWith('/node_modules/');
     const hasExtension = path.extname(url.split('?')[0]) !== '';
@@ -1089,6 +1159,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       }
 
       try {
+        if (appDev) data = await appDev.indexHtml(url, data);
         // Inject entry point if not present (simple heuristic)
         // Angular CLI projects often don't have the script tag in source index.html
         let needsInjection = true;
@@ -1571,6 +1642,16 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       }
     }
 
+    // Modules a Vite plugin loads: virtual modules (`/@id/…`) and queries such as `?react`.
+    if (appDev) {
+      const mod = await appDev.load(url);
+      if (mod) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+        res.end(await servePluginModule(mod.id, mod.code, mod.transformed));
+        return;
+      }
+    }
+
     // Try to serve from public first
     const publicUrlPath = url.startsWith('/') ? url.slice(1) : url;
     const publicPath = path.join(cfg.root, 'public', publicUrlPath);
@@ -1644,6 +1725,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
         // Plugin transform (JS plugins like Tailwind)
         raw = await pluginManager.transform(raw, filePath);
+        if (appDev) raw = await appDev.transform('pre', raw, filePath);
 
         // Use Universal Transformer (supports all frameworks)
         try {
@@ -1656,8 +1738,9 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             define: devDefines
           });
 
-          const globbed = transformGlobImports(transformResult.code, filePath, cfg.root);
-          let code = await rewriteImports(globbed ?? transformResult.code, cfg.root, preBundledDeps, devFederation, aliases);
+          const compiled = appDev ? await appDev.transform('post', transformResult.code, filePath) : transformResult.code;
+          const globbed = transformGlobImports(compiled, filePath, cfg.root);
+          let code = await rewriteImports(globbed ?? compiled, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath);
 
           res.writeHead(200, {
             'Content-Type': 'application/javascript',
@@ -1710,6 +1793,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       if (CSS_LANGS.test(filePath)) {
         let raw = await fs.readFile(filePath, 'utf-8');
         raw = await pluginManager.transform(raw, filePath);
+        if (appDev) raw = await appDev.transform('pre', raw, filePath);
         const compiled = await compileCss({
           root: cfg.root,
           file: filePath,
@@ -1727,13 +1811,15 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           },
         });
 
+        if (appDev) compiled.code = await appDev.transform('post', compiled.code, filePath);
+
         if (/[?&]inline\b/.test(url)) {
           res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
           res.end(`export default ${JSON.stringify(compiled.code)};`);
           return;
         }
 
-        if (url.includes('?import')) {
+        if (/[?&]import\b/.test(url)) {
           const id = '/' + path.relative(cfg.root, filePath).split(path.sep).join('/');
           // One <style> per file, replaced in place on every hot update.
           const jsModule = `const id = ${JSON.stringify(id)};
@@ -1754,7 +1840,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
       if (ext === '.json') {
         const raw = await fs.readFile(filePath, 'utf-8');
-        if (url.includes('?import')) {
+        if (/[?&]import\b/.test(url)) {
           res.writeHead(200, { 'Content-Type': 'application/javascript' });
           res.end(`export default ${raw}; `);
           return;
@@ -1769,7 +1855,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
         res.end(`export default ${JSON.stringify(await fs.readFile(filePath, 'utf-8'))};`);
         return;
       }
-      if (url.includes('?url') || url.includes('?import')) {
+      if (url.includes('?url') || /[?&]import\b/.test(url)) {
         const publicPath = url.split('?')[0];
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
         res.end(`export default ${JSON.stringify(publicPath)};`);
@@ -1782,6 +1868,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       if (ext === '.html') {
         mime = 'text/html';
         let html = data.toString('utf-8');
+        if (appDev) html = await appDev.indexHtml(url, html);
         let clientScript = `\n<script type="module" src="/@lunx/hmr-client"></script>\n`;
         let preamble = `
     <script>
@@ -1880,6 +1967,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     const { createUWSServer } = await import('./uWS-shim.js');
     server = createUWSServer(httpsOptions);
     (server as any).requestHandler = requestHandler;
+    appDev?.setHttpServer(server);
   }
 
   // WebSocket Server setup.
@@ -1960,6 +2048,13 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   // A short batch: editors write a save as one or two events, and each ms is HMR latency.
   const watcher = new DevWatcher(cfg.root);
   watcher.on('change', async (files: string[]) => {
+    // Modules a Vite plugin built from these files (a Tailwind stylesheet from the sources it scanned) update with them.
+    const pluginDependents = new Set(appDev ? files.flatMap((f) => appDev!.fileChanged(f)) : []);
+    for (const file of files) pluginDependents.delete(file);
+    for (const dep of pluginDependents) {
+      universalTransformer.clearCache(dep);
+      hmrThrottle.queueUpdate('/' + path.relative(cfg.root, dep).split(path.sep).join('/'), dep.endsWith('.css') ? 'css-update' : 'update');
+    }
     for (const file of files) {
       try {
         // Clear transform cache for changed file
@@ -1973,7 +2068,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           try {
             // Compile now to catch errors at once, with the same input and options as the
             // request path, so the browser's request for the update hits this result.
-            const code = await pluginManager.transform(await fs.readFile(file, 'utf-8'), file);
+            let code = await pluginManager.transform(await fs.readFile(file, 'utf-8'), file);
+            if (appDev) code = await appDev.transform('pre', code, file);
             await universalTransformer.transform({
               filePath: file,
               code,

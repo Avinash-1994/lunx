@@ -361,6 +361,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
   try {
     if (await fs.access(lunxTsPath).then(() => true).catch(() => false)) {
+      await (await import('./vite-compat.js')).redirectViteForPlugins(lunxTsPath);
       rawConfig = await loadModuleConfig(lunxTsPath, cwd);
       loadedConfigPath = 'lunx.config.ts';
     } else if (await fs.access(lunxCjsPath).then(() => true).catch(() => false)) {
@@ -453,7 +454,10 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
     const config = result.data as BuildConfig;
     const root = config.root || cwd;
-    if (foreign?.plugins.length) (config as any).__rollupPlugins = foreign.plugins;
+    if (foreign?.plugins.length) {
+      (config as any).__vitePlugins = foreign.plugins;
+      (config as any).__viteConfig = foreign.vite;
+    }
 
     // CFG-02: normalise entry (handles string, array, or auto-detect)
     config.entry = normaliseEntry(config.entry as any, root);

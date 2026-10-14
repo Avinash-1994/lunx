@@ -68,7 +68,7 @@ function compilePatternFilter(spec: any, forId: boolean): Matcher | null {
 const filterCache = new WeakMap<object, { id: Matcher | null; code: Matcher | null }>();
 
 /** Hook filter (Vite 6.3 / Rolldown): skip the call when it cannot match. */
-function passesFilter(hook: any, id: string, code?: string): boolean {
+export function passesFilter(hook: any, id: string, code?: string): boolean {
     if (typeof hook !== 'object' || !hook?.filter) return true;
     let compiled = filterCache.get(hook);
     if (!compiled) {
@@ -86,6 +86,9 @@ export class PluginContainer {
     private started: Promise<void> | null = null;
     private closed = false;
 
+    /** `this.addWatchFile(file)` from a hook running for module `id`: the module depends on that file. */
+    onWatchFile?: (file: string, id?: string) => void;
+
     constructor(public environment: any, public plugins: any[]) {}
 
     private context(plugin: any, extra: Record<string, any> = {}): any {
@@ -93,6 +96,7 @@ export class PluginContainer {
         const { resolveId, moduleMeta, watchFiles } = { resolveId: this.resolveId.bind(this), moduleMeta: this.moduleMeta, watchFiles: this.watchFiles };
         const self = { load: this.load.bind(this), transform: this.transform.bind(this) };
         const env = this.environment;
+        const onWatchFile = this.onWatchFile;
         const ctx: any = {
             environment: env,
             meta: { rollupVersion: '4.40.0', viteVersion: VERSION, watchMode: env.mode === 'dev', rolldownVersion: '1.2.12' },
@@ -140,6 +144,7 @@ export class PluginContainer {
             addWatchFile(file: string) {
                 watchFiles.add(file);
                 env.watcher?.add?.(file);
+                onWatchFile?.(file, extra.id);
             },
             getWatchFiles() {
                 return [...watchFiles];

@@ -314,6 +314,10 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
         additionalAllowedHosts: [],
     };
 
+    // The config as the plugins left it, before defaults: what lunx's own app build maps from.
+    Object.defineProperty(resolved, 'userConfig', { value: config, enumerable: false });
+    Object.defineProperty(resolved, 'userPlugins', { value: userPlugins, enumerable: false });
+
     // The plugin chain, in Vite's order, with lunx's built-ins in place of Vite's.
     resolved.plugins = corePlugins(resolved, { pre: prePlugins, normal: normalPlugins, post: postPlugins });
     resolved.getSortedPlugins = (hook: string) => sortByHook(resolved.plugins, hook);

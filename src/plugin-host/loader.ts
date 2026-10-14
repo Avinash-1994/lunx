@@ -6,7 +6,8 @@
 
 import module from 'node:module';
 
-let installed = false;
+const installed = new Set<string>();
+let childProcesses = false;
 
 /** Packages lunx stands in for: the build tools frameworks import, mapped to lunx's own modules. */
 const REDIRECTS: Array<{ specifier: string; path: RegExp; to: string }> = [
@@ -21,15 +22,24 @@ const REDIRECTS: Array<{ specifier: string; path: RegExp; to: string }> = [
     { specifier: 'vite-node/source-map', path: /\/node_modules\/vite-node\/dist\/source-map\.(m?js|cjs)$/, to: './shims/vite-node-source-map.js' },
 ];
 
-export function installRedirects(): void {
-    if (installed) return;
-    installed = true;
-    // Child processes the framework starts get the same redirects.
-    const register = new URL('./register.js', import.meta.url).href;
-    if (!(process.env.NODE_OPTIONS ?? '').includes(register)) {
-        process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --import ${register}`.trim();
+/**
+ * `only`: just these packages, in this process. An app's Vite plugins need
+ * only `vite` (its helpers); the Rollup they bundle with themselves (workbox's
+ * service worker, in AMD) stays theirs.
+ */
+export function installRedirects(only?: readonly string[]): void {
+    if (!only && !childProcesses) {
+        childProcesses = true;
+        // Child processes the framework starts get the same redirects.
+        const register = new URL('./register.js', import.meta.url).href;
+        if (!(process.env.NODE_OPTIONS ?? '').includes(register)) {
+            process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --import ${register}`.trim();
+        }
     }
-    const targets = REDIRECTS.map((r) => ({ ...r, url: new URL(r.to, import.meta.url).href }));
+    const wanted = REDIRECTS.filter((r) => (!only || only.includes(r.specifier)) && !installed.has(r.specifier));
+    if (!wanted.length) return;
+    for (const r of wanted) installed.add(r.specifier);
+    const targets = wanted.map((r) => ({ ...r, url: new URL(r.to, import.meta.url).href }));
     const registerHooks = (module as any).registerHooks as undefined | ((hooks: any) => void);
     if (registerHooks) {
         registerHooks({

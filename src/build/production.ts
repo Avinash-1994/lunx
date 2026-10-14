@@ -23,6 +23,7 @@ import { TransformCache } from './build-cache.js';
 import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
+import type { AppPlugins } from '../plugin-host/app-plugins.js';
 
 // zlib (~8ms to load) is first needed after the bundle; the engine-busy hook loads it while Rolldown works.
 let zlibModule: Promise<typeof import('node:zlib')> | null = null;
@@ -48,6 +49,8 @@ export interface ProductionBuildResult {
     modules: string[];
     /** With `deferCompression`: compress the HTML pages as they are now, and wait for the rest. */
     finishCompression?: () => Promise<void>;
+    /** With `deferAfterWrite`: run the plugins' writeBundle / closeBundle. */
+    afterWrite?: () => Promise<void>;
 }
 
 export interface ProductionBuildOptions {
@@ -64,6 +67,11 @@ export interface ProductionBuildOptions {
      * (SRI, CSP).
      */
     deferCompression?: boolean;
+    /**
+     * Leave the plugins' writeBundle / closeBundle to the caller (`afterWrite`),
+     * to run once it has finished rewriting the pages.
+     */
+    deferAfterWrite?: boolean;
 }
 
 /** The bundler is a regular dependency, but a broken native binding must not take the CLI down. */
@@ -103,6 +111,10 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const minify = build.minify !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
 
+    // Vite plugins (from vite.config or lunx.config), with Vite's lifecycle.
+    const app = await resolveVitePlugins(config, root, outDir, base);
+    const vp = app && (await import('../plugin-host/app-plugins.js'));
+
     // ── Entries ──────────────────────────────────────────────────────────────
     const entries = (config.entry?.length ? config.entry : ['index.html']).map((e) => path.resolve(root, e));
     const input: Record<string, string> = {};
@@ -138,7 +150,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             input[nameFor(entry)] = entry;
             continue;
         }
-        const source = await fsp.readFile(entry, 'utf8');
+        let source = await fsp.readFile(entry, 'utf8');
+        if (vp) source = await vp.transformIndexHtml(app!, 'pre', source, { path: '/' + toPosix(path.relative(root, entry)), filename: entry });
         const html: HtmlEntry = { file: entry, source, scripts: new Map(), styles: [] };
         for (const m of source.matchAll(/<script\b[^>]*\btype=["']module["'][^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi)) {
             const src = m[1]!;
@@ -224,8 +237,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     }
 
     const plugins: any[] = [
-        ...((config as any).__rollupPlugins ?? []),
-        ...(config.plugins ?? []).filter((p: any) => p && typeof p === 'object' && (p.resolveId || p.load || p.transform || p.renderChunk || p.generateBundle)),
+        // Vite's order: `enforce: 'pre'`, the built-ins, the rest, `enforce: 'post'`.
+        ...(vp ? vp.forRolldown(app!, app!.pre) : []),
         {
             name: 'lunx:framework',
             // Hook filters keep Rolldown from calling into JS for modules a
@@ -289,9 +302,11 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 const file = cleanId(id);
                 if (!CSS_EXT.test(file)) return null;
                 const query = id.slice(file.length);
-                const raw = await fsp.readFile(file, 'utf8');
+                let raw = await fsp.readFile(file, 'utf8');
                 if (/[?&]raw\b/.test(query)) return { code: `export default ${JSON.stringify(raw)};`, moduleType: 'js' };
+                if (vp) raw = await vp.transformCss(app!, 'pre', this, raw, id);
                 const result = await css.process(this, file, raw, isCssModule(file));
+                if (vp) result.code = await vp.transformCss(app!, 'post', this, result.code, id);
                 if (/[?&]inline\b/.test(query)) return { code: `export default ${JSON.stringify(result.code)};`, moduleType: 'js' };
                 css.add(file, result.code);
                 const exports = result.exports ? `export default ${JSON.stringify(result.exports)};` : 'export {};';
@@ -422,6 +437,25 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         },
     ];
 
+    if (vp) {
+        plugins.push(...vp.forRolldown(app!, [...app!.normal, ...app!.post]));
+        // As Vite: a plugin's virtual module imports packages from the project root.
+        const real = new Map<string, boolean>();
+        const rootImporter = path.join(root, 'index.html');
+        plugins.push({
+            name: 'lunx:virtual-importer',
+            resolveId: {
+                filter: { id: /^[\w@]/ },
+                handler(this: any, source: string, importer: string | undefined, opts: any) {
+                    if (!importer || source.includes(':')) return null;
+                    const file = cleanId(importer);
+                    let exists = real.get(file);
+                    if (exists === undefined) real.set(file, (exists = !file.startsWith('\0') && path.isAbsolute(file) && fs.existsSync(file)));
+                    return exists ? null : this.resolve(source, rootImporter, { ...opts, skipSelf: true });
+                },
+            },
+        });
+    }
     if (federation) plugins.push(federationEnginePlugin(federation, root, appEntries));
     // Rolldown has the module graph and renders and minifies in Rust from here: start the
     // JavaScript work the build needs next while the main thread would otherwise wait.
@@ -446,9 +480,11 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         'import.meta.env': JSON.stringify(metaEnv),
         ...Object.fromEntries(Object.entries(metaEnv).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)])),
         ...((config as any).define ?? {}),
+        // What the plugins' `config` hooks added.
+        ...Object.fromEntries(Object.entries(app?.config.define ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])),
     };
 
-    const alias = normalizeAlias((config as any).resolve?.alias, root);
+    const alias = normalizeAlias([...toAliasList((config as any).resolve?.alias), ...toAliasList(app?.config.resolve.alias)], root);
     const tsconfig = ['tsconfig.json', 'jsconfig.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
     const jsxImportSource = framework === 'preact' ? 'preact' : undefined;
 
@@ -490,8 +526,11 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     for (const html of htmlEntries) {
         const files: string[] = [];
         for (const file of html.styles) {
-            const result = await css.process({ emitFile: (f: any) => emittedAssets.push({ fileName: f.fileName, type: 'asset', source: f.source }) }, file, await fsp.readFile(file, 'utf8'), false);
-            files.push(result.code);
+            const ctx = { emitFile: (f: any) => emittedAssets.push({ fileName: f.fileName, type: 'asset', source: f.source }) };
+            let raw = await fsp.readFile(file, 'utf8');
+            if (vp) raw = await vp.transformCss(app!, 'pre', ctx, raw, file);
+            const result = await css.process(ctx, file, raw, false);
+            files.push(vp ? await vp.transformCss(app!, 'post', ctx, result.code, file) : result.code);
         }
         htmlCss.set(html, files);
     }
@@ -530,6 +569,15 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         if (head.length) {
             const tags = head.map((t) => `    ${t}\n`).join('');
             page = /<\/head>/i.test(page) ? page.replace(/<\/head>/i, `${tags}  </head>`) : tags + page;
+        }
+        if (vp) {
+            const entryChunk = [...html.scripts.values()].map((name) => chunkByName.get(name)).find(Boolean);
+            page = await vp.transformIndexHtml(app!, 'post', page, {
+                path: '/' + toPosix(path.relative(root, html.file)),
+                filename: html.file,
+                bundle: Object.fromEntries(output.map((o) => [o.fileName, o])),
+                chunk: entryChunk,
+            });
         }
         const target = path.join(outDir, path.relative(root, html.file));
         await fsp.mkdir(path.dirname(target), { recursive: true });
@@ -587,7 +635,35 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const modules = new Set<string>();
     for (const o of output) if (o.type === 'chunk') for (const id of o.moduleIds as string[]) if (path.isAbsolute(cleanId(id))) modules.add(cleanId(id));
 
-    return { success: true, engine: getBundler().name, durationMs: performance.now() - started, artifacts, modules: [...modules], finishCompression };
+    // Plugins' writeBundle / closeBundle (a service worker over the finished app…).
+    const afterWrite = vp ? () => vp.runAfterWrite(app!, outDir, artifacts) : undefined;
+    if (afterWrite && !options.deferAfterWrite) await afterWrite();
+
+    return {
+        success: true, engine: getBundler().name, durationMs: performance.now() - started, artifacts, modules: [...modules], finishCompression,
+        afterWrite: options.deferAfterWrite ? afterWrite : undefined,
+    };
+}
+
+/**
+ * Vite plugins from vite.config (framework plugins already replaced by lunx)
+ * and lunx.config, resolved as Vite would: `apply`, `enforce`, `config`,
+ * `configResolved`. Null when there are none: then nothing of this loads.
+ */
+async function resolveVitePlugins(config: BuildConfig, root: string, outDir: string, base: string): Promise<AppPlugins | null> {
+    const list = [
+        ...((config as any).__vitePlugins ?? []),
+        ...(config.plugins ?? []).filter((p: any) => p && typeof p === 'object'),
+    ];
+    if (!list.length) return null;
+    const vite = (config as any).__viteConfig ?? {};
+    const { resolveAppPlugins } = await import('../plugin-host/app-plugins.js');
+    return resolveAppPlugins(root, {
+        ...vite,
+        base,
+        publicDir: (config as any).publicDir ?? vite.publicDir,
+        build: { ...vite.build, outDir: path.relative(root, outDir) || '.' },
+    }, list, 'build', config.mode ?? 'production');
 }
 
 // ── CSS processing ───────────────────────────────────────────────────────────
@@ -689,8 +765,14 @@ function sourcemapOption(value: unknown): boolean | 'inline' | 'hidden' {
     return false;
 }
 
+function toAliasList(alias: unknown): Array<{ find: string; replacement: string }> {
+    if (!alias) return [];
+    if (Array.isArray(alias)) return alias.filter((a) => typeof a?.find === 'string' && typeof a?.replacement === 'string');
+    return Object.entries(alias as Record<string, string>).map(([find, replacement]) => ({ find, replacement }));
+}
+
 function normalizeAlias(alias: unknown, root: string): Record<string, string> | null {
-    if (!alias) return null;
+    if (!alias || (Array.isArray(alias) && alias.length === 0)) return null;
     const entries: Array<[string, string]> = Array.isArray(alias)
         ? alias.map((a: any) => [String(a.find), String(a.replacement)])
         : Object.entries(alias as Record<string, string>);

@@ -15,8 +15,13 @@ const ATTR = (attrs: string, name: string): string | undefined => new RegExp(`\\
 const PROXY = '?html-proxy&index=';
 
 function hooksOf(config: any, phase: 'pre' | 'post'): Array<(html: string, ctx: any) => any> {
+    return indexHtmlHooks(config.plugins, phase);
+}
+
+/** `transformIndexHtml` handlers of `order: 'pre'` (before the page is read) or the rest (after bundling). */
+export function indexHtmlHooks(plugins: any[], phase: 'pre' | 'post'): Array<(html: string, ctx: any) => any> {
     const out: any[] = [];
-    for (const plugin of config.plugins) {
+    for (const plugin of plugins) {
         const hook = plugin.transformIndexHtml;
         if (!hook) continue;
         const order = typeof hook === 'object' ? hook.order ?? hook.enforce : undefined;
@@ -55,7 +60,7 @@ function inject(html: string, tags: any[]): string {
     return html;
 }
 
-async function applyHooks(hooks: any[], html: string, ctx: any): Promise<string> {
+export async function applyHooks(hooks: any[], html: string, ctx: any): Promise<string> {
     const tags: any[] = [];
     for (const hook of hooks) {
         const result = await hook(html, ctx);
