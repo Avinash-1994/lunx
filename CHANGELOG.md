@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-14
+
 ### Added
 - **CSS code splitting**, as in Vite: CSS that only lazy chunks import goes in their own stylesheets, and a lazy chunk's `import()` resolves once its CSS has loaded (no flash of unstyled content); the page's stylesheet keeps what loads up front. `build.cssCodeSplit: false` (also read from a vite.config) keeps one file.
 - **Build output audit** (`npm run test:parity`): the same app per framework (vanilla, React, Preact, Vue, Svelte, Solid, Lit, and a two-page React app with lazy routes, base path and source maps) built by lunx and Vite 8, both run in Chromium, outputs compared. lunx's JS is smaller in every one; every probe passes.

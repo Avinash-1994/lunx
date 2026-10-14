@@ -1,6 +1,6 @@
 {
   "name": "lunx-dev",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "⚡ Lunx — a fast build tool for web apps on Rolldown and Oxc: dev server with instant HMR, production builds, module federation and library mode for React, Vue, Svelte, Solid, Angular, Qwik and the meta-frameworks built on them.",
   "homepage": "https://lunx.dev",
   "type": "module",

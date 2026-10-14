@@ -6,10 +6,10 @@
     {
       "framework": "vanilla",
       "lunx": {
-        "buildMs": 457,
+        "buildMs": 281,
         "jsFiles": 3,
         "jsBytes": 929,
-        "jsGzip": 617,
+        "jsGzip": 620,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -22,7 +22,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 508,
+        "buildMs": 507,
         "jsFiles": 3,
         "jsBytes": 3123,
         "jsGzip": 1574,
@@ -42,7 +42,7 @@
     {
       "framework": "react",
       "lunx": {
-        "buildMs": 676,
+        "buildMs": 438,
         "jsFiles": 3,
         "jsBytes": 220943,
         "jsGzip": 68339,
@@ -58,7 +58,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 802,
+        "buildMs": 492,
         "jsFiles": 3,
         "jsBytes": 221984,
         "jsGzip": 68846,
@@ -78,10 +78,10 @@
     {
       "framework": "preact",
       "lunx": {
-        "buildMs": 309,
+        "buildMs": 248,
         "jsFiles": 3,
         "jsBytes": 13866,
-        "jsGzip": 5962,
+        "jsGzip": 5961,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -94,7 +94,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 670,
+        "buildMs": 737,
         "jsFiles": 3,
         "jsBytes": 16078,
         "jsGzip": 6881,
@@ -114,13 +114,13 @@
     {
       "framework": "vue",
       "lunx": {
-        "buildMs": 1190,
+        "buildMs": 975,
         "jsFiles": 3,
         "jsBytes": 65262,
         "jsGzip": 25443,
         "cssFiles": 1,
         "cssBytes": 181,
-        "cssGzip": 163,
+        "cssGzip": 159,
         "assets": [
           "assets/photo.8f774d6f.png"
         ],
@@ -130,7 +130,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 846,
+        "buildMs": 711,
         "jsFiles": 3,
         "jsBytes": 65019,
         "jsGzip": 25482,
@@ -150,10 +150,10 @@
     {
       "framework": "svelte",
       "lunx": {
-        "buildMs": 681,
+        "buildMs": 777,
         "jsFiles": 3,
         "jsBytes": 25576,
-        "jsGzip": 10301,
+        "jsGzip": 10303,
         "cssFiles": 1,
         "cssBytes": 132,
         "cssGzip": 130,
@@ -166,7 +166,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 1154,
+        "buildMs": 1185,
         "jsFiles": 3,
         "jsBytes": 27814,
         "jsGzip": 11198,
@@ -186,7 +186,7 @@
     {
       "framework": "solid",
       "lunx": {
-        "buildMs": 603,
+        "buildMs": 598,
         "jsFiles": 3,
         "jsBytes": 10825,
         "jsGzip": 4428,
@@ -202,7 +202,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 702,
+        "buildMs": 712,
         "jsFiles": 3,
         "jsBytes": 13191,
         "jsGzip": 5383,
@@ -222,10 +222,10 @@
     {
       "framework": "lit",
       "lunx": {
-        "buildMs": 258,
+        "buildMs": 232,
         "jsFiles": 3,
         "jsBytes": 16292,
-        "jsGzip": 6371,
+        "jsGzip": 6370,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -238,7 +238,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 514,
+        "buildMs": 392,
         "jsFiles": 3,
         "jsBytes": 18118,
         "jsGzip": 7132,
@@ -258,7 +258,7 @@
     {
       "framework": "app",
       "lunx": {
-        "buildMs": 1478,
+        "buildMs": 1293,
         "jsFiles": 6,
         "jsBytes": 222163,
         "jsGzip": 69231,
@@ -281,7 +281,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 2111,
+        "buildMs": 1854,
         "jsFiles": 7,
         "jsBytes": 222971,
         "jsGzip": 69727,
