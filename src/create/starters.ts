@@ -650,7 +650,7 @@ const tanstackStart = framework({
     id: 'tanstack-start',
     label: 'TanStack Start',
     aliases: ['tanstack-start-app', 'tanstack'],
-    deps: { '@tanstack/react-start': '^1.168.60', '@tanstack/react-router': '^1.170.41', react: REACT, 'react-dom': REACT, vite: '^7.1.9', '@vitejs/plugin-react': '^5.2.0' },
+    deps: { '@tanstack/react-start': '^1.169.1', '@tanstack/react-router': '^1.170.41', react: REACT, 'react-dom': REACT, vite: '^8.3.4', '@vitejs/plugin-react': '^6.1.2' },
     files: (name) => ({
         'vite.config.js': lines(
             "import { tanstackStart } from '@tanstack/react-start/plugin/vite';",
