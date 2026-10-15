@@ -79,6 +79,8 @@ const PACKAGES = [
     'swc-loader', 'css-loader', 'style-loader',
     'esbuild', 'parcel', 'rolldown', 'bun',
     '@rspack/dev-server',
+    '@rsbuild/core', '@rsbuild/plugin-react',
+    '@farmfe/core', '@farmfe/cli', '@farmfe/plugin-react',
     // swc 1.16.x refuses to load its native addon on some Windows setups,
     // which takes swc-loader (and therefore webpack and rspack) down with it.
     '@swc/core@1.15.24',
@@ -108,6 +110,12 @@ const APP_FILES = {
         '',
     ].join('\n'),
     'src/app.css': '.card { color: rgb(17, 34, 51); padding: 8px; }\n',
+    // Rsbuild injects its own bundle into the template: one without the module script.
+    'index.rsbuild.html': [
+        '<!doctype html>',
+        '<html><head><meta charset="utf-8"><title>arena</title></head>',
+        '<body><div id="root"></div></body></html>',
+    ].join('\n'),
     // JS-only entry: rolldown 1.2.x removed CSS bundling, so it gets an entry
     // without the stylesheet rather than a failed build.
     'src/main.nocss.tsx': [
@@ -196,6 +204,29 @@ function writeConfigs(dir) {
         "    infrastructureLogging: { level: 'error' },",
         "    devServer: { hot: true, client: { logging: 'error' } },",
         '};',
+        '',
+    ].join('\n'));
+
+    w('rsbuild.config.mjs', [
+        "import { defineConfig } from '@rsbuild/core';",
+        "import { pluginReact } from '@rsbuild/plugin-react';",
+        'export default defineConfig({',
+        '    plugins: [pluginReact()],',
+        "    source: { entry: { index: './src/main.tsx' } },",
+        "    html: { template: './index.rsbuild.html' },",
+        "    output: { distPath: { root: 'out-rsbuild' } },",
+        "    server: { host: '127.0.0.1' },",
+        '});',
+        '',
+    ].join('\n'));
+
+    w('farm.config.mjs', [
+        "import { defineConfig } from '@farmfe/core';",
+        'export default defineConfig({',
+        "    compilation: { input: { index: './index.html' }, output: { path: 'out-farm' }, persistentCache: process.env.FARM_CACHE !== '0' },",
+        "    server: { host: '127.0.0.1' },",
+        "    plugins: ['@farmfe/plugin-react'],",
+        '});',
         '',
     ].join('\n'));
 
@@ -297,6 +328,20 @@ const TOOLS = {
         build: () => [bin('vite'), ['build'], PROD],
         out: 'out-vite',
         caches: ['node_modules/.vite'],
+    },
+    rsbuild: {
+        kind: 'bundler',
+        dev: (port) => [bin('rsbuild'), ['dev', '--port', String(port)], DEV],
+        build: () => [bin('rsbuild'), ['build'], PROD],
+        out: 'out-rsbuild',
+        caches: ['node_modules/.cache'],
+    },
+    farm: {
+        kind: 'bundler',
+        dev: (port) => [bin('farm'), ['start', '--port', String(port)], DEV],
+        build: () => [bin('farm'), ['build'], PROD],
+        out: 'out-farm',
+        caches: ['node_modules/.farm'],
     },
     rspack: {
         kind: 'bundler',
@@ -444,10 +489,21 @@ if (!fs.existsSync(LUNX_CLI)) {
     process.exit(1);
 }
 
+/** Installed version of each tool's package. */
+const PKG = { lunx: null, vite: 'vite', rsbuild: '@rsbuild/core', farm: '@farmfe/core', rspack: '@rspack/core', webpack: 'webpack', parcel: 'parcel', esbuild: 'esbuild', bun: 'bun', rolldown: 'rolldown' };
+function versionOf(name) {
+    const file = PKG[name] ? path.join(baseApp, 'node_modules', PKG[name], 'package.json') : path.join(REPO, 'package.json');
+    try {
+        return JSON.parse(fs.readFileSync(file, 'utf8')).version;
+    } catch {
+        return null;
+    }
+}
+
 const results = {};
 for (const [name, tool] of Object.entries(TOOLS)) {
     if (ONLY.length && !ONLY.includes(name)) continue;
-    const r = { kind: tool.kind };
+    const r = { kind: tool.kind, version: versionOf(name) };
 
     if (tool.dev) {
         const boots = [];
@@ -520,6 +576,6 @@ for (const k of Object.keys(results)) {
 
 fs.mkdirSync(path.join(REPO, 'reports'), { recursive: true });
 const reportName = SCALE ? `BENCH_ARENA_SCALE_${SCALE}.json` : 'BENCH_ARENA.json';
-fs.writeFileSync(path.join(REPO, 'reports', reportName), JSON.stringify({ scale: SCALE || null, runs: RUNS, results }, null, 2));
+fs.writeFileSync(path.join(REPO, 'reports', reportName), JSON.stringify({ scale: SCALE || null, runs: RUNS, node: process.version, cpus: os.cpus().length, platform: `${process.platform} ${os.release()}`, results }, null, 2));
 console.log(`\nreport: reports${path.sep}${reportName}`);
 if (browserPromise) await (await browserPromise).close();
