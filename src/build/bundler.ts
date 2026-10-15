@@ -1,3 +1,4 @@
+import { forTerminal } from '../utils/plain-text.js';
 import fs from 'fs';
 import path from 'path';
 import { BuildConfig } from '../config/index.js';
@@ -386,7 +387,7 @@ export async function build(rawConfig: BuildConfig) {
     console.log('✅ Build completed successfully!');
     return result;
   } catch (error: any) {
-    console.error('❌ Build failed:', error.message);
+    console.error('❌ Build failed:', forTerminal(String(error.message)));
     throw error;
   } finally {
     await pipeline?.close();

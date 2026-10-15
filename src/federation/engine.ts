@@ -31,6 +31,8 @@ export interface FederationOptions {
     exposes?: Record<string, string>;
     remotes?: Record<string, string>;
     shared?: string[] | Record<string, SharedOptions | boolean | string>;
+    /** Type hints (src/federation/types.ts): `false`, or `{ generateTypes, consumeTypes }`. */
+    dts?: boolean | { generateTypes?: boolean; consumeTypes?: boolean };
 }
 
 const RUNTIME = 'lunx-mf:runtime';

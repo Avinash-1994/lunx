@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { remoteCache } from './remote-cache.js';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.lunx', '.lunx_cache', '.cache', '.turbo', '.next', '.nuxt', '.svelte-kit', '.output', 'coverage']);
 /** Above this many files the fingerprint costs more than it saves. */
@@ -259,9 +260,13 @@ export class TransformCache {
     private readonly used = new Map<string, unknown>();
     private dirty = false;
 
+    /** The shared copy (`cache.remote`), keyed by scope and compiler versions. */
+    private readonly remoteKey: string;
+
     constructor(root: string, scope: string, salt: string) {
         this.file = path.join(root, '.lunx', 'transform-cache', `${scope}.json`);
         this.salt = `${lunxVersion()}\0${salt}`;
+        this.remoteKey = `transform-cache/${scope}.${crypto.createHash('sha256').update(this.salt).digest('hex').slice(0, 16)}.json`;
     }
 
     private key(parts: string[]): string {
@@ -272,11 +277,10 @@ export class TransformCache {
 
     private load(): Promise<Map<string, unknown>> {
         if (this.entries) return Promise.resolve(this.entries);
-        return (this.loading ??= fsp
-            .readFile(this.file, 'utf8')
-            .then((text) => new Map(Object.entries(JSON.parse(text))))
-            .catch(() => new Map<string, unknown>())
-            .then((m) => (this.entries = m)));
+        return (this.loading ??= Promise.all([
+            fsp.readFile(this.file, 'utf8').then((text) => Object.entries(JSON.parse(text))).catch(() => []),
+            remoteCache()?.get(this.remoteKey).then((b) => (b ? Object.entries(JSON.parse(b.toString('utf8'))) : [])).catch(() => []) ?? [],
+        ]).then(([local, shared]) => (this.entries = new Map<string, unknown>([...shared, ...local]))));
     }
 
     async get(parts: string[]): Promise<any | null> {
@@ -300,8 +304,11 @@ export class TransformCache {
         try {
             await fsp.mkdir(path.dirname(this.file), { recursive: true });
             const tmp = `${this.file}.${process.pid}.tmp`;
-            await fsp.writeFile(tmp, JSON.stringify(Object.fromEntries(this.used)));
+            const text = JSON.stringify(Object.fromEntries(this.used));
+            await fsp.writeFile(tmp, text);
             await fsp.rename(tmp, this.file);
+            const shared = remoteCache();
+            if (shared && !shared.readOnly && this.dirty) await shared.put(this.remoteKey, Buffer.from(text));
         } catch {
             // ignore
         }

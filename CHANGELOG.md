@@ -7,15 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-10-14
+## [1.2.0] - 2026-10-15
 
 ### Added
+- `` import(`./locales/${lang}.js`) `` is bundled: every file the pattern matches becomes a lazy chunk, aliases included (the import was left as-is and failed with a 404).
+- `import MyWorker from './worker.js?worker'` (and `?sharedworker`, `&url`, `&inline`), as in Vite, in dev and builds (the build failed).
+- `build.target` / `build.cssTarget` (also read from a vite.config), or the project's browserslist: Oxc lowers JS syntax and LightningCSS lowers and prefixes CSS for those browsers. The default is Vite's `baseline-widely-available` (CSS nesting is lowered for Safari 16). `build.targets` was accepted before but not used.
+- `build.manifest` writes `.vite/manifest.json` in Vite's format (entries, imports, dynamic imports, CSS, assets) for server-rendered backends.
+- Module federation types, in `@module-federation`'s `@mf-types` format: remotes write and serve `@mf-types.zip`, hosts download them into `@mf-types/<remote>/`. The docs described a `federation.dts` option that did not exist.
+- `cache.remote` shares compile results between machines: `provider: 'http'` (GET/PUT, bearer token) or `'s3'` (SigV4, AWS credentials from the environment), `readOnly` for pull requests. It was accepted before and did nothing; `'lunx-cloud'` (never a real service) is now an error.
 - **CSS code splitting**, as in Vite: CSS that only lazy chunks import goes in their own stylesheets, and a lazy chunk's `import()` resolves once its CSS has loaded (no flash of unstyled content); the page's stylesheet keeps what loads up front. `build.cssCodeSplit: false` (also read from a vite.config) keeps one file.
 - **Build output audit** (`npm run test:parity`): the same app per framework (vanilla, React, Preact, Vue, Svelte, Solid, Lit, and a two-page React app with lazy routes, base path and source maps) built by lunx and Vite 8, both run in Chromium, outputs compared. lunx's JS is smaller in every one; every probe passes.
 - **Module federation with webpack 5 and Rspack** (`npm run test:mf-interop`): lunx hosts with webpack / Rspack remotes, webpack / Rspack hosts with lunx remotes, and shells mixing all three, in Chromium with React shared as a singleton.
 - **Built in, no plugin needed**: SVG files as components (`import Logo from './logo.svg?react'` for React and Preact, `?component` for the app's framework, Vue included), in place of `vite-plugin-svgr` / `vite-svg-loader`; `.wasm?init` imports, as in Vite; `%ENV%` values in `index.html` (`%VITE_APP_TITLE%`, `%MODE%`…), as in Vite. An installed `vite-plugin-svgr` keeps `?react`. Checked in Chromium by the plugin matrix (`builtin-*` scenarios).
 - **PWA, built in**: `pwa: { manifest }` in lunx.config writes `manifest.webmanifest`, `registerSW.js` and a `sw.js` that precaches the finished build (after SRI), serves it cache-first, falls back to `index.html` for offline navigations and drops old caches on deploy. No Workbox. The plugin matrix checks it offline in Chromium. An installed `vite-plugin-pwa` keeps the job.
 - **Type errors in dev, built in**: `server: { typecheck: true }` runs the project's `tsc` (or `vue-tsc`) in watch mode beside `lunx dev`; each pass's errors go to the terminal and to a Type Errors tab in the overlay, and clear once fixed. In place of `vite-plugin-checker`.
+- Build errors print without colour codes under `NO_COLOR` or when stderr is not a terminal (Rolldown's code frames kept theirs).
 - The error overlay shows compiler messages as text (`Promise<string>` was parsed as markup) and links build errors to their file.
 - `electron` and `pwa` are accepted in lunx.config (the config check rejected `electron` as an unknown key).
 - `lunx-dev/client` types: assets, `?raw` / `?url` / `?inline` / `?react` / `.wasm?init`, CSS modules, `import.meta.env`, `import.meta.hot`, `import.meta.glob`. TypeScript app starters reference them in `src/lunx-env.d.ts`.

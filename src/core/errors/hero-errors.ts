@@ -10,6 +10,7 @@
  * Never show "Build failed" without context.
  */
 
+import { forTerminal } from '../../utils/plain-text.js';
 import kleur from '../../lib/colors.js';
 import path from 'path';
 
@@ -113,7 +114,7 @@ export class HeroError extends Error {
      * Display error to console
      */
     display(): void {
-        console.error(this.format());
+        console.error(forTerminal(this.format()));
     }
 }
 

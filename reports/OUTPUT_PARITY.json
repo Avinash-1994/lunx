@@ -1,15 +1,15 @@
 {
-  "lunx": "1.1.0",
+  "lunx": "1.2.0",
   "vite": "8.3.4",
   "node": "v22.22.0",
   "results": [
     {
       "framework": "vanilla",
       "lunx": {
-        "buildMs": 281,
+        "buildMs": 533,
         "jsFiles": 3,
         "jsBytes": 929,
-        "jsGzip": 620,
+        "jsGzip": 618,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -22,7 +22,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 507,
+        "buildMs": 1151,
         "jsFiles": 3,
         "jsBytes": 3123,
         "jsGzip": 1574,
@@ -42,10 +42,10 @@
     {
       "framework": "react",
       "lunx": {
-        "buildMs": 438,
+        "buildMs": 1542,
         "jsFiles": 3,
         "jsBytes": 220943,
-        "jsGzip": 68339,
+        "jsGzip": 68338,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -58,7 +58,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 492,
+        "buildMs": 580,
         "jsFiles": 3,
         "jsBytes": 221984,
         "jsGzip": 68846,
@@ -78,10 +78,10 @@
     {
       "framework": "preact",
       "lunx": {
-        "buildMs": 248,
+        "buildMs": 244,
         "jsFiles": 3,
         "jsBytes": 13866,
-        "jsGzip": 5961,
+        "jsGzip": 5960,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -94,7 +94,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 737,
+        "buildMs": 495,
         "jsFiles": 3,
         "jsBytes": 16078,
         "jsGzip": 6881,
@@ -114,13 +114,13 @@
     {
       "framework": "vue",
       "lunx": {
-        "buildMs": 975,
+        "buildMs": 2367,
         "jsFiles": 3,
         "jsBytes": 65262,
-        "jsGzip": 25443,
+        "jsGzip": 25444,
         "cssFiles": 1,
         "cssBytes": 181,
-        "cssGzip": 159,
+        "cssGzip": 162,
         "assets": [
           "assets/photo.8f774d6f.png"
         ],
@@ -130,7 +130,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 711,
+        "buildMs": 2081,
         "jsFiles": 3,
         "jsBytes": 65019,
         "jsGzip": 25482,
@@ -150,13 +150,13 @@
     {
       "framework": "svelte",
       "lunx": {
-        "buildMs": 777,
+        "buildMs": 646,
         "jsFiles": 3,
         "jsBytes": 25576,
-        "jsGzip": 10303,
+        "jsGzip": 10301,
         "cssFiles": 1,
         "cssBytes": 132,
-        "cssGzip": 130,
+        "cssGzip": 128,
         "assets": [
           "assets/photo.8f774d6f.png"
         ],
@@ -166,7 +166,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 1185,
+        "buildMs": 797,
         "jsFiles": 3,
         "jsBytes": 27814,
         "jsGzip": 11198,
@@ -186,7 +186,7 @@
     {
       "framework": "solid",
       "lunx": {
-        "buildMs": 598,
+        "buildMs": 1036,
         "jsFiles": 3,
         "jsBytes": 10825,
         "jsGzip": 4428,
@@ -202,7 +202,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 712,
+        "buildMs": 608,
         "jsFiles": 3,
         "jsBytes": 13191,
         "jsGzip": 5383,
@@ -222,10 +222,10 @@
     {
       "framework": "lit",
       "lunx": {
-        "buildMs": 232,
+        "buildMs": 222,
         "jsFiles": 3,
         "jsBytes": 16292,
-        "jsGzip": 6370,
+        "jsGzip": 6371,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -238,7 +238,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 392,
+        "buildMs": 259,
         "jsFiles": 3,
         "jsBytes": 18118,
         "jsGzip": 7132,
@@ -258,7 +258,7 @@
     {
       "framework": "app",
       "lunx": {
-        "buildMs": 1293,
+        "buildMs": 1528,
         "jsFiles": 6,
         "jsBytes": 222163,
         "jsGzip": 69231,
@@ -281,7 +281,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 1854,
+        "buildMs": 1979,
         "jsFiles": 7,
         "jsBytes": 222971,
         "jsGzip": 69727,

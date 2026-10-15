@@ -66,6 +66,8 @@ export class DevFederation {
         this.shared = normalizeShared(ctx.root, options.shared);
         this.remoteNames = Object.keys(options.remotes ?? {});
         this.fileName = '/' + (options.filename ?? 'remoteEntry.js').replace(/\.json$/, '.js').replace(/^\/+/, '');
+        // A host: the remotes' type hints into @mf-types/, in the background.
+        import('./types.js').then(({ consumeRemoteTypes, dtsSides }) => (dtsSides(options).consume ? consumeRemoteTypes(ctx.root, options) : null)).catch(() => {});
     }
 
     isRemote(spec: string): boolean {
@@ -112,6 +114,17 @@ export class DevFederation {
     /** Serve the federation URLs; false for any other request. */
     async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
         const url = (req.url ?? '').split('?')[0]!;
+        // A remote: its type hints, compiled on request (hosts ask once, as they start).
+        if ((url === '/@mf-types.zip' || url === '/@mf-types.d.ts') && this.options.exposes && Object.keys(this.options.exposes).length) {
+            const { dtsSides, generateRemoteTypes } = await import('./types.js');
+            if (!dtsSides(this.options).generate) return false;
+            const dir = path.join(this.ctx.root, '.lunx', 'mf-types');
+            const files = await generateRemoteTypes(this.ctx.root, dir, this.options, projectSources(this.ctx.root)).catch(() => null);
+            if (!files) return false;
+            res.writeHead(200, { 'Content-Type': url.endsWith('.zip') ? 'application/zip' : 'text/plain', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+            res.end(fs.readFileSync(path.join(dir, url.slice(1))));
+            return true;
+        }
         let code: string | null = null;
         if (url === RUNTIME_URL) code = await this.runtime();
         else if (url.startsWith(SHARED_URL)) code = await this.sharedModule(url.slice(SHARED_URL.length).replace(/\.js$/, ''));
@@ -202,4 +215,19 @@ export async function get(request) {
 export default { name, init, get };
 `;
     }
+}
+
+/** The project's TypeScript sources (outside node_modules and build output), for dev-time type hints. */
+function projectSources(root: string): string[] {
+    const out: string[] = [];
+    const skip = new Set(['node_modules', '.git', '.lunx', 'dist', 'build', '@mf-types', 'coverage']);
+    const walk = (dir: string) => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (e.isDirectory()) {
+                if (!skip.has(e.name) && !e.name.startsWith('.')) walk(path.join(dir, e.name));
+            } else if (/\.(m|c)?tsx?$/.test(e.name) && !e.name.endsWith('.d.ts')) out.push(path.join(dir, e.name));
+        }
+    };
+    walk(root);
+    return out;
 }

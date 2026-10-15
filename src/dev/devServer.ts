@@ -1724,6 +1724,19 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
       const ext = path.extname(filePath);
 
+        // `import MyWorker from './worker.js?worker'` (Vite's): a constructor for the
+        // worker, which loads the module itself as a module worker.
+        const workerQuery = /[?&](shared)?worker\b/.exec(url);
+        if (workerQuery && /\.[mc]?[jt]sx?$/.test(ext)) {
+          const ctor = workerQuery[1] ? 'SharedWorker' : 'Worker';
+          const workerUrl = `new URL(${JSON.stringify(cleanUrl)}, import.meta.url)`;
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+          res.end(/[?&]url\b/.test(url)
+            ? `export default ${workerUrl}.href;\n`
+            : `export default function WorkerWrapper(options) {\n  return new ${ctor}(${workerUrl}, { type: 'module', name: options?.name });\n}\n`);
+          return;
+        }
+
         if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs' || ext === '.vue' || ext === '.svelte' || ext === '.astro') {
         let raw = await fs.readFile(filePath, 'utf-8');
 

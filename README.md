@@ -237,8 +237,16 @@ export default defineConfig({
   build: {
     minify: true,
     sourcemap: 'external',
-    splitting: true,
-    targets: ['chrome90', 'firefox88', 'safari14']
+    // Browsers to compile JS and CSS for (default: the project's browserslist,
+    // else Vite's 'baseline-widely-available'); 'esnext' keeps syntax as written
+    target: ['chrome90', 'firefox88', 'safari14'],
+    // .vite/manifest.json for server-rendered backends (Laravel, Rails, Django…)
+    manifest: true,
+  },
+
+  // Share compile results between machines (CI, teammates): 'http' or 's3'
+  cache: {
+    remote: { provider: 'http', baseUrl: 'https://cache.example.com/lunx', token: process.env.CACHE_TOKEN },
   },
 
   // Supply-chain security settings
@@ -323,6 +331,7 @@ export function App() {
 - `remoteEntry.js` is an ES module exporting the webpack 5 container API (`init`, `get`); `mf-manifest.json` lists exposes, shared versions and CSS. Remotes can be lunx ES module containers or webpack containers (`name@url` with a global).
 - **Shared** packages go through a webpack-format share scope: `singleton`, `requiredVersion` (defaults to your package.json range), `strictVersion` and `eager`. Each app's own copy is a separate chunk, downloaded only if the scope picks it, so a remote using the host's React never fetches its own.
 - **Dev and build mix freely**: a dev host can load a built remote and the other way round. In dev, a remote's modules fast-refresh inside the host page, state kept.
+- **Types across apps**, in `@module-federation`'s format (so lunx, webpack and Rspack apps read each other's): a TypeScript remote's build writes `@mf-types.zip` beside `remoteEntry.js` (its dev server serves it too), and a host downloads each remote's into `@mf-types/<remote>/` when it starts or builds. Add `"paths": { "*": ["./@mf-types/*"] }` to the host's tsconfig and `import Button from 'remote/Button'` is typed. `federation: { dts: false }` turns it off, `{ generateTypes, consumeTypes }` picks a side.
 - `npm run test:federation-e2e` runs all four dev/build pairings in Chromium.
 - **With webpack 5 and Rspack**, both ways (`npm run test:mf-interop`, production builds in Chromium, React shared as a singleton): a lunx host loads their remotes as `name@url`; their hosts load a lunx remote, an ES module, with `remoteType: 'import'` (or `'import <url>'` beside script remotes) and, for webpack, `target: ['web', 'es2020']`. A shell mixing lunx, webpack and Rspack remotes shares one React across all of them.
 

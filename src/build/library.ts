@@ -284,7 +284,7 @@ export async function buildLibrary(root: string, options: LibraryOptions, framew
  * Oxc's isolated declarations are fast but need explicit types on exports;
  * if any file lacks them, tsc writes all the declarations instead.
  */
-async function emitDeclarations(root: string, outDir: string, entries: Record<string, string>, modules: string[]): Promise<string[]> {
+export async function emitDeclarations(root: string, outDir: string, entries: Record<string, string>, modules: string[]): Promise<string[]> {
     const sources = modules.filter((f) => SOURCE_RE.test(f) && !f.endsWith('.d.ts') && fs.existsSync(f));
     if (!sources.length) return [];
     const base = commonDir([...Object.values(entries).map(realpath), ...sources].map((f) => path.dirname(f)));

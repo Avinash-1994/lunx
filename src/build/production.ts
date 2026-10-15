@@ -17,10 +17,14 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
+import { dynamicImportVarsPlugin } from '../engines/rolldown.js';
+import { resolveTargets } from './targets.js';
 import { CompilePool, MIN_POOL_FILES, type Compiled } from './compile-pool.js';
 import { transformGlobImports } from './glob-import.js';
 import { TransformCache } from './build-cache.js';
+import { configureRemoteCache } from './remote-cache.js';
 import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
+import { consumeRemoteTypes, dtsSides, generateRemoteTypes } from '../federation/types.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 import { metaEnvFrom, replaceHtmlEnv } from './html-env.js';
@@ -119,6 +123,9 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const cssCodeSplit = (build as any).cssCodeSplit !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
 
+    // A shared cache for compile results (`cache.remote`).
+    configureRemoteCache((config as any).cache?.remote);
+
     // Vite plugins (from vite.config or lunx.config), with Vite's lifecycle.
     const app = await resolveVitePlugins(config, root, outDir);
     const vp = app && (await import('../plugin-host/app-plugins.js'));
@@ -196,12 +203,16 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     }
     const appEntries = new Set(Object.values(input));
     if (federation) Object.assign(input, federationInputs(federation, root));
+    // The remotes' type hints, fetched while this app builds.
+    const remoteTypes = federation && dtsSides(federation).consume ? consumeRemoteTypes(root, federation).catch(() => []) : null;
     if (Object.keys(input).length === 0 && htmlEntries.every((h) => h.styles.length === 0)) {
         throw new Error('No module scripts found in the HTML entry. Add <script type="module" src="/src/main.ts"></script>.');
     }
 
     // ── Plugins ──────────────────────────────────────────────────────────────
-    const css = new CssCollector(root, base, minify, inlineLimit);
+    // Browsers to compile for: `build.target`, else the project's browserslist, else as written.
+    const targets = resolveTargets(root, (build as any).target ?? (build as any).targets, (build as any).cssTarget);
+    const css = new CssCollector(root, base, minify, inlineLimit, targets.css);
     const assets = new Map<string, string>(); // source file → public URL
     const emittedAssets: BuildArtifact[] = [];
 
@@ -287,6 +298,28 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return aot;
     }
 
+    /**
+     * `?worker` / `?sharedworker` imports: the default export constructs the
+     * worker (`new MyWorker({ name })`); `&url` exports its URL, and `&inline`
+     * puts the bundled worker in a blob URL (a separate one-file build).
+     */
+    async function workerModule(ctx: any, file: string, shared: boolean, query: string): Promise<string> {
+        const ctor = shared ? 'SharedWorker' : 'Worker';
+        if (/[?&]inline\b/.test(query)) {
+            const [chunk] = (await getBundler().bundle(
+                { input: { worker: file }, cwd: root, platform: 'browser', plugins: [], define: { 'process.env.NODE_ENV': JSON.stringify(config.mode === 'production' ? 'production' : config.mode) }, extensions: ['.ts', '.tsx', '.js', '.mjs', '.jsx', '.json'] },
+                { format: 'iife', minify, inlineDynamicImports: true },
+            )).filter((o) => o.type === 'chunk') as any[];
+            ctx.addWatchFile?.(file);
+            const source = JSON.stringify(chunk.code);
+            return `const source = ${source};\nexport default function WorkerWrapper(options) {\n  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));\n  try { return new ${ctor}(url, { name: options?.name }); } finally { URL.revokeObjectURL(url); }\n}\n`;
+        }
+        const ref = ctx.emitFile({ type: 'chunk', id: file, name: path.basename(file).replace(/\.[^.]+$/, '') });
+        const url = `new URL(__LUNX_FILE_URL_${ref}__, import.meta.url)`;
+        if (/[?&]url\b/.test(query)) return `export default ${url}.href;\n`;
+        return `export default function WorkerWrapper(options) {\n  return new ${ctor}(${url}, { type: 'module', name: options?.name });\n}\n`;
+    }
+
     /** Vue / Svelte components' CSS, by the module id each component imports it under. */
     const componentCss = new Map<string, string>();
 
@@ -327,6 +360,21 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return [...pages, ...css.order.map((f) => css.get(f)!)].filter(Boolean).join(sep);
     };
     let cssFile: string | null = null;
+    /** A lazy chunk's own stylesheet (CSS code splitting), for the manifest. */
+    const chunkCss = new Map<string, string>();
+
+    const alias = normalizeAlias([...toAliasList((config as any).resolve?.alias), ...toAliasList(app?.config.resolve.alias)], root);
+    // `` import(`./locales/${lang}.js`) ``: every file the pattern matches, as lazy chunks.
+    const dynamicImportVars = await dynamicImportVarsPlugin((id, importer) => {
+        for (const [find, replacement] of Object.entries(alias ?? {})) {
+            if (id !== find && !id.startsWith(find.endsWith('/') ? find : `${find}/`)) continue;
+            const target = path.isAbsolute(replacement) ? replacement + id.slice(find.length) : null;
+            if (!target) return undefined;
+            const rel = toPosix(path.relative(path.dirname(importer), target));
+            return rel.startsWith('.') ? rel : `./${rel}`;
+        }
+        return undefined;
+    });
 
     const plugins: any[] = [
         // Vite's order: `enforce: 'pre'`, the built-ins, the rest, `enforce: 'post'`.
@@ -388,6 +436,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                   },
               }]
             : []),
+        dynamicImportVars,
         {
             name: 'lunx:glob-import',
             transform: {
@@ -430,10 +479,13 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         {
             name: 'lunx:assets',
             load: {
-              filter: { id: /(\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)|[?&](url|raw|init|react|component)\b.*)$/i },
+              filter: { id: /(\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)|[?&](url|raw|init|react|component|worker|sharedworker)\b.*)$/i },
               async handler(this: any, id: string) {
                 const file = cleanId(id);
                 const query = id.slice(file.length);
+                // `import MyWorker from './worker.js?worker'` (Vite's): a constructor for the worker, bundled as its own chunk.
+                const worker = /[?&](shared)?worker\b/.exec(query);
+                if (worker) return { code: await workerModule(this, file, !!worker[1], query), moduleType: 'js' };
                 // `./logo.svg?react`: a component (vite-plugin-svgr, when installed, keeps it).
                 const svgRuntime = /\.svg$/i.test(file) && SVG_COMPONENT_QUERY.test(query) && !app?.plugins.some((p: any) => p.name === 'vite-plugin-svgr') ? svgRuntimeFor(framework, query) : null;
                 if (svgRuntime) return { code: svgComponent(await fsp.readFile(file, 'utf8'), svgRuntime), moduleType: 'js' };
@@ -607,6 +659,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                         const text = sheets.map((f) => css.get(f)!).join(sep);
                         const fileName = `assets/${chunk.name}.${hash8(text)}.css`;
                         this.emitFile({ type: 'asset', fileName, source: text });
+                        chunkCss.set(chunk.fileName, fileName);
                         // The chunk's module finishes evaluating once its stylesheet has loaded, so
                         // import() resolves with the CSS in place (no flash of unstyled content).
                         // Appended, so the chunk's source map is unaffected.
@@ -627,6 +680,46 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             },
         },
     ];
+
+    if ((build as any).manifest) {
+        // Vite's `build.manifest` (.vite/manifest.json): source file → output files, for
+        // server frameworks that render the page themselves (Laravel, Rails, Django…).
+        plugins.push({
+            name: 'lunx:manifest',
+            generateBundle(this: any, _opts: unknown, bundle: Record<string, any>) {
+                const chunks = Object.values(bundle).filter((o: any) => o.type === 'chunk') as any[];
+                const keyOf = new Map<string, string>();
+                for (const c of chunks) keyOf.set(c.fileName, c.facadeModuleId && !c.facadeModuleId.startsWith('\0') ? toPosix(path.relative(root, cleanId(c.facadeModuleId))) : `_${path.posix.basename(c.fileName)}`);
+                const assetFile = (file: string) => {
+                    const url = assets.get(file);
+                    return url && !url.startsWith('data:') ? url.slice(url.indexOf('assets/')) : null;
+                };
+                const manifest: Record<string, any> = {};
+                for (const c of chunks) {
+                    const entry: Record<string, any> = { file: c.fileName, name: c.name };
+                    if (c.facadeModuleId && !c.facadeModuleId.startsWith('\0')) entry.src = keyOf.get(c.fileName);
+                    if (c.isEntry) entry.isEntry = true;
+                    if (c.isDynamicEntry) entry.isDynamicEntry = true;
+                    const imports = (c.imports ?? []).map((f: string) => keyOf.get(f)).filter(Boolean);
+                    const dynamicImports = (c.dynamicImports ?? []).map((f: string) => keyOf.get(f)).filter(Boolean);
+                    if (imports.length) entry.imports = imports;
+                    if (dynamicImports.length) entry.dynamicImports = dynamicImports;
+                    const sheets = [...(c.isEntry && cssFile ? [cssFile] : []), ...(chunkCss.has(c.fileName) ? [chunkCss.get(c.fileName)!] : [])];
+                    if (sheets.length) entry.css = sheets;
+                    const used = [...new Set((c.moduleIds ?? []).map((id: string) => assetFile(cleanId(id))).filter(Boolean))];
+                    if (used.length) entry.assets = used;
+                    manifest[keyOf.get(c.fileName)!] = entry;
+                }
+                for (const [file] of assets) {
+                    const out = assetFile(file);
+                    const key = toPosix(path.relative(root, file));
+                    if (out && !manifest[key]) manifest[key] = { file: out, src: key };
+                }
+                const where = typeof (build as any).manifest === 'string' ? (build as any).manifest : '.vite/manifest.json';
+                this.emitFile({ type: 'asset', fileName: where, source: JSON.stringify(manifest, null, 2) + '\n' });
+            },
+        });
+    }
 
     if (vp) {
         plugins.push(...vp.forRolldown(app!, [...app!.normal, ...app!.post], pluginCss));
@@ -692,7 +785,6 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         ...Object.fromEntries(Object.entries(app?.config.define ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])),
     };
 
-    const alias = normalizeAlias([...toAliasList((config as any).resolve?.alias), ...toAliasList(app?.config.resolve.alias)], root);
     const tsconfig = ['tsconfig.json', 'jsconfig.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
     const jsxImportSource = framework === 'preact' ? 'preact' : undefined;
 
@@ -710,6 +802,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         // Never `development`: dev-only builds of React/Vue are 3–10× larger.
         conditions: ['browser', 'import', 'module', config.mode === 'production' ? 'production' : 'development', 'default'],
         define,
+        ...(targets.js ? { target: targets.js } : {}),
         jsx: jsxImportSource ? { runtime: 'automatic', importSource: jsxImportSource } : undefined,
         // Normal in app code; not worth a warning on every build.
         onWarning: (w) => !['EVAL', 'CIRCULAR_DEPENDENCY', 'MIXED_EXPORT'].includes(w.code ?? ''),
@@ -793,6 +886,21 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         for (const item of output) if (item.type === 'chunk' && item.isEntry) entryFiles.set(item.name, item.fileName);
         const remoteEntry = await writeRemoteEntry(federation, root, outDir, entryFiles, cssFile ? [cssFile] : []);
         if (remoteEntry) emittedAssets.push({ fileName: remoteEntry.fileName, type: 'asset', source: remoteEntry.code });
+        // Type hints for hosts (lunx, webpack, Rspack): @mf-types.zip next to remoteEntry.js.
+        if (remoteEntry && dtsSides(federation).generate) {
+            const modules = output.flatMap((item) => (item.type === 'chunk' ? item.moduleIds : []));
+            const types = await generateRemoteTypes(root, outDir, federation, modules).catch((err) => {
+                log.warn(`[lunx mf] no type hints for the exposed modules: ${err?.message ?? err}`);
+                return null;
+            });
+            if (types) {
+                const manifestFile = path.join(outDir, 'mf-manifest.json');
+                const manifest = JSON.parse(await fsp.readFile(manifestFile, 'utf8'));
+                manifest.metaData = { ...manifest.metaData, types: { path: '', name: '', zip: types[0], api: types[1] } };
+                await fsp.writeFile(manifestFile, JSON.stringify(manifest, null, 2));
+            }
+        }
+        if (remoteTypes) await remoteTypes;
     }
 
     // ── public/ ──────────────────────────────────────────────────────────────
@@ -883,7 +991,7 @@ class CssCollector {
     ids = new Set<string>();
     emitAsset!: (ctx: any, file: string, data: Buffer) => string;
 
-    constructor(private root: string, private base: string, private minify: boolean, private inlineLimit: number) {}
+    constructor(private root: string, private base: string, private minify: boolean, private inlineLimit: number, private targets: Record<string, number> | null = null) {}
 
     has(file: string) { return this.sheets.has(file); }
     get(file: string) { return this.sheets.get(file); }
@@ -899,6 +1007,7 @@ class CssCollector {
             source,
             modules,
             minify: this.minify,
+            targets: this.targets,
             resolveUrl: (from, url) => {
                 // A relative base: url()s resolve against the CSS file, which is in assets/.
                 const relative = this.base === './';

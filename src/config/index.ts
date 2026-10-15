@@ -63,6 +63,8 @@ export const BuildConfigSchema = z.object({
         version: z.string().optional(),
       })])),
     ]).optional(),
+    /** Type hints across apps (`@mf-types`, as `@module-federation`'s dts plugin): on by default in TypeScript projects. */
+    dts: z.union([z.boolean(), z.object({ generateTypes: z.boolean().optional(), consumeTypes: z.boolean().optional() })]).optional(),
     prefetch: z.array(z.string()).optional(),
     fallback: z.string().optional(),
     mock: z.boolean().optional(),
@@ -92,6 +94,12 @@ export const BuildConfigSchema = z.object({
     splitting: z.boolean().optional(),
     cssModules: z.boolean().default(false),
     targets: z.array(z.string()).optional(),
+    /** Browsers to compile JS for: 'es2020', ['chrome90', 'safari14'], 'baseline-widely-available', 'esnext' (default: the project's browserslist, else no lowering). */
+    target: z.union([z.string(), z.array(z.string())]).optional(),
+    /** Write `.vite/manifest.json` (or this path in the output): source files → output files, for server-rendered backends. */
+    manifest: z.union([z.boolean(), z.string()]).optional(),
+    /** Browsers to compile CSS for, when they differ from `target`. */
+    cssTarget: z.union([z.string(), z.array(z.string())]).optional(),
     manualChunks: z.record(z.string(), z.array(z.string())).optional(),
     /** Production bundler: 'rolldown' (Rust, default) or the 'legacy' JS engine. */
     bundler: z.enum(['rolldown', 'legacy']).optional(),
@@ -131,7 +139,8 @@ export const BuildConfigSchema = z.object({
   // Phase 4.2 — Remote cache (new optional key)
   cache: z.object({
     remote: z.object({
-      provider: z.union([z.enum(['s3', 'lunx-cloud']), z.literal(false)]).default(false),
+      /** 'http' (GET / PUT under baseUrl, `token` as a bearer token) or 's3' (AWS_* credentials from the environment). */
+      provider: z.union([z.enum(['http', 's3']), z.literal(false)]).default(false),
       bucket: z.string().optional(),
       token: z.string().optional(),
       region: z.string().optional(),
