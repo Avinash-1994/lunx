@@ -19,6 +19,7 @@ import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
 import { dynamicImportVarsPlugin } from '../engines/rolldown.js';
 import { resolveTargets } from './targets.js';
+import { addNonce, applyHtmlOptions } from './html-options.js';
 import { CompilePool, MIN_POOL_FILES, type Compiled } from './compile-pool.js';
 import { transformGlobImports } from './glob-import.js';
 import { TransformCache } from './build-cache.js';
@@ -122,6 +123,13 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const minify = build.minify !== false;
     const cssCodeSplit = (build as any).cssCodeSplit !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
+    const b = build as any;
+    // CSS minified with the JS unless `build.cssMinify` says otherwise.
+    const cssMinify = b.cssMinify ?? minify;
+    /** Output file names: Rollup-style templates (`assets/[name].[hash][extname]`). */
+    const assetFileNames: string = typeof b.assetFileNames === 'string' ? b.assetFileNames : 'assets/[name].[hash][extname]';
+    const assetFileName = (name: string, ext: string, data: string | Buffer) =>
+        assetFileNames.replace(/\[name\]/g, name).replace(/\[hash(?::\d+)?\]/g, hash8(data)).replace(/\[extname\]/g, ext).replace(/\[ext\]/g, ext.slice(1));
 
     // Third-party license notices: in the code, dropped, or (default) beside each chunk.
     const legalComments: 'inline' | 'none' | 'linked' = minify ? ((build as any).legalComments ?? 'linked') : 'inline';
@@ -215,17 +223,30 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     // ── Plugins ──────────────────────────────────────────────────────────────
     // Browsers to compile for: `build.target`, else the project's browserslist, else as written.
     const targets = resolveTargets(root, (build as any).target ?? (build as any).targets, (build as any).cssTarget);
-    const css = new CssCollector(root, base, minify, inlineLimit, targets.css);
+    const css = new CssCollector(root, base, cssMinify, inlineLimit, targets.css);
     const assets = new Map<string, string>(); // source file → public URL
+    const assetFiles = new Map<string, string>(); // source file → output file name
     const emittedAssets: BuildArtifact[] = [];
+    /**
+     * Where the page loads a built file from: `build.renderBuiltUrl(fileName, { hostType })`
+     * (Vite's `experimental.renderBuiltUrl`), else `build.assetPrefix` (a CDN), else `base`.
+     */
+    const renderBuiltUrl = b.renderBuiltUrl ?? (config as any).experimental?.renderBuiltUrl;
+    const assetPrefix: string | undefined = typeof b.assetPrefix === 'string' ? b.assetPrefix.replace(/\/?$/, '/') : undefined;
+    const urlFor = (fileName: string, hostType: 'js' | 'css' | 'html'): string => {
+        const custom = typeof renderBuiltUrl === 'function' ? renderBuiltUrl(fileName, { hostType, type: 'asset', hostId: '', ssr: false }) : undefined;
+        if (typeof custom === 'string') return custom;
+        return (assetPrefix ?? base) + fileName;
+    };
 
     const emitAsset = (ctx: any, file: string, data: Buffer): string => {
         const known = assets.get(file);
         if (known) return known;
         const ext = path.extname(file);
-        const fileName = `assets/${path.basename(file, ext)}.${hash8(data)}${ext}`;
+        const fileName = assetFileName(path.basename(file, ext), ext, data);
         ctx.emitFile({ type: 'asset', fileName, source: data });
-        const url = base + fileName;
+        assetFiles.set(file, fileName);
+        const url = urlFor(fileName, 'js');
         assets.set(file, url);
         return url;
     };
@@ -661,7 +682,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                         if (!sheets.length) continue;
                         const sep = minify ? '' : '\n';
                         const text = sheets.map((f) => css.get(f)!).join(sep);
-                        const fileName = `assets/${chunk.name}.${hash8(text)}.css`;
+                        const fileName = assetFileName(chunk.name, '.css', text);
                         this.emitFile({ type: 'asset', fileName, source: text });
                         chunkCss.set(chunk.fileName, fileName);
                         // The chunk's module finishes evaluating once its stylesheet has loaded, so
@@ -678,14 +699,14 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 // Emitted here, so the plugins' generateBundle sees (and may rewrite) it, as Vite's CSS.
                 const all = await collectCss(this);
                 if (all.trim()) {
-                    cssFile = `assets/style.${hash8(all)}.css`;
+                    cssFile = assetFileName('style', '.css', all);
                     this.emitFile({ type: 'asset', fileName: cssFile, source: all });
                 }
             },
         },
     ];
 
-    if ((build as any).manifest) {
+    if ((build as any).manifest || b.ssrManifest) {
         // Vite's `build.manifest` (.vite/manifest.json): source file → output files, for
         // server frameworks that render the page themselves (Laravel, Rails, Django…).
         plugins.push({
@@ -694,10 +715,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 const chunks = Object.values(bundle).filter((o: any) => o.type === 'chunk') as any[];
                 const keyOf = new Map<string, string>();
                 for (const c of chunks) keyOf.set(c.fileName, c.facadeModuleId && !c.facadeModuleId.startsWith('\0') ? toPosix(path.relative(root, cleanId(c.facadeModuleId))) : `_${path.posix.basename(c.fileName)}`);
-                const assetFile = (file: string) => {
-                    const url = assets.get(file);
-                    return url && !url.startsWith('data:') ? url.slice(url.indexOf('assets/')) : null;
-                };
+                const assetFile = (file: string) => assetFiles.get(file) ?? null;
                 const manifest: Record<string, any> = {};
                 for (const c of chunks) {
                     const entry: Record<string, any> = { file: c.fileName, name: c.name };
@@ -719,8 +737,25 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                     const key = toPosix(path.relative(root, file));
                     if (out && !manifest[key]) manifest[key] = { file: out, src: key };
                 }
-                const where = typeof (build as any).manifest === 'string' ? (build as any).manifest : '.vite/manifest.json';
-                this.emitFile({ type: 'asset', fileName: where, source: JSON.stringify(manifest, null, 2) + '\n' });
+                if ((build as any).manifest) {
+                    const where = typeof (build as any).manifest === 'string' ? (build as any).manifest : '.vite/manifest.json';
+                    this.emitFile({ type: 'asset', fileName: where, source: JSON.stringify(manifest, null, 2) + '\n' });
+                }
+                // Vite's `build.ssrManifest`: each source module → the files to preload when a server render used it.
+                if (b.ssrManifest) {
+                    const ssr: Record<string, string[]> = {};
+                    for (const c of chunks) {
+                        const entry = manifest[keyOf.get(c.fileName)!];
+                        const files = [c.fileName, ...(entry.css ?? []), ...(entry.assets ?? [])].map((f: string) => urlFor(f, 'html'));
+                        for (const id of c.moduleIds ?? []) {
+                            if (id.startsWith('\0')) continue;
+                            const key = toPosix(path.relative(root, cleanId(id)));
+                            ssr[key] = [...new Set([...(ssr[key] ?? []), ...files])];
+                        }
+                    }
+                    const where = typeof b.ssrManifest === 'string' ? b.ssrManifest : '.vite/ssr-manifest.json';
+                    this.emitFile({ type: 'asset', fileName: where, source: JSON.stringify(ssr, null, 2) + '\n' });
+                }
             },
         });
     }
@@ -792,7 +827,13 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const tsconfig = ['tsconfig.json', 'jsconfig.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
     const jsxImportSource = framework === 'preact' ? 'preact' : undefined;
 
-    await emptyDir(outDir, root);
+    if (b.emptyOutDir !== false) await emptyDir(outDir, root);
+    else await fsp.mkdir(outDir, { recursive: true });
+
+    const externals: Array<string | RegExp> = Array.isArray(b.external) ? b.external : b.external ? [b.external] : [];
+    const externalTest = externals.length
+        ? (id: string) => externals.some((e) => (typeof e === 'string' ? id === e || id.startsWith(`${e}/`) : e.test(id)))
+        : null;
 
     const manualChunks = build.manualChunks;
     const output: OutputItem[] = Object.keys(input).length === 0 ? [] : await getBundler().bundle({
@@ -807,16 +848,21 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         conditions: ['browser', 'import', 'module', config.mode === 'production' ? 'production' : 'development', 'default'],
         define,
         ...(targets.js ? { target: targets.js } : {}),
+        // `build.external`: imports left to the page (an import map, a CDN script…).
+        ...(externalTest ? { external: externalTest } : {}),
         jsx: jsxImportSource ? { runtime: 'automatic', importSource: jsxImportSource } : undefined,
         // Normal in app code; not worth a warning on every build.
         onWarning: (w) => !['EVAL', 'CIRCULAR_DEPENDENCY', 'MIXED_EXPORT'].includes(w.code ?? ''),
     }, {
         dir: outDir,
         format: 'es',
-        entryFileNames: 'assets/[name].[hash].js',
-        chunkFileNames: 'assets/[name].[hash].js',
-        assetFileNames: 'assets/[name].[hash][extname]',
-        minify,
+        entryFileNames: typeof b.entryFileNames === 'string' ? b.entryFileNames : 'assets/[name].[hash].js',
+        chunkFileNames: typeof b.chunkFileNames === 'string' ? b.chunkFileNames : 'assets/[name].[hash].js',
+        assetFileNames,
+        // `build.drop: ['console', 'debugger']` (esbuild's): those statements removed when minifying.
+        minify: minify && Array.isArray(b.drop) && b.drop.length
+            ? ({ compress: { dropConsole: b.drop.includes('console'), dropDebugger: b.drop.includes('debugger') }, mangle: true } as any)
+            : minify,
         legalComments: legalComments === 'inline',
         sourcemap: sourcemapOption(build.sourcemap),
         chunkGroups: manualChunks
@@ -826,6 +872,14 @@ export async function productionBuild(config: BuildConfig, framework: string, op
               }))
             : undefined,
     }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush(), ngAot?.flush()]));
+
+    // Vite's `build.chunkSizeWarningLimit` (kB, default 500): a hint to split a chunk that big.
+    const sizeLimit = typeof b.chunkSizeWarningLimit === 'number' ? b.chunkSizeWarningLimit : 500;
+    const large = output.filter((o) => o.type === 'chunk' && o.code.length / 1000 > sizeLimit) as any[];
+    if (large.length) {
+        log.warn(`Some chunks are larger than ${sizeLimit} kB after minification: ${large.map((c) => `${c.fileName} (${Math.round(c.code.length / 1000)} kB)`).join(', ')}. ` +
+            'Split them with dynamic import() or build.manualChunks, or raise build.chunkSizeWarningLimit.');
+    }
 
     // ── CSS ──────────────────────────────────────────────────────────────────
     // Emitted in the bundle (lunx:css-emit); a page with only stylesheets has no bundle.
@@ -844,27 +898,34 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     // ── HTML ─────────────────────────────────────────────────────────────────
     const chunkByName = new Map<string, any>();
     for (const item of output) if (item.type === 'chunk' && item.isEntry) chunkByName.set(item.name, item);
+    // Externals (`build.external`) are in chunk.imports too, but are not files of this build.
+    const chunkFiles = new Set(output.filter((o) => o.type === 'chunk').map((o) => o.fileName));
     for (const html of htmlEntries) {
         let page = html.source;
         const preloads = new Set<string>();
+        const prefetches = new Set<string>();
         for (const [src, name] of html.scripts) {
             const chunk = chunkByName.get(name);
             if (!chunk) continue;
-            page = page.replace(new RegExp(`(<script\\b[^>]*\\bsrc=["'])${escapeRe(src)}(["'][^>]*>)`), `$1${base}${chunk.fileName}$2`);
-            for (const dep of chunk.imports as string[]) preloads.add(dep);
+            page = page.replace(new RegExp(`(<script\\b[^>]*\\bsrc=["'])${escapeRe(src)}(["'][^>]*>)`), `$1${urlFor(chunk.fileName, 'html')}$2`);
+            for (const dep of chunk.imports as string[]) if (chunkFiles.has(dep)) preloads.add(dep);
+            // `build.prefetch`: the lazy chunks this page can load, fetched while the browser is idle.
+            if (b.prefetch) for (const lazy of (chunk.dynamicImports ?? []) as string[]) prefetches.add(lazy);
         }
         page = page.replace(/<link\b[^>]*\brel=["']stylesheet["'][^>]*\bhref=["']([^"']+)["'][^>]*>\s*/gi, (tag, href) =>
             html.styles.some((s) => s === (href.startsWith('/') ? path.join(root, href) : path.resolve(path.dirname(html.file), href))) ? '' : tag,
         );
         const head = [
-            ...[...preloads].map((f) => `<link rel="modulepreload" crossorigin href="${base}${f}">`),
-            ...(cssFile ? [`<link rel="stylesheet" crossorigin href="${base}${cssFile}">`] : []),
+            ...[...preloads].map((f) => `<link rel="modulepreload" crossorigin href="${urlFor(f, 'html')}">`),
+            ...(cssFile ? [`<link rel="stylesheet" crossorigin href="${urlFor(cssFile, 'html')}">`] : []),
+            ...[...prefetches].filter((f) => !preloads.has(f)).map((f) => `<link rel="prefetch" crossorigin href="${urlFor(f, 'html')}">`),
             ...(pwa ? pwaHeadTags(pwa, base) : []),
         ];
         if (head.length) {
             const tags = head.map((t) => `    ${t}\n`).join('');
             page = /<\/head>/i.test(page) ? page.replace(/<\/head>/i, `${tags}  </head>`) : tags + page;
         }
+        page = applyHtmlOptions(page, (config as any).html, base);
         if (vp) {
             const entryChunk = [...html.scripts.values()].map((name) => chunkByName.get(name)).find(Boolean);
             page = await vp.transformIndexHtml(app!, 'post', page, {
@@ -874,6 +935,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 chunk: entryChunk,
             });
         }
+        // Tags the plugins added get the nonce too.
+        if ((config as any).html?.cspNonce) page = addNonce(page, (config as any).html.cspNonce);
         const target = path.join(outDir, path.relative(root, html.file));
         await fsp.mkdir(path.dirname(target), { recursive: true });
         await fsp.writeFile(target, page);
@@ -910,7 +973,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
 
     // ── public/ ──────────────────────────────────────────────────────────────
     const publicDir = path.resolve(root, (config as any).publicDir ?? 'public');
-    if (fs.existsSync(publicDir) && fs.statSync(publicDir).isDirectory()) {
+    if (b.copyPublicDir !== false && fs.existsSync(publicDir) && fs.statSync(publicDir).isDirectory()) {
         await fsp.cp(publicDir, outDir, { recursive: true, force: false, errorOnExist: false });
     }
 

@@ -118,6 +118,8 @@ export interface OutputChunk {
     facadeModuleId: string | null;
     /** Static imports of other chunks (file names). */
     imports: string[];
+    /** Chunks this one loads with import(). */
+    dynamicImports?: string[];
     moduleIds: string[];
 }
 

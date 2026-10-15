@@ -96,6 +96,30 @@ export const BuildConfigSchema = z.object({
     targets: z.array(z.string()).optional(),
     /** Browsers to compile JS for: 'es2020', ['chrome90', 'safari14'], 'baseline-widely-available', 'esnext' (default: the project's browserslist, else no lowering). */
     target: z.union([z.string(), z.array(z.string())]).optional(),
+    /** Load built files from here instead of `base` (a CDN): 'https://cdn.example.com/app/'. */
+    assetPrefix: z.string().optional(),
+    /** Vite's renderBuiltUrl: (fileName, { hostType }) => URL string for a built file. */
+    renderBuiltUrl: z.any().optional(),
+    /** Empty outDir before building (default true). */
+    emptyOutDir: z.boolean().optional(),
+    /** Copy public/ into outDir (default true). */
+    copyPublicDir: z.boolean().optional(),
+    /** Warn about JS chunks larger than this many kB after minification (default 500). */
+    chunkSizeWarningLimit: z.number().optional(),
+    /** Output file name templates (Rollup's): '[name]', '[hash]', '[extname]'. */
+    entryFileNames: z.string().optional(),
+    chunkFileNames: z.string().optional(),
+    assetFileNames: z.string().optional(),
+    /** Imports left out of the bundle (resolved by the page: an import map, a CDN script). */
+    external: z.any().optional(),
+    /** Statements removed when minifying, as esbuild's `drop`. */
+    drop: z.array(z.enum(['console', 'debugger'])).optional(),
+    /** Minify CSS (default: as `minify`). */
+    cssMinify: z.boolean().optional(),
+    /** Write `.vite/ssr-manifest.json`: source module → files to preload when it rendered on the server. */
+    ssrManifest: z.union([z.boolean(), z.string()]).optional(),
+    /** `<link rel="prefetch">` for the lazy chunks each page can load. */
+    prefetch: z.boolean().optional(),
     /** Third-party license notices in minified output: 'linked' (default, `<chunk>.LICENSE.txt` beside each chunk), 'inline' or 'none'. */
     legalComments: z.enum(['inline', 'none', 'linked']).optional(),
     /** Write `.vite/manifest.json` (or this path in the output): source files → output files, for server-rendered backends. */
@@ -109,6 +133,21 @@ export const BuildConfigSchema = z.object({
     assetsInlineLimit: z.number().optional(),
     /** CSS imported only by lazy chunks loads with them (default true); false puts all CSS in one file. */
     cssCodeSplit: z.boolean().optional(),
+  }).optional(),
+  /** Page options in dev and builds: title, meta, favicon, preconnect, dnsPrefetch, tags, cspNonce (src/build/html-options.ts). */
+  html: z.object({
+    title: z.string().optional(),
+    meta: z.record(z.string(), z.string()).optional(),
+    favicon: z.string().optional(),
+    preconnect: z.array(z.string()).optional(),
+    dnsPrefetch: z.array(z.string()).optional(),
+    tags: z.array(z.object({
+      tag: z.string(),
+      attrs: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
+      children: z.string().optional(),
+      injectTo: z.enum(['head', 'head-prepend', 'body', 'body-prepend']).optional(),
+    })).optional(),
+    cspNonce: z.string().optional(),
   }).optional(),
   /** Public base path the app is served from, e.g. '/my-app/'. */
   base: z.string().optional(),
@@ -124,7 +163,12 @@ export const BuildConfigSchema = z.object({
     host: z.string().optional(),
     port: z.number().optional(),
     strictPort: z.boolean().optional(),
-    cors: z.boolean().optional(),
+    /** CORS: pages on localhost only by default (as Vite); true for any origin, or { origin }. */
+    cors: z.union([z.boolean(), z.object({ origin: z.any().optional() })]).optional(),
+    /** Host names the dev server answers besides localhost and IPs ('.example.test' for subdomains), or true for any. */
+    allowedHosts: z.union([z.array(z.string()), z.literal(true)]).optional(),
+    /** Dev server as a middleware for your own server (lunx's createServer API): no port of its own. */
+    middlewareMode: z.boolean().optional(),
     open: z.union([z.boolean(), z.string()]).optional(),
     proxy: z.record(z.string(), z.union([z.string(), z.any()])).optional(),
     https: z.union([z.boolean(), z.object({ key: z.string(), cert: z.string() })]).optional(),
@@ -253,7 +297,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
   'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib',
-  'electron', 'pwa',
+  'electron', 'pwa', 'html', 'experimental',
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {

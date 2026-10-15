@@ -95,7 +95,7 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
     }
 
     const server: Record<string, any> = {};
-    for (const key of ['port', 'host', 'strictPort', 'open', 'proxy', 'cors', 'headers'] as const) {
+    for (const key of ['port', 'host', 'strictPort', 'open', 'proxy', 'cors', 'headers', 'allowedHosts'] as const) {
         const value = vite.server?.[key];
         if (value === undefined) continue;
         server[key] = key === 'host' && value === true ? '0.0.0.0' : value;
@@ -112,8 +112,23 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
     if (b.cssCodeSplit === false) build.cssCodeSplit = false;
     if (b.target !== undefined) build.target = b.target;
     if (b.manifest) build.manifest = b.manifest;
+    if (b.ssrManifest) build.ssrManifest = b.ssrManifest;
+    if (typeof b.emptyOutDir === 'boolean') build.emptyOutDir = b.emptyOutDir;
+    if (typeof b.copyPublicDir === 'boolean') build.copyPublicDir = b.copyPublicDir;
+    if (typeof b.chunkSizeWarningLimit === 'number') build.chunkSizeWarningLimit = b.chunkSizeWarningLimit;
+    if (b.cssMinify === false) build.cssMinify = false;
+    const out = b.rolldownOptions?.output ?? b.rollupOptions?.output;
+    for (const key of ['entryFileNames', 'chunkFileNames', 'assetFileNames'] as const) if (typeof out?.[key] === 'string') build[key] = out[key];
+    if (!b.lib) {
+        const external = b.rolldownOptions?.external ?? b.rollupOptions?.external;
+        if (typeof external === 'string' || external instanceof RegExp || Array.isArray(external)) build.external = external;
+    }
+    if (typeof vite.experimental?.renderBuiltUrl === 'function') build.renderBuiltUrl = vite.experimental.renderBuiltUrl;
+    const drop = vite.esbuild?.drop ?? vite.oxc?.drop;
+    if (Array.isArray(drop)) build.drop = drop;
     if (b.cssTarget !== undefined) build.cssTarget = b.cssTarget;
     if (Object.keys(build).length) config.build = build;
+    if (vite.html?.cspNonce) config.html = { ...(config.html ?? {}), cspNonce: vite.html.cspNonce };
     const input = b.rollupOptions?.input ?? b.rolldownOptions?.input;
     if (input) config.entry = typeof input === 'string' ? [input] : Array.isArray(input) ? input : Object.values(input);
     if (b.lib) {

@@ -21,6 +21,8 @@ import type { WebSocketServer, WebSocket } from '../lib/ws.js';
 import { fileURLToPath } from 'url';
 import { BuildConfig } from '../config/index.js';
 import { metaEnvFrom, replaceHtmlEnv } from '../build/html-env.js';
+import { addNonce, applyHtmlOptions } from '../build/html-options.js';
+import { corsOrigin, hostAllowed } from './access.js';
 import { wasmInitModule } from '../build/wasm-init.js';
 import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from '../build/svg-component.js';
 import { log } from '../utils/logger.js';
@@ -649,6 +651,14 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   let port = cfg.server?.port || cfg.port || 5173;
   const host = cfg.server?.host || 'localhost';
 
+  // `server.middlewareMode`: requests come through the app's own server (createServer().middlewares),
+  // and HMR rides on the server given as server.hmr.server, if any.
+  const middlewareMode = !!(cfg.server as any)?.middlewareMode;
+  if (middlewareMode && !existingServer) {
+    existingServer = (cfg.server as any)?.hmr?.server ?? http.createServer();
+    if (!(cfg.server as any)?.hmr?.server) log.info('[lunx] middleware mode without server.hmr.server: pages load, but without live updates.', { category: 'server' });
+  }
+
   // Dynamic port detection - skip if existingServer provided (minimal server already bound the port)
   if (!cfg.server?.strictPort && !existingServer) {
     port = await findAvailablePort(port, host);
@@ -908,15 +918,27 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     return rewriteImports(out, cfg.root, preBundledDeps, devFederation, aliases, appDev, onDisk ? file : path.join(cfg.root, 'index.html'));
   };
 
+  const access = { host: cfg.server?.host, allowedHosts: (cfg.server as any)?.allowedHosts, cors: (cfg.server as any)?.cors };
   const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    // DNS rebinding: a page on another domain must not reach this server through it.
+    if (!hostAllowed(req.headers.host, access)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end(`Blocked request. This host (${JSON.stringify(req.headers.host)}) is not allowed.\nTo allow it, add it to server.allowedHosts in lunx.config.`);
+      return;
+    }
     if (appDev && await appDev.handle(req, res)) return;
     const reqPath = (req.url || '/').split('?')[0]!;
     if (reqPath !== '/' && !reqPath.endsWith('.html') && !reqPath.startsWith('/@lunx/hmr-client') && !reqPath.startsWith('/__lunx')) {
       await prebundleReady;
     }
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    // CORS for pages on localhost only, unless server.cors says otherwise (as Vite).
+    const allowOrigin = corsOrigin(req.headers.origin, access);
+    if (allowOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      if (allowOrigin !== '*') res.setHeader('Vary', 'Origin');
+    }
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -1172,6 +1194,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
       try {
         data = replaceHtmlEnv(String(data), { ...metaEnvFrom(devDefines), BASE_URL: '/' });
+        // `html` in lunx.config (title, meta, favicon, tags…), as in the build; the nonce comes last, below.
+        data = applyHtmlOptions(data, { ...(cfg as any).html, cspNonce: undefined }, '/');
         if (appDev) data = await appDev.indexHtml(url, data);
         // Inject entry point if not present (simple heuristic)
         // Angular CLI projects often don't have the script tag in source index.html
@@ -1253,6 +1277,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           // Fallback if no head tag found
           data = registryScript + federationRuntime + clientScript + data;
         }
+        // `html.cspNonce`: on every script and stylesheet, lunx's own included.
+        if ((cfg as any).html?.cspNonce) data = addNonce(data, (cfg as any).html.cspNonce);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(data);
@@ -2023,7 +2049,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   wss = (server as any).wsServer;
   if (!wss) {
     const { WebSocketServer } = await import('../lib/ws.js');
-    wss = new WebSocketServer({ server });
+    // On the app's own server (middleware mode), only lunx's HMR path: its other sockets stay its own.
+    wss = new WebSocketServer({ server, ...(middlewareMode ? { path: '/__lunx_hmr' } : {}) });
     (server as any).wsServer = wss;
   }
 

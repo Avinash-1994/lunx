@@ -230,7 +230,19 @@ export default defineConfig({
     open: true,
     proxy: {
       '/api': 'http://localhost:8080'
-    }
+    },
+    // As Vite: only localhost / IPs answered and only localhost pages get CORS, unless listed
+    allowedHosts: ['.example.test'],
+  },
+
+  // Every page, in dev and builds
+  html: {
+    title: 'My app',
+    meta: { description: 'Fast app', 'theme-color': '#0b1020' },
+    favicon: '/favicon.svg',
+    preconnect: ['https://api.example.com'],
+    tags: [{ tag: 'script', attrs: { src: 'https://cdn.example.com/analytics.js', defer: true }, injectTo: 'body' }],
+    cspNonce: 'NONCE', // on every script and stylesheet (Vite's html.cspNonce)
   },
   
   // Production build options
@@ -244,6 +256,13 @@ export default defineConfig({
     manifest: true,
     // Third-party license notices: 'linked' (default: <chunk>.LICENSE.txt), 'inline' or 'none'
     legalComments: 'linked',
+    assetPrefix: 'https://cdn.example.com/app/', // load built files from a CDN (or renderBuiltUrl)
+    entryFileNames: 'js/[name]-[hash].js',        // also chunkFileNames, assetFileNames
+    external: ['three'],                           // left to an import map / CDN
+    drop: ['console', 'debugger'],
+    prefetch: true,                                // <link rel="prefetch"> for lazy chunks
+    ssrManifest: true,                             // .vite/ssr-manifest.json
+    // also: cssMinify, emptyOutDir, copyPublicDir, chunkSizeWarningLimit (kB, default 500)
   },
 
   // Share compile results between machines (CI, teammates): 'http' or 's3'
@@ -256,6 +275,22 @@ export default defineConfig({
     vulnSeverity: 'high' // 'critical' | 'high' | 'medium' | 'low' | 'off'
   }
 });
+```
+
+### JavaScript API
+
+```js
+import { build, createServer } from 'lunx-dev';
+
+await build({ root: 'apps/web', build: { sourcemap: true } }); // lunx.config underneath
+
+// The dev server inside your own server (Express, Fastify, plain http)
+const app = express();
+const httpServer = http.createServer(app);
+const lunx = await createServer({ server: { middlewareMode: true, hmr: { server: httpServer } } });
+app.use('/api', api);
+app.use(lunx.middlewares);
+httpServer.listen(3000);
 ```
 
 ---

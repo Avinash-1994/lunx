@@ -74,6 +74,7 @@ export const rolldownBundler: Bundler = {
                           isEntry: item.isEntry,
                           facadeModuleId: item.facadeModuleId ?? null,
                           imports: item.imports ?? [],
+                          dynamicImports: item.dynamicImports ?? [],
                           moduleIds: item.moduleIds ?? [],
                       }
                     : { type: 'asset', fileName: item.fileName, source: item.source },
