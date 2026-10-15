@@ -242,6 +242,8 @@ export default defineConfig({
     target: ['chrome90', 'firefox88', 'safari14'],
     // .vite/manifest.json for server-rendered backends (Laravel, Rails, Django…)
     manifest: true,
+    // Third-party license notices: 'linked' (default: <chunk>.LICENSE.txt), 'inline' or 'none'
+    legalComments: 'linked',
   },
 
   // Share compile results between machines (CI, teammates): 'http' or 's3'

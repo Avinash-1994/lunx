@@ -96,6 +96,8 @@ export const BuildConfigSchema = z.object({
     targets: z.array(z.string()).optional(),
     /** Browsers to compile JS for: 'es2020', ['chrome90', 'safari14'], 'baseline-widely-available', 'esnext' (default: the project's browserslist, else no lowering). */
     target: z.union([z.string(), z.array(z.string())]).optional(),
+    /** Third-party license notices in minified output: 'linked' (default, `<chunk>.LICENSE.txt` beside each chunk), 'inline' or 'none'. */
+    legalComments: z.enum(['inline', 'none', 'linked']).optional(),
     /** Write `.vite/manifest.json` (or this path in the output): source files → output files, for server-rendered backends. */
     manifest: z.union([z.boolean(), z.string()]).optional(),
     /** Browsers to compile CSS for, when they differ from `target`. */

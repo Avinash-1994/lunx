@@ -123,6 +123,9 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const cssCodeSplit = (build as any).cssCodeSplit !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
 
+    // Third-party license notices: in the code, dropped, or (default) beside each chunk.
+    const legalComments: 'inline' | 'none' | 'linked' = minify ? ((build as any).legalComments ?? 'linked') : 'inline';
+
     // A shared cache for compile results (`cache.remote`).
     configureRemoteCache((config as any).cache?.remote);
 
@@ -437,6 +440,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
               }]
             : []),
         dynamicImportVars,
+        ...(legalComments === 'linked' ? [legalCommentsPlugin()] : []),
         {
             name: 'lunx:glob-import',
             transform: {
@@ -813,6 +817,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         chunkFileNames: 'assets/[name].[hash].js',
         assetFileNames: 'assets/[name].[hash][extname]',
         minify,
+        legalComments: legalComments === 'inline',
         sourcemap: sourcemapOption(build.sourcemap),
         chunkGroups: manualChunks
             ? Object.entries(manualChunks).map(([name, pkgs]) => ({
@@ -1126,4 +1131,37 @@ async function emptyDir(outDir: string, root: string): Promise<void> {
     for (const entry of await fsp.readdir(outDir)) {
         await fsp.rm(path.join(outDir, entry), { recursive: true, force: true });
     }
+}
+
+/**
+ * `build.legalComments: 'linked'` (the default): the `@license` / `/*!` notices of
+ * the packages in each chunk go to `<chunk>.LICENSE.txt` beside it, linked from the
+ * end of the chunk, as Rsbuild and webpack do, instead of in the shipped code.
+ */
+function legalCommentsPlugin(): any {
+    const notices = new Map<string, string[]>();
+    const LEGAL = /\/\*\*?![\s\S]*?\*\/|\/\*[\s\S]*?(?:@license|@preserve|@copyright)[\s\S]*?\*\//g;
+    return {
+        name: 'lunx:legal-comments',
+        transform: {
+            filter: { id: /node_modules/, code: { include: [/@license|@preserve|@copyright|\/\*!/] } },
+            handler(code: string, id: string) {
+                const found = code.match(LEGAL);
+                if (found) notices.set(id, [...new Set(found)]);
+                return null;
+            },
+        },
+        generateBundle(this: any, _opts: unknown, bundle: Record<string, any>) {
+            for (const chunk of Object.values(bundle) as any[]) {
+                if (chunk.type !== 'chunk') continue;
+                const text = [...new Set((chunk.moduleIds ?? []).flatMap((id: string) => notices.get(id) ?? []))];
+                if (!text.length) continue;
+                const fileName = `${chunk.fileName}.LICENSE.txt`;
+                this.emitFile({ type: 'asset', fileName, source: text.join('\n\n') + '\n' });
+                const banner = `\n/*! Licenses: ${path.posix.basename(fileName)} */`;
+                const map = chunk.code.lastIndexOf('\n//# sourceMappingURL=');
+                chunk.code = map === -1 ? chunk.code + banner : chunk.code.slice(0, map) + banner + chunk.code.slice(map);
+            }
+        },
+    };
 }

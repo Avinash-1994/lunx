@@ -101,6 +101,8 @@ export interface BundleOutputOptions {
     minify?: boolean;
     /** Keep `@__PURE__` annotations in minified output (libraries: downstream bundlers tree-shake with them). */
     keepAnnotations?: boolean;
+    /** Minified output: keep `@license` / `/*!` comments in the code (default true). */
+    legalComments?: boolean;
     sourcemap?: boolean | 'inline' | 'hidden';
     inlineDynamicImports?: boolean;
     /** Named chunks: modules whose id matches go into that chunk. */

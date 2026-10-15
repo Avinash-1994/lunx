@@ -97,6 +97,20 @@ describe('build features', () => {
         expect(manifest['src/lazy.js'].css[0]).toMatch(/^assets\/lazy\..+\.css$/);
     });
 
+    it('moves license notices beside the chunk by default, keeps them with legalComments: inline', () => {
+        const files = {
+            'node_modules/licensed/package.json': '{"name":"licensed","version":"1.0.0","type":"module","main":"index.js"}',
+            'node_modules/licensed/index.js': '/*! licensed v1 | MIT */\nexport function v() { return Math.random(); }\n',
+            'src/main.js': "import { v } from 'licensed';\nconsole.log(v());\n",
+        };
+        const linked = built(project(files));
+        expect(linked.js).not.toContain('licensed v1');
+        const notice = linked.files.find((f) => f.endsWith('.LICENSE.txt'))!;
+        expect(notice).toMatch(/^main\..+\.js\.LICENSE\.txt$/);
+        expect(linked.js).toContain(`/*! Licenses: ${notice} */`);
+        expect(built(project({ ...files, 'lunx.config.js': "export default { build: { legalComments: 'inline' } };\n" })).js).toContain('licensed v1');
+    });
+
     it('prints build errors without colour codes under NO_COLOR', () => {
         const r = build(project({ 'src/main.js': "import x from './missing.js';\nconsole.log(x);\n" }), { NO_COLOR: '1' });
         expect(r.status).not.toBe(0);
