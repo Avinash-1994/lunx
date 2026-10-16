@@ -137,7 +137,9 @@ export class DevEnvironment {
         if (mod.file && this.watcher && path.isAbsolute(mod.file) && !mod.file.includes('node_modules')) this.watcher.add?.(mod.file);
         const transformed = await this.pluginContainer.transform(code, id, { inMap: map });
         let result: any = { code: transformed.code, map: transformed.map, etag: `W/"${transformed.code.length.toString(16)}-${hash(transformed.code)}"` };
-        if (!this.isClient) {
+        // Vite's `dev.moduleRunnerTransform`: a module runner's form, by default for server environments
+        // (Vitest turns it on for `client`, which runs its jsdom / happy-dom tests).
+        if (this.config.dev?.moduleRunnerTransform ?? !this.isClient) {
             // Plugins have produced JavaScript by now; the runner transform keys its parser off the extension.
             const name = cleanUrl(id).replace(/^\0/, '');
             const ssr = await ssrTransform(/\.(m|c)?js$/.test(name) ? name : `${name}.js`, transformed.code);

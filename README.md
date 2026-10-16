@@ -277,6 +277,16 @@ export default defineConfig({
 });
 ```
 
+### Vite-based tools: `lunx exec`
+
+```bash
+lunx exec storybook dev -p 6006   # Storybook on lunx's engine
+lunx exec storybook build
+lunx exec vitest run              # Vitest: node, jsdom / happy-dom, snapshots
+```
+
+The tool runs unchanged with `vite` (and Rollup, vite-node) pointing at lunx, in its process and the ones it starts.
+
 ### JavaScript API
 
 ```js

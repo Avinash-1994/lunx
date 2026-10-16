@@ -130,6 +130,8 @@ export const BuildConfigSchema = z.object({
     legalComments: z.enum(['inline', 'none', 'linked']).optional(),
     /** Write `.vite/manifest.json` (or this path in the output): source files → output files, for server-rendered backends. */
     manifest: z.union([z.boolean(), z.string()]).optional(),
+    /** core-js polyfills for `target`: 'entry' (all the targets need) or 'usage' (what the code uses); default off. */
+    polyfill: z.enum(['entry', 'usage', 'off']).optional(),
     /** Browsers to compile CSS for, when they differ from `target`. */
     cssTarget: z.union([z.string(), z.array(z.string())]).optional(),
     manualChunks: z.record(z.string(), z.array(z.string())).optional(),

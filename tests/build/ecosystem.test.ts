@@ -73,3 +73,12 @@ describe('React Compiler setting', () => {
         }
     });
 });
+
+describe('Vite-based tools on lunx (lunx exec)', () => {
+    it('fetchModule externalizes builtins and URLs as Vite does', async () => {
+        const { fetchModule } = await import('../../src/plugin-host/shim.js');
+        expect(await fetchModule({}, 'node:fs')).toEqual({ externalize: 'node:fs', type: 'builtin' });
+        expect(await fetchModule({}, 'path')).toEqual({ externalize: 'path', type: 'builtin' });
+        expect(await fetchModule({}, 'https://cdn.test/x.js')).toEqual({ externalize: 'https://cdn.test/x.js', type: 'network' });
+    });
+});

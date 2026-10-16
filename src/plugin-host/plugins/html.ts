@@ -5,6 +5,7 @@
  * the plugins' `transformIndexHtml` hooks applied.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { cleanUrl, normalizePath } from '../utils.js';
 import type { StateLookup } from './build.js';
@@ -95,8 +96,10 @@ export function buildHtmlPlugin(config: any, getState: StateLookup): any {
                 const imports: string[] = [];
                 // `/x` is root-relative, unless it is already a path inside the
                 // root (plugins write virtual entries' absolute paths into pages).
+                // A specifier with a scheme (`virtual:/…`) is a plugin's module id, imported as it is.
                 const fromHtml = (src: string) =>
-                    !src.startsWith('/') ? path.resolve(path.dirname(file), src) : src.startsWith(normalizePath(config.root) + '/') ? src : path.join(config.root, src);
+                    /^[a-z][\w+.-]+:/i.test(src) ? src
+                    : !src.startsWith('/') ? path.resolve(path.dirname(file), src) : src.startsWith(normalizePath(config.root) + '/') ? src : path.join(config.root, src);
                 let index = 0;
                 let stripped = html.replace(SCRIPT_RE, (match, attrs: string, body: string) => {
                     if (ATTR(attrs, 'type') !== 'module') return match;
@@ -117,6 +120,15 @@ export function buildHtmlPlugin(config: any, getState: StateLookup): any {
                     return '';
                 });
                 pages.set(file, stripped);
+                // A root-relative src a plugin serves (Storybook's `/virtual:/@storybook/builder-vite/vite-app.js`):
+                // its id, as Vite resolves page scripts through the plugins.
+                for (let i = 0; i < imports.length; i++) {
+                    const spec = imports[i]!;
+                    if (inlineScripts.has(spec) || /^[a-z][\w+.-]+:/i.test(spec) || fs.existsSync(spec)) continue;
+                    const original = spec.startsWith(config.root) ? '/' + normalizePath(path.relative(config.root, spec)) : spec;
+                    const resolved = await this.resolve(original, file, { skipSelf: true }).catch(() => null);
+                    if (resolved && !resolved.external) imports[i] = resolved.id;
+                }
                 return { code: imports.map((s) => `import ${JSON.stringify(s)};`).join('\n') || 'export {};', map: null, moduleType: 'js' };
             },
         },

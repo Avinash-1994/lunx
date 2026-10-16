@@ -242,7 +242,54 @@ export class DepsOptimizer {
             }
         };
         walk(this.config.root, 0);
+        // `optimizeDeps.entries`: files (or globs) the app loads besides its sources, e.g. Storybook's
+        // preview annotations in node_modules, whose imports (React) must be pre-bundled too.
+        // Crawled through their relative imports, as Vite's scanner does (Storybook's preview entry
+        // reaches React through its own chunks).
+        const queue = this.entryFiles();
+        const crawled = new Set<string>();
+        while (queue.length && crawled.size < 2000) {
+            const file = queue.pop()!;
+            if (crawled.has(file)) continue;
+            crawled.add(file);
+            let code: string;
+            try {
+                code = fs.readFileSync(file, 'utf-8');
+            } catch {
+                continue;
+            }
+            for (const m of code.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]/g)) {
+                const spec = m[1]!;
+                if (spec.startsWith('.')) {
+                    const next = path.resolve(path.dirname(file), spec);
+                    if (/\.(m|c)?js$/.test(next) && !crawled.has(next)) queue.push(next);
+                } else if (!spec.startsWith('/') && !spec.startsWith('#') && !spec.startsWith('$') && !spec.includes(':')) found.add(spec);
+            }
+        }
         return found;
+    }
+
+    /** The files `optimizeDeps.entries` names: paths, or globs relative to the root. */
+    private entryFiles(): string[] {
+        const out = new Set<string>();
+        for (const entry of arraify(this.options.entries ?? []).flat().filter((e: unknown): e is string => typeof e === 'string')) {
+            // Glob-escaped paths (Storybook escapes `@`, `(`…): the file they name.
+            const unescaped = entry.replace(/\\(.)/g, '$1');
+            const abs = path.isAbsolute(unescaped) ? unescaped : path.join(this.config.root, unescaped);
+            if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+                out.add(abs);
+                continue;
+            }
+            if (!/[*?{[]/.test(entry)) continue;
+            const glob = (fs as any).globSync as undefined | ((pattern: string, opts: object) => string[]);
+            if (!glob) continue;
+            try {
+                for (const f of glob(entry, { cwd: this.config.root, exclude: (p: string) => p.includes('node_modules') })) out.add(path.resolve(this.config.root, f));
+            } catch {
+                // a pattern Node's glob does not take: the sources scan still ran
+            }
+        }
+        return [...out];
     }
 
     /** URL of the pre-bundled module for `spec`, registering it if it is new. */

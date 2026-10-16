@@ -19,6 +19,7 @@ import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
 import { dynamicImportVarsPlugin } from '../engines/rolldown.js';
 import { resolveTargets } from './targets.js';
+import { entryPolyfills, POLYFILLS_ID, usagePolyfiller, type PolyfillMode } from './polyfills.js';
 import { compileReact, declaresReactCompiler, mayHaveComponents, reactCompiler, type ReactCompilerConfig } from '../core/react-compiler.js';
 import { addNonce, applyHtmlOptions } from './html-options.js';
 import { CompilePool, MIN_POOL_FILES, type Compiled } from './compile-pool.js';
@@ -464,6 +465,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         dynamicImportVars,
         ...(legalComments === 'linked' ? [legalCommentsPlugin()] : []),
         ...(await reactCompilerPlugin(root, framework, (config as any).react, app)),
+        ...polyfillPlugins(root, b.polyfill, targets.js, appEntries),
         {
             name: 'lunx:glob-import',
             transform: {
@@ -1255,6 +1257,44 @@ async function reactCompilerPlugin(root: string, framework: string, react: React
                 const file = cleanId(id);
                 if (!mayHaveComponents(file, code)) return null;
                 return compileReact(compiler, file, code);
+            },
+        },
+    }];
+}
+
+/** `build.polyfill: 'entry' | 'usage'` (src/build/polyfills.ts): core-js for the build's targets. */
+function polyfillPlugins(root: string, mode: PolyfillMode, targets: string[] | null, entries: Set<string>): any[] {
+    if (!mode || mode === 'off') return [];
+    if (mode === 'entry') {
+        const code = entryPolyfills(root, targets);
+        return [{
+            name: 'lunx:polyfill-entry',
+            resolveId: { filter: { id: /^lunx:polyfills$/ }, handler: (id: string) => (id === POLYFILLS_ID ? `\0${POLYFILLS_ID}` : null) },
+            load: { filter: { id: /^\0lunx:polyfills$/ }, handler: (id: string) => (id === `\0${POLYFILLS_ID}` ? { code, moduleType: 'js', moduleSideEffects: true } : null) },
+            transform: {
+                filter: { id: { exclude: /node_modules/ } },
+                // On the first line, so the entry's own line numbers stay put.
+                handler: (src: string, id: string) => (entries.has(cleanId(id)) ? { code: `import ${JSON.stringify(POLYFILLS_ID)}; ${src}`, map: null } : null),
+            },
+        }];
+    }
+    const polyfiller = usagePolyfiller(root, targets);
+    // Each polyfill through a one-line module of its own: Rolldown split an entry that imports
+    // core-js's CommonJS modules directly into two chunks that import each other.
+    const PREFIX = 'lunx:polyfill/';
+    return [{
+        name: 'lunx:polyfill-usage',
+        resolveId: { filter: { id: /^lunx:polyfill\// }, handler: (id: string) => (id.startsWith(PREFIX) ? `\0${id}` : null) },
+        load: {
+            filter: { id: /^\0lunx:polyfill\// },
+            handler: (id: string) => ({ code: `import ${JSON.stringify(`core-js/modules/${id.slice(PREFIX.length + 1)}.js`)};\n`, moduleType: 'js', moduleSideEffects: true }),
+        },
+        transform: {
+            filter: { id: { include: /\.[mc]?[jt]sx?(\?.*)?$/, exclude: /node_modules/ } },
+            async handler(src: string, id: string) {
+                const out = await polyfiller.transform(cleanId(id), src);
+                if (!out) return null;
+                return { code: out.code.replace(/^import "core-js\/modules\/([\w.-]+)\.js";$/gm, (_m, name) => `import ${JSON.stringify(PREFIX + name)};`), map: out.map };
             },
         },
     }];
