@@ -113,8 +113,8 @@ Competitor cells follow each tool's own documentation.
 | | lunx | Vite | Rsbuild | Rspack / webpack | Parcel | Farm | Bun |
 |---|---|---|---|---|---|---|---|
 | React (Fast Refresh) | ✅ | 🔌 | 🔌 | 🔌 | ✅ | 🔌 | ✅ |
-| React Compiler | ❌ | 🔌 (Babel) | ✅ Rust (2.1) | 🧩 | ❌ | ❌ | ❌ |
-| React Server Components | only via Waku / React Router | 🔌 `plugin-rsc` | ✅ (2.0) | experimental (2.0) | ✅ (beta) | ❌ | ❌ |
+| React Compiler | ✅ (project's Babel plugin, dev + build) | 🔌 (Babel) | ✅ Rust (2.1) | 🧩 | ❌ | ❌ | ❌ |
+| React Server Components | ✅ `@vitejs/plugin-rsc` apps, Waku, React Router | 🔌 `plugin-rsc` | ✅ (2.0) | experimental (2.0) | ✅ (beta) | ❌ | ❌ |
 | Vue (SFC, HMR) | ✅ | 🔌 | 🔌 | 🔌 loader | ✅ | 🔌 | 🧩 |
 | Svelte 5 | ✅ | 🔌 | 🔌 | 🧩 loader | 🧩 | 🔌 | 🧩 |
 | Solid | ✅ | 🧩 | 🔌 | 🧩 | ❌ | 🔌 | ❌ |
@@ -130,8 +130,8 @@ Competitor cells follow each tool's own documentation.
 |---|---|---|---|---|
 | SvelteKit, Nuxt, Astro, React Router, Remix, TanStack Start, SolidStart, Qwik City, Analog, VitePress, Waku, Marko Run | ✅ built by lunx (Vite plugins on its engine; client size ≤ their own CLI, `npm run test:meta-parity`) | ✅ native | TanStack Start, Modern.js, Rspress | ❌ |
 | Next.js, Docusaurus, Gatsby, RedwoodJS | runs their own CLI | ❌ | Next (experimental), Docusaurus (Rspack) | ✅ |
-| Storybook | ❌ no builder | ✅ builder | ✅ builder | ✅ builder |
-| Vike, Vitest, Histoire, Slidev… (Vite-only ecosystem) | ❌ untested | ✅ | ❌ | ❌ |
+| Storybook | ✅ `lunx exec storybook` (its Vite builder on lunx) | ✅ builder | ✅ builder | ✅ builder |
+| Vitest, and other Vite-only tools (Vike, Histoire, Slidev…) | ✅ Vitest via `lunx exec vitest` (jsdom, snapshots); others untested | ✅ | ❌ | ❌ |
 
 ## 4. Module federation
 
@@ -142,11 +142,11 @@ Competitor cells follow each tool's own documentation.
 | `mf-manifest.json` | ✅ | ✅ | ✅ | ✅ |
 | Dev HMR across host and remote | ✅ | ✅ | partial | ✅ |
 | `loadRemote`, `preloadRemote` | ✅ | ✅ | ✅ | ✅ |
-| `registerRemotes` (remotes added at runtime) | ❌ | ✅ | ✅ | ✅ |
-| Runtime plugins (retry, fallback, auth…) | ❌ | ✅ | ✅ | ✅ |
-| Type hints for remotes (`dts`) | ❌ (**docs claim it**) | ✅ | ✅ | ✅ |
-| `shareStrategy`, `shareScope`, `import: false` | ❌ | ✅ | ✅ | ✅ |
-| Remote as object (`{ entry, type }`) | ❌ string only | ✅ | ✅ | ✅ |
+| `registerRemotes` (remotes added at runtime) | ✅ | ✅ | ✅ | ✅ |
+| Runtime plugins (retry, fallback, auth…) | ✅ `beforeRequest`, `onLoad`, `errorLoadRemote` | ✅ | ✅ | ✅ |
+| Type hints for remotes (`dts`) | ✅ `@mf-types.zip`, same layout as the MF dts plugin | ✅ | ✅ | ✅ |
+| `shareStrategy`, `shareScope`, `import: false` | ✅ | ✅ | ✅ | ✅ |
+| Remote as object (`{ entry, type }`) | ✅ | ✅ | ✅ | ✅ |
 | Chrome DevTools extension | ❌ | ✅ | ✅ | ✅ |
 
 ## 5. Bundler features
@@ -157,22 +157,22 @@ Competitor cells follow each tool's own documentation.
 | CSS code splitting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | CSS modules, PostCSS, Sass, Less, Stylus, Tailwind v4 | ✅ | ✅ | ✅ | loaders | ✅ | partial | partial |
 | `new Worker(new URL(…, import.meta.url))` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| `import W from './w.js?worker'` | ❌ **fails** | ✅ | ✅ (2.1) | ❌ | ❌ | ❌ | ❌ |
-| `` import(`./locales/${lang}.js`) `` | ❌ **not bundled, 404 at runtime** | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `import W from './w.js?worker'` (`&url`, `&inline`) | ✅ | ✅ | ✅ (2.1) | ❌ | ❌ | ❌ | ❌ |
+| `` import(`./locales/${lang}.js`) `` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | `import.meta.glob` | ✅ | ✅ | ✅ (`import.meta.webpackContext`) | ✅ (`require.context`) | ✅ glob | ❌ | ❌ |
 | `.wasm?init` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Wasm ESM import (`import { f } from './a.wasm'`) | ❌ | ✅ (8.1) | ✅ | ✅ | ❌ | ❌ | partial |
-| Syntax lowering for older browsers (`build.target` / browserslist) | ❌ always ESNext | ✅ | ✅ | ✅ | ✅ | ✅ | partial |
-| Polyfills (core-js usage, legacy `nomodule`) | ❌ | 🔌 `plugin-legacy` | ✅ `output.polyfill` | ✅ | ✅ differential | ❌ | ❌ |
-| `build.manifest` (Laravel, Rails, Django backends) | ❌ | ✅ | ✅ | 🔌 | ✅ | ✅ metafile | ❌ |
-| `ssrManifest` | ❌ | ✅ | ✅ | 🔌 | ❌ | ❌ | ❌ |
+| Wasm ESM import (`import { f } from './a.wasm'`) | ✅ | ✅ (8.1) | ✅ | ✅ | ❌ | ❌ | partial |
+| Syntax lowering for older browsers (`build.target` / browserslist) | ✅ default: Baseline widely available | ✅ | ✅ | ✅ | ✅ | ✅ | partial |
+| Polyfills (core-js usage, legacy `nomodule`) | ✅ `build.polyfill` entry / usage; no `nomodule` | 🔌 `plugin-legacy` | ✅ `output.polyfill` | ✅ | ✅ differential | ❌ | ❌ |
+| `build.manifest` (Laravel, Rails, Django backends) | ✅ | ✅ | ✅ | 🔌 | ✅ | ✅ metafile | ❌ |
+| `ssrManifest` | ✅ | ✅ | ✅ | 🔌 | ❌ | ❌ | ❌ |
 | Chunk import map (stable hashes) | ❌ | ✅ (8.1) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| CDN URLs per asset (`renderBuiltUrl` / `assetPrefix`) | ❌ (only `base`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Drop `console` / `debugger` | ❌ | via minifier options | ✅ `removeConsole` | ✅ (Terser) | ❌ | ✅ `drop` | ✅ |
-| Legal comments (measured) | kept inline | dropped | Rsbuild: `.LICENSE.txt`; Rspack: dropped | dropped | dropped | kept inline | dropped |
+| CDN URLs per asset (`renderBuiltUrl` / `assetPrefix`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Drop `console` / `debugger` | ✅ `build.drop` | via minifier options | ✅ `removeConsole` | ✅ (Terser) | ❌ | ✅ `drop` | ✅ |
+| Legal comments (measured) | `.LICENSE.txt` per chunk (`build.legalComments`) | dropped | Rsbuild: `.LICENSE.txt`; Rspack: dropped | dropped | dropped | kept inline | dropped |
 | Library mode (es, cjs, umd, iife, `.d.ts`) | ✅ | ✅ (no dts) | ✅ Rslib | ✅ | ✅ | ✅ | ✅ |
 | Persistent build cache | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Remote (shared) cache | ❌ (**option accepted, does nothing**) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Remote (shared) cache | ✅ `cache.remote` (HTTP, S3) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Precompressed .gz / .br | ✅ | 🔌 | 🔌 | 🔌 | ✅ | ❌ | ❌ |
 | Bundled dev mode for 10k+ module apps | ❌ | ✅ experimental (8.1) | n/a (bundler) | n/a | n/a | n/a | n/a |
 | Single-file executable | ❌ | ❌ (Vite+: `vp pack`) | ❌ | ❌ | ❌ | ❌ | ✅ `--compile` |
@@ -188,33 +188,33 @@ Options a production project reaches for. A lunx ❌ means neither
 | `envPrefix`, `envDir` | partial | ✅ | ✅ |
 | `sourcemap` (inline, hidden, external) | ✅ | ✅ | ✅ |
 | `minify` on/off | ✅ | ✅ | ✅ |
-| `cssMinify`, `cssTarget` | ❌ | ✅ | ✅ |
+| `cssMinify`, `cssTarget` | ✅ | ✅ | ✅ |
 | `assetsInlineLimit` | ✅ | ✅ | ✅ |
-| `assetsInclude` | ❌ | ✅ | ✅ |
-| `emptyOutDir` / `cleanDistPath` | always | ✅ | ✅ |
-| `copyPublicDir` / `copy` | always | ✅ | ✅ |
-| Output file name templates | ❌ fixed `assets/[name].[hash]` | ✅ | ✅ |
+| `assetsInclude` | ✅ (vite.config, plugin host) | ✅ | ✅ |
+| `emptyOutDir` / `cleanDistPath` | ✅ | ✅ | ✅ |
+| `copyPublicDir` / `copy` | ✅ | ✅ | ✅ |
+| Output file name templates | ✅ entry / chunk / asset | ✅ | ✅ |
 | Chunk splitting | `manualChunks` by package | ✅ `advancedChunks` | ✅ strategies |
-| `chunkSizeWarningLimit`, `reportCompressedSize` | ❌ | ✅ | ✅ |
-| Preload / prefetch / preconnect hints | modulepreload only | ✅ | ✅ |
-| `externals` in apps | ❌ (libraries only) | ✅ | ✅ |
-| HTML: title, meta, favicon, tags | ❌ | 🔌 | ✅ |
-| `html.cspNonce` | ❌ (CSP via `lunx security headers`) | ✅ | ✅ `security.nonce` |
+| `chunkSizeWarningLimit`, `reportCompressedSize` | ✅ / always reported | ✅ | ✅ |
+| Preload / prefetch / preconnect hints | ✅ | ✅ | ✅ |
+| `externals` in apps | ✅ `build.external` | ✅ | ✅ |
+| HTML: title, meta, favicon, tags | ✅ `html` | 🔌 | ✅ |
+| `html.cspNonce` | ✅ | ✅ | ✅ `security.nonce` |
 | SRI | ✅ default | ❌ | ✅ |
 | `server.proxy`, `https`, `cors`, `headers`, `open`, `strictPort` | ✅ | ✅ | ✅ |
-| `server.allowedHosts` (DNS rebinding guard) | partial | ✅ | ✅ |
+| `server.allowedHosts` (DNS rebinding guard) | ✅ on by default, localhost-only CORS | ✅ | ✅ |
 | `server.warmup` | via plugin host | ✅ | n/a |
-| `middlewareMode` (embed in Express) | ❌ for apps | ✅ | ✅ |
+| `middlewareMode` (embed in Express) | ✅ | ✅ | ✅ |
 | `writeToDisk` in dev | ❌ | ❌ | ✅ |
 | Environment API (client + SSR + edge in one config) | partial (plugin host) | ✅ | ✅ `environments` |
-| JS API (`build()`, `createServer()`) | partial | ✅ | ✅ |
+| JS API (`build()`, `createServer()`) | ✅ | ✅ | ✅ |
 
 ## 7. Toolchain around the bundler
 
 | | lunx | Vite (+ Vite+) | Rstack | Parcel | Bun |
 |---|---|---|---|---|---|
 | Scaffolding | ✅ `lunx create`, 27 templates | ✅ `create-vite`, `vp create` | ✅ | ❌ | ✅ |
-| Test runner | basic: `describe`/`it`/`expect`/`vi`, TS, watch | ✅ Vitest | ✅ Rstest | ❌ | ✅ `bun test` |
+| Test runner | basic `lunx test`; Vitest runs on lunx via `lunx exec vitest` | ✅ Vitest | ✅ Rstest | ❌ | ✅ `bun test` |
 | · DOM environment (jsdom / happy-dom) | ❌ | ✅ | ✅ | | ✅ |
 | · Coverage | ❌ | ✅ | ✅ | | ✅ |
 | · Snapshots | ❌ | ✅ | ✅ | | ✅ |
