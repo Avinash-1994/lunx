@@ -525,65 +525,73 @@ function versionOf(name) {
     }
 }
 
+// Round by round: every tool runs once per round, so a machine that speeds up or slows
+// down during the session (shared CPUs drift by 2-3x) shifts all tools alike.
+const selected = Object.entries(TOOLS).filter(([name]) => !ONLY.length || ONLY.includes(name));
 const results = {};
-for (const [name, tool] of Object.entries(TOOLS)) {
-    if (ONLY.length && !ONLY.includes(name)) continue;
-    const r = { kind: tool.kind, version: versionOf(name) };
-
-    if (tool.dev) {
-        const boots = [];
-        const codes = [];
-        const hmrs = [];
-        const pages = [];
-        for (let i = 0; i < RUNS; i++) {
-            clearCaches(tool);
-            const d = await devRun(tool);
-            if (d.error) {
-                r.devError = d.error;
-                console.log(`${name} dev FAILED: ${d.error.split('\n').slice(-3).join(' ')}`);
-                break;
-            }
-            boots.push(d.bootMs);
-            if (d.appCodeMs !== null) codes.push(d.appCodeMs);
-            if (d.hmrMs !== null && d.hmrMs !== undefined) hmrs.push(d.hmrMs);
-            if (d.pageMs !== null && d.pageMs !== undefined) pages.push(d.pageMs);
-            console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms${HMR ? `, page ${d.pageMs ?? 'failed'}ms, hmr ${d.hmrMs ?? 'failed'}ms` : ''}`);
-        }
-        if (boots.length) r.devBootMs = median(boots);
-        if (codes.length) r.devAppCodeMs = median(codes);
-        if (hmrs.length) r.hmrMs = median(hmrs);
-        if (pages.length) r.devPageMs = median(pages);
-    } else {
-        r.devBootMs = null;
-    }
-    if (!tool.build) {
-        results[name] = r;
-        continue;
-    }
-
-    // Cold builds swing 2x on a shared machine (page cache, CPU steal), so one
-    // sample says little: take the median of RUNS cache-cleared builds.
-    const colds = [];
-    let cold;
-    for (let i = 0; i < RUNS; i++) {
+const samples = {};
+for (const [name, tool] of selected) {
+    results[name] = { kind: tool.kind, version: versionOf(name) };
+    samples[name] = { boots: [], codes: [], hmrs: [], pages: [], colds: [], warms: [] };
+    if (!tool.dev) results[name].devBootMs = null;
+}
+for (let i = 0; i < RUNS; i++) {
+    for (const [name, tool] of selected) {
+        const r = results[name];
+        const m = samples[name];
+        if (!tool.dev || r.devError) continue;
         clearCaches(tool);
-        cold = buildRun(tool);
-        if (cold.status !== 0) break;
-        colds.push(cold.ms);
+        const d = await devRun(tool);
+        if (d.error) {
+            r.devError = d.error;
+            console.log(`${name} dev FAILED: ${d.error.split('\n').slice(-3).join(' ')}`);
+            continue;
+        }
+        m.boots.push(d.bootMs);
+        if (d.appCodeMs !== null) m.codes.push(d.appCodeMs);
+        if (d.hmrMs !== null && d.hmrMs !== undefined) m.hmrs.push(d.hmrMs);
+        if (d.pageMs !== null && d.pageMs !== undefined) m.pages.push(d.pageMs);
+        console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms${HMR ? `, page ${d.pageMs ?? 'failed'}ms, hmr ${d.hmrMs ?? 'failed'}ms` : ''}`);
     }
-    if (cold.status !== 0) {
-        r.buildError = cold.log;
-        console.log(`${name} build FAILED (exit ${cold.status})`);
-    } else {
-        const warm = [];
-        for (let i = 0; i < RUNS; i++) warm.push(buildRun(tool).ms);
-        r.buildColdMs = median(colds);
-        r.buildWarmMs = median(warm);
-        r.jsBytes = cold.js;
-        r.cssBytes = cold.css;
-        console.log(`${name} build: cold ${median(colds)}ms (${colds.join('/')}), warm ${median(warm)}ms, js ${cold.js}B, css ${cold.css}B`);
+}
+// Cold builds swing 2x on a shared machine (page cache, CPU steal), so one
+// sample says little: the median of RUNS cache-cleared builds, then RUNS warm ones.
+const lastCold = {};
+for (let i = 0; i < RUNS; i++) {
+    for (const [name, tool] of selected) {
+        if (!tool.build || results[name].buildError) continue;
+        clearCaches(tool);
+        const cold = buildRun(tool);
+        if (cold.status !== 0) {
+            results[name].buildError = cold.log;
+            console.log(`${name} build FAILED (exit ${cold.status})`);
+            continue;
+        }
+        lastCold[name] = cold;
+        samples[name].colds.push(cold.ms);
     }
-    results[name] = r;
+}
+// Warm: each tool's rebuilds right after one of its own builds (the other tools' output
+// directories, written in between, are changes to the project for a tool that tracks them).
+for (const [name, tool] of selected) {
+    if (!tool.build || results[name].buildError) continue;
+    buildRun(tool);
+    for (let i = 0; i < RUNS; i++) samples[name].warms.push(buildRun(tool).ms);
+}
+for (const [name, tool] of selected) {
+    const r = results[name];
+    const m = samples[name];
+    if (m.boots.length) r.devBootMs = median(m.boots);
+    if (m.codes.length) r.devAppCodeMs = median(m.codes);
+    if (m.hmrs.length) r.hmrMs = median(m.hmrs);
+    if (m.pages.length) r.devPageMs = median(m.pages);
+    if (tool.build && !r.buildError && m.colds.length) {
+        r.buildColdMs = median(m.colds);
+        r.buildWarmMs = median(m.warms);
+        r.jsBytes = lastCold[name].js;
+        r.cssBytes = lastCold[name].css;
+        console.log(`${name} build: cold ${r.buildColdMs}ms (${m.colds.join('/')}), warm ${r.buildWarmMs}ms, js ${r.jsBytes}B, css ${r.cssBytes}B`);
+    }
 }
 
 const cols = [
