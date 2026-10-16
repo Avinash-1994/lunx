@@ -7,6 +7,8 @@ import { describe, it, expect } from '@jest/globals';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { spawnSync } from 'child_process';
+import { pathToFileURL } from 'url';
 import { wasmEsmModule } from '../../src/build/wasm-init.js';
 import { normalizeRemotes } from '../../src/federation/engine.js';
 import { runtimeSource } from '../../src/federation/runtime-source.js';
@@ -51,6 +53,42 @@ describe('module federation runtime', () => {
         expect(code).toContain('export function registerRemotes(');
         expect(code).toContain('export function registerPlugins(');
         expect(code).toContain('errorLoadRemote');
+    });
+
+    it('works with the Module Federation DevTools: global plugins, remote overrides, module graph and share scope', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lunx-mf-devtools-'));
+        try {
+            const container = (text: string) => `export function init() {}\nexport function get(m) { return () => ({ default: ${JSON.stringify(text)} + m }); }\n`;
+            fs.writeFileSync(path.join(dir, 'real.mjs'), container('real '));
+            fs.writeFileSync(path.join(dir, 'local.mjs'), container('local '));
+            const real = pathToFileURL(path.join(dir, 'real.mjs')).href;
+            const local = pathToFileURL(path.join(dir, 'local.mjs')).href;
+            fs.writeFileSync(path.join(dir, 'runtime.mjs'), runtimeSource('host', { lodash: { version: '4.17.21', requiredVersion: '^4.17.0', singleton: false, strictVersion: false, eager: false } }, { app2: real }, () => '() => Promise.resolve(() => ({}))'));
+            // As the extension's content script does before the page runs: the override plugin
+            // (@module-federation/devtools' basic-proxy-core), with an override saved in its panel.
+            fs.writeFileSync(path.join(dir, 'page.mjs'), [
+                'globalThis.__FEDERATION__ = { __GLOBAL_PLUGIN__: [{',
+                "  name: 'mf-chrome-devtools-override-remotes-plugin',",
+                `  beforeRegisterRemote(args) { const to = { app2: ${JSON.stringify(local)} }[args.remote.name]; if (to) args.remote.entry = to; return args; },`,
+                '}] };',
+                "const snapshots = [];",
+                "globalThis.__FEDERATION__.__GLOBAL_PLUGIN__.push({ name: 'mf-devtool-getModuleInfo-plugin', loadRemoteSnapshot(args) { snapshots.push(args.moduleInfo.name); return args; } });",
+                "const rt = await import('./runtime.mjs');",
+                "const mod = await rt.loadRemote('app2/Button');",
+                'console.log(JSON.stringify({ text: mod.default, vmok: globalThis.__VMOK__ === globalThis.__FEDERATION__, info: globalThis.__FEDERATION__.moduleInfo, share: globalThis.__FEDERATION__.__SHARE__.host.default, snapshots }));',
+            ].join('\n'));
+            const r = spawnSync(process.execPath, [path.join(dir, 'page.mjs')], { encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '' } });
+            expect(r.stderr).toBe('');
+            const out = JSON.parse(r.stdout);
+            expect(out.text).toBe('local ./Button');
+            expect(out.vmok).toBe(true);
+            expect(out.info.host.remotesInfo).toEqual({ app2: { matchedVersion: local } });
+            expect(out.info[`app2:${local}`]).toMatchObject({ remoteEntry: local });
+            expect(out.snapshots).toEqual(['app2']);
+            expect(out.share.lodash['4.17.21']).toMatchObject({ from: 'host', version: '4.17.21', shareConfig: { requiredVersion: '^4.17.0', singleton: false } });
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it('does not register its own copy of a shared package with import: false', () => {

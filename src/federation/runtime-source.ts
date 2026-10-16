@@ -50,6 +50,25 @@ const REMOTES = ${JSON.stringify(remotes)};
 const g = globalThis;
 const scopes = g.__lunx_mf_scopes__ || (g.__lunx_mf_scopes__ = { default: {} });
 let scope = scopes.default;
+// The global @module-federation/runtime keeps (__FEDERATION__, alias __VMOK__): the Module Federation
+// DevTools extension reads its module graph and share scope there, and adds its plugins (remote
+// overrides, snapshots) to __GLOBAL_PLUGIN__, which this runtime runs as its own.
+const FED = (() => {
+    const own = (k) => Object.prototype.hasOwnProperty.call(g, k);
+    const define = (k, v) => Object.defineProperty(g, k, { value: v, configurable: false, writable: true });
+    if (own('__VMOK__') && !own('__FEDERATION__')) define('__FEDERATION__', g.__VMOK__);
+    if (!own('__FEDERATION__')) define('__FEDERATION__', {});
+    if (!own('__VMOK__')) define('__VMOK__', g.__FEDERATION__);
+    const f = g.__FEDERATION__;
+    f.__GLOBAL_PLUGIN__ = f.__GLOBAL_PLUGIN__ || [];
+    f.__INSTANCES__ = f.__INSTANCES__ || [];
+    f.moduleInfo = f.moduleInfo || {};
+    f.__SHARE__ = f.__SHARE__ || {};
+    return f;
+})();
+const SNAPSHOT = FED.moduleInfo[NAME] || (FED.moduleInfo[NAME] = { version: '', remoteEntry: '', remotesInfo: {} });
+FED.__SHARE__[NAME] = { default: scope };
+const OPTIONS = { name: NAME, inBrowser: typeof document !== 'undefined' };
 const resolved = Object.create(null);
 const factories = Object.create(null);
 const remoteModules = Object.create(null);
@@ -110,7 +129,9 @@ function register() {
     for (const pkg of Object.keys(SHARED)) {
         const s = SHARED[pkg];
         const versions = scope[pkg] || (scope[pkg] = {});
-        if (s.import !== false && !versions[s.version]) versions[s.version] = { get: GET[pkg], from: NAME, eager: s.eager, loaded: 0 };
+        if (s.import !== false && !versions[s.version]) {
+            versions[s.version] = { get: GET[pkg], from: NAME, eager: s.eager, loaded: 0, version: s.version, scope: ['default'], shareConfig: { singleton: s.singleton, requiredVersion: s.requiredVersion, eager: s.eager, strictVersion: s.strictVersion } };
+        }
     }
 }
 
@@ -122,6 +143,7 @@ export function init(shareScope) {
             for (const v of Object.keys(scope[pkg])) if (!target[v]) target[v] = scope[pkg][v];
         }
         scope = scopes.default = shareScope;
+        FED.__SHARE__[NAME] = { default: scope };
     }
     register();
 }
@@ -203,8 +225,13 @@ function joined(name) {
     if (!spec) return Promise.reject(new Error('[lunx mf] unknown remote "' + name + '"; configured: ' + Object.keys(REMOTES).join(', ')));
     const at = /^([A-Za-z0-9_$.-]+)@(.+)$/.exec(spec);
     const global = at ? at[1] : name;
-    const url = at ? at[2] : spec;
     return (containers[name] = (async () => {
+        // A plugin may point the remote somewhere else (the DevTools' remote overrides do).
+        const remote = { name: global, alias: name, entry: at ? at[2] : spec };
+        await hook('beforeRegisterRemote', { remote, origin: OPTIONS });
+        const url = remote.entry;
+        await hook('beforeLoadRemoteSnapshot', { options: OPTIONS, moduleInfo: remote, origin: OPTIONS });
+        SNAPSHOT.remotesInfo[global] = { matchedVersion: url };
         let c = null;
         try {
             const m = await import(/* @vite-ignore */ url);
@@ -221,13 +248,16 @@ function joined(name) {
         if (!c || typeof c.get !== 'function') throw new Error('[lunx mf] ' + url + ' is not a module federation container');
         register();
         await c.init(scope);
+        const key = global + ':' + url;
+        const remoteSnapshot = FED.moduleInfo[key] || (FED.moduleInfo[key] = { version: '', remoteEntry: url, remoteEntryType: at ? 'global' : 'esm', modules: [], shared: [], remotesInfo: {} });
+        await hook('loadRemoteSnapshot', { options: OPTIONS, moduleInfo: remote, remoteSnapshot, from: 'global' });
         return c;
     })());
 }
 
-/** Run a hook through the runtime plugins; each may return new args. */
+/** Run a hook through the runtime plugins (this app's, then the global ones); each may return new args. */
 async function hook(name, args) {
-    for (const p of PLUGINS) {
+    for (const p of [...PLUGINS, ...FED.__GLOBAL_PLUGIN__.filter((x) => !PLUGINS.includes(x))]) {
         if (typeof p[name] !== 'function') continue;
         const out = await p[name](args);
         if (out !== undefined && out !== null) args = out;
@@ -273,7 +303,7 @@ function asExports(m) {
 
 /** import('remote/Module'): the exposed module's exports. */
 export async function loadRemote(id) {
-    if (PLUGINS.length) id = (await hook('beforeRequest', { id })).id;
+    id = (await hook('beforeRequest', { id })).id;
     if (id in remoteModules) return remoteModules[id];
     const slash = id.indexOf('/');
     const name = slash < 0 ? id : id.slice(0, slash);
@@ -284,14 +314,14 @@ export async function loadRemote(id) {
         mod = typeof factory === 'function' ? await factory() : factory;
     } catch (error) {
         // errorLoadRemote: the first plugin that returns something supplies the module instead.
-        for (const p of PLUGINS) {
+        for (const p of [...PLUGINS, ...FED.__GLOBAL_PLUGIN__]) {
             if (typeof p.errorLoadRemote !== 'function') continue;
             const fallback = await p.errorLoadRemote({ id, error, from: 'runtime' });
             if (fallback !== undefined && fallback !== null) return (remoteModules[id] = fallback);
         }
         throw error;
     }
-    if (PLUGINS.length) mod = (await hook('onLoad', { id, module: mod })).module;
+    mod = (await hook('onLoad', { id, module: mod })).module;
     return (remoteModules[id] = mod);
 }
 
