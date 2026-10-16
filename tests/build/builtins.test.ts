@@ -11,6 +11,7 @@ import os from 'os';
 import path from 'path';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { stopProcess, removeDir } from './dev-process.js';
 import { replaceHtmlEnv } from '../../src/build/html-env.js';
 import { svgComponent, svgRuntimeFor } from '../../src/build/svg-component.js';
 import { wasmInitModule } from '../../src/build/wasm-init.js';
@@ -145,9 +146,9 @@ describe('built-ins: lunx dev', () => {
         }
         throw new Error('dev server did not start');
     }, 60_000);
-    afterAll(() => {
-        dev?.kill();
-        fs.rmSync(root, { recursive: true, force: true });
+    afterAll(async () => {
+        await stopProcess(dev);
+        removeDir(root);
     });
 
     it('replaces %ENV% in the page', async () => {

@@ -9,6 +9,8 @@ import os from 'os';
 import path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 import { fileURLToPath } from 'url';
+import { WebSocket } from 'ws';
+import { stopProcess, removeDir } from './dev-process.js';
 import { TscOutput, type TypeError } from '../../src/dev/typecheck.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -80,10 +82,10 @@ describe('server.typecheck', () => {
         });
     }, 60_000);
 
-    afterAll(() => {
+    afterAll(async () => {
         socket?.close();
-        dev?.kill();
-        fs.rmSync(root, { recursive: true, force: true });
+        await stopProcess(dev);
+        removeDir(root);
     });
 
     it('sends the type errors, then none once fixed', async () => {

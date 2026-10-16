@@ -117,7 +117,7 @@ export async function buildElectron(app: ElectronApp): Promise<string[]> {
         const bundle = await rolldown(input);
         try {
             const { output: files } = await bundle.write(output);
-            return files.map((f) => path.relative(app.root, path.join(app.outDir, f.fileName)));
+            return files.map((f) => path.relative(app.root, path.join(app.outDir, f.fileName)).split(path.sep).join('/'));
         } finally {
             await bundle.close();
         }
