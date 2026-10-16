@@ -6,10 +6,10 @@
     {
       "framework": "vanilla",
       "lunx": {
-        "buildMs": 360,
+        "buildMs": 302,
         "jsFiles": 3,
         "jsBytes": 929,
-        "jsGzip": 617,
+        "jsGzip": 616,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
@@ -22,7 +22,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 725,
+        "buildMs": 459,
         "jsFiles": 3,
         "jsBytes": 3123,
         "jsGzip": 1574,
@@ -42,15 +42,15 @@
     {
       "framework": "react",
       "lunx": {
-        "buildMs": 581,
+        "buildMs": 895,
         "jsFiles": 3,
-        "jsBytes": 219818,
-        "jsGzip": 68038,
+        "jsBytes": 208133,
+        "jsGzip": 64618,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
         "assets": [
-          "assets/main.B4y7bcJf.js.LICENSE.txt",
+          "assets/main.BQlxGVXF.js.LICENSE.txt",
           "assets/photo.8f774d6f.png"
         ],
         "htmlBytes": 739,
@@ -59,7 +59,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 504,
+        "buildMs": 411,
         "jsFiles": 3,
         "jsBytes": 221984,
         "jsGzip": 68846,
@@ -79,7 +79,7 @@
     {
       "framework": "preact",
       "lunx": {
-        "buildMs": 273,
+        "buildMs": 239,
         "jsFiles": 3,
         "jsBytes": 13866,
         "jsGzip": 5961,
@@ -95,7 +95,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 829,
+        "buildMs": 639,
         "jsFiles": 3,
         "jsBytes": 16078,
         "jsGzip": 6881,
@@ -115,15 +115,15 @@
     {
       "framework": "vue",
       "lunx": {
-        "buildMs": 982,
+        "buildMs": 999,
         "jsFiles": 3,
         "jsBytes": 64886,
-        "jsGzip": 25274,
+        "jsGzip": 25272,
         "cssFiles": 1,
         "cssBytes": 181,
-        "cssGzip": 165,
+        "cssGzip": 162,
         "assets": [
-          "assets/main.D8Fb9QSF.js.LICENSE.txt",
+          "assets/main.COz-h5QR.js.LICENSE.txt",
           "assets/photo.8f774d6f.png"
         ],
         "htmlBytes": 739,
@@ -132,7 +132,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 833,
+        "buildMs": 651,
         "jsFiles": 3,
         "jsBytes": 65019,
         "jsGzip": 25482,
@@ -152,13 +152,13 @@
     {
       "framework": "svelte",
       "lunx": {
-        "buildMs": 727,
+        "buildMs": 673,
         "jsFiles": 3,
         "jsBytes": 25576,
         "jsGzip": 10301,
         "cssFiles": 1,
         "cssBytes": 132,
-        "cssGzip": 130,
+        "cssGzip": 131,
         "assets": [
           "assets/photo.8f774d6f.png"
         ],
@@ -168,7 +168,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 1326,
+        "buildMs": 1213,
         "jsFiles": 3,
         "jsBytes": 27814,
         "jsGzip": 11198,
@@ -188,7 +188,7 @@
     {
       "framework": "solid",
       "lunx": {
-        "buildMs": 562,
+        "buildMs": 433,
         "jsFiles": 3,
         "jsBytes": 10825,
         "jsGzip": 4428,
@@ -204,7 +204,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 627,
+        "buildMs": 595,
         "jsFiles": 3,
         "jsBytes": 13191,
         "jsGzip": 5383,
@@ -224,15 +224,15 @@
     {
       "framework": "lit",
       "lunx": {
-        "buildMs": 367,
+        "buildMs": 213,
         "jsFiles": 3,
         "jsBytes": 15990,
-        "jsGzip": 6318,
+        "jsGzip": 6319,
         "cssFiles": 1,
         "cssBytes": 62,
         "cssGzip": 82,
         "assets": [
-          "assets/main.BJ06aL9f.js.LICENSE.txt",
+          "assets/main.BaODDY4D.js.LICENSE.txt",
           "assets/photo.8f774d6f.png"
         ],
         "htmlBytes": 739,
@@ -241,7 +241,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 434,
+        "buildMs": 444,
         "jsFiles": 3,
         "jsBytes": 18118,
         "jsGzip": 7132,
@@ -261,16 +261,16 @@
     {
       "framework": "app",
       "lunx": {
-        "buildMs": 1629,
+        "buildMs": 1523,
         "jsFiles": 6,
-        "jsBytes": 221038,
-        "jsGzip": 68919,
+        "jsBytes": 209819,
+        "jsGzip": 65657,
         "cssFiles": 3,
         "cssBytes": 151,
         "cssGzip": 203,
         "assets": [
           "assets/bg.0176aa64.png",
-          "assets/main.DVr0ug0C.js.LICENSE.txt",
+          "assets/main.M2iDMhbR.js.LICENSE.txt",
           "robots.txt"
         ],
         "htmlBytes": 645,
@@ -285,7 +285,7 @@
         "failures": []
       },
       "vite": {
-        "buildMs": 2107,
+        "buildMs": 1641,
         "jsFiles": 7,
         "jsBytes": 222971,
         "jsGzip": 69727,

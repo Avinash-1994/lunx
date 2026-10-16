@@ -128,6 +128,12 @@ export const BuildConfigSchema = z.object({
     prefetch: z.boolean().optional(),
     /** Third-party license notices in minified output: 'linked' (default, `<chunk>.LICENSE.txt` beside each chunk), 'inline' or 'none'. */
     legalComments: z.enum(['inline', 'none', 'linked']).optional(),
+    /** Dependencies' static CommonJS modules (React…) built as ES modules, so unused exports drop (default true). */
+    commonjsTreeShaking: z.boolean().optional(),
+    /** Chunks import each other through an inline import map, so a changed chunk keeps the others' hashes (Rolldown's chunkImportMap). */
+    chunkImportMap: z.boolean().optional(),
+    /** A `nomodule` script per page for browsers without ES modules: true, or `{ targets, babel }` (src/build/legacy.ts). */
+    legacy: z.union([z.boolean(), z.object({ targets: z.array(z.string()).optional(), babel: z.boolean().optional() })]).optional(),
     /** Write `.vite/manifest.json` (or this path in the output): source files → output files, for server-rendered backends. */
     manifest: z.union([z.boolean(), z.string()]).optional(),
     /** core-js polyfills for `target`: 'entry' (all the targets need) or 'usage' (what the code uses); default off. */

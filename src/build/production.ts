@@ -405,6 +405,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const plugins: any[] = [
         // Vite's order: `enforce: 'pre'`, the built-ins, the rest, `enforce: 'post'`.
         ...(vp ? vp.forRolldown(app!, app!.pre, pluginCss) : []),
+        ...(b.commonjsTreeShaking === false ? [] : [cjsTreeShakingPlugin(config.mode === 'production' ? 'production' : String(config.mode))]),
         {
             name: 'lunx:framework',
             // Hook filters keep Rolldown from calling into JS for modules a
@@ -845,6 +846,9 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         : null;
 
     const manualChunks = build.manualChunks;
+    // Import maps hold URLs: the chunks' own (a CDN prefix or the base), so a function from renderBuiltUrl rules it out.
+    const chunkImportMap = !!b.chunkImportMap && !renderBuiltUrl && !federation;
+    const chunkImportMapBase = b.assetPrefix ? String(b.assetPrefix).replace(/\/?$/, '/') : base;
     const output: OutputItem[] = Object.keys(input).length === 0 ? [] : await getBundler().bundle({
         input,
         cwd: root,
@@ -859,6 +863,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         ...(targets.js ? { target: targets.js } : {}),
         // `build.external`: imports left to the page (an import map, a CDN script…).
         ...(externalTest ? { external: externalTest } : {}),
+        // `build.chunkImportMap`: a changed chunk no longer changes the hashes of the chunks importing it.
+        ...(chunkImportMap ? { chunkImportMap: { baseUrl: chunkImportMapBase } } : {}),
         jsx: jsxImportSource ? { runtime: 'automatic', importSource: jsxImportSource } : undefined,
         // Normal in app code; not worth a warning on every build.
         onWarning: (w) => !['EVAL', 'CIRCULAR_DEPENDENCY', 'MIXED_EXPORT'].includes(w.code ?? ''),
@@ -905,6 +911,26 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     }
 
     // ── HTML ─────────────────────────────────────────────────────────────────
+    // `build.chunkImportMap`: the map goes inline in each page (written by Rolldown as importmap.json).
+    let importMap: string | null = null;
+    if (chunkImportMap) {
+        const asset = output.find((o) => o.type === 'asset' && o.fileName === 'importmap.json') as any;
+        if (asset) {
+            importMap = String(asset.source);
+            await fsp.rm(path.join(outDir, 'importmap.json'), { force: true });
+        }
+    }
+    // `build.legacy`: a nomodule script per entry for browsers without ES modules (src/build/legacy.ts).
+    let legacyFiles = new Map<string, string>();
+    if (b.legacy && !federation && output.length) {
+        const { buildLegacy } = await import('./legacy.js');
+        const renamed = importMap
+            ? new Map(Object.entries(JSON.parse(importMap).imports as Record<string, string>).map(([k, v]) => [k.slice(chunkImportMapBase.length), v.slice(chunkImportMapBase.length)]))
+            : new Map<string, string>();
+        const entries = output.filter((o) => o.type === 'chunk' && o.isEntry).map((o) => ({ fileName: o.fileName }));
+        legacyFiles = await buildLegacy(root, outDir, entries, b.legacy, define, renamed);
+        for (const file of legacyFiles.values()) emittedAssets.push({ fileName: file, type: 'asset', source: await fsp.readFile(path.join(outDir, file), 'utf8') });
+    }
     const chunkByName = new Map<string, any>();
     for (const item of output) if (item.type === 'chunk' && item.isEntry) chunkByName.set(item.name, item);
     // Externals (`build.external`) are in chunk.imports too, but are not files of this build.
@@ -933,6 +959,16 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         if (head.length) {
             const tags = head.map((t) => `    ${t}\n`).join('');
             page = /<\/head>/i.test(page) ? page.replace(/<\/head>/i, `${tags}  </head>`) : tags + page;
+        }
+        if (legacyFiles.size) {
+            const { addLegacyScripts } = await import('./legacy.js');
+            const scripts = [...html.scripts.values()].map((name) => chunkByName.get(name)).filter((c) => c && legacyFiles.has(c.fileName));
+            page = addLegacyScripts(page, scripts.map((c) => ({ modernUrl: urlFor(c.fileName, 'html'), legacyUrl: urlFor(legacyFiles.get(c.fileName)!, 'html') })));
+        }
+        if (importMap) {
+            // Before every module script and preload: the browser reads the map first.
+            const tag = `<script type="importmap">${importMap}</script>`;
+            page = /<head[^>]*>/i.test(page) ? page.replace(/<head[^>]*>/i, (m) => `${m}\n    ${tag}`) : tag + page;
         }
         page = applyHtmlOptions(page, (config as any).html, base);
         if (vp) {
@@ -1234,6 +1270,27 @@ function legalCommentsPlugin(): any {
                 const map = chunk.code.lastIndexOf('\n//# sourceMappingURL=');
                 chunk.code = map === -1 ? chunk.code + banner : chunk.code.slice(0, map) + banner + chunk.code.slice(map);
             }
+        },
+    };
+}
+
+/**
+ * Dependencies' CommonJS modules with a static shape (React, ReactDOM, the
+ * scheduler…) rewritten as ES modules, so Rolldown drops the exports the app
+ * never uses (src/build/cjs-to-esm.ts). `build.commonjsTreeShaking: false`
+ * leaves them to Rolldown's CommonJS interop.
+ */
+function cjsTreeShakingPlugin(mode: string): any {
+    return {
+        name: 'lunx:cjs-esm',
+        transform: {
+            filter: { id: /[\\/]node_modules[\\/].*\.c?js(\?.*)?$/, code: { include: ['exports'] } },
+            async handler(code: string, id: string) {
+                const { cjsToEsm, mayConvert } = await import('./cjs-to-esm.js');
+                if (!mayConvert(code)) return null;
+                const out = cjsToEsm(code, cleanId(id), mode);
+                return out === null ? null : { code: out };
+            },
         },
     };
 }

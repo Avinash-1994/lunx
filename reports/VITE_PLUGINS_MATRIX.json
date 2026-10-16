@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-16T04:54:19.720Z",
+  "generatedAt": "2026-10-16T11:05:44.128Z",
   "node": "v22.22.0",
   "passed": 22,
   "total": 22,
@@ -39,7 +39,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 7
+      "seconds": 6
     },
     {
       "name": "tailwind",
@@ -49,7 +49,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "unocss",
@@ -59,7 +59,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 6
+      "seconds": 5
     },
     {
       "name": "svgr",
@@ -69,7 +69,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "tsconfig-paths",
@@ -79,7 +79,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "auto-import",
@@ -159,7 +159,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "wasm",
@@ -169,7 +169,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "node-polyfills",
@@ -179,7 +179,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 6
+      "seconds": 4
     },
     {
       "name": "checker",
@@ -189,7 +189,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 6
+      "seconds": 5
     },
     {
       "name": "inspect",
@@ -207,7 +207,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "builtin-wasm-init",
@@ -223,7 +223,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "builtin-typecheck",
@@ -231,7 +231,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "builtin-html-env",

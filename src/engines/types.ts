@@ -79,6 +79,8 @@ export interface BundleInput {
     tsconfig?: string;
     /** Syntax to lower to (Oxc targets: 'es2020', 'chrome90'…); unset keeps it as written. */
     target?: string[];
+    /** Chunks import each other by stable names, mapped to their hashed files by an import map (`importmap.json`). */
+    chunkImportMap?: { baseUrl: string };
     /** Suppress all bundler warnings (internal bundles: pre-bundling, config loading). */
     quiet?: boolean;
     /** Called for warnings; return false to drop one. */

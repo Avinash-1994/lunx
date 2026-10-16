@@ -27,6 +27,7 @@ export const rolldownBundler: Bundler = {
             external: input.external,
             logLevel: input.quiet ? 'silent' : 'warn',
             ...(input.tsconfig ? { tsconfig: input.tsconfig } : {}),
+            ...(input.chunkImportMap ? { experimental: { chunkImportMap: { baseUrl: input.chunkImportMap.baseUrl, fileName: 'importmap.json' } } } : {}),
             resolve: {
                 ...(input.alias ? { alias: input.alias } : {}),
                 ...(input.extensions ? { extensions: input.extensions } : {}),

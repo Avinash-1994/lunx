@@ -111,6 +111,25 @@ describe('build features', () => {
         expect(built(project({ ...files, 'lunx.config.js': "export default { build: { legalComments: 'inline' } };\n" })).js).toContain('licensed v1');
     });
 
+    it('keeps the importing chunk\'s hash when a lazy chunk changes, with build.chunkImportMap', () => {
+        const dir = project({
+            'lunx.config.js': 'export default { build: { chunkImportMap: true } };\n',
+            'src/main.js': "import('./lazy.js').then((m) => console.log(m.v));\n",
+            'src/lazy.js': 'export const v = 1;\n',
+        });
+        const first = built(dir);
+        const html = fs.readFileSync(path.join(dir, 'dist', 'index.html'), 'utf8');
+        const map = JSON.parse(/<script type="importmap">(.*?)<\/script>/.exec(html)![1]!);
+        const lazy = first.files.find((f) => f.startsWith('lazy.') && f.endsWith('.js'))!;
+        expect(Object.values(map.imports)).toContain(`/assets/${lazy}`);
+        expect(fs.existsSync(path.join(dir, 'dist', 'importmap.json'))).toBe(false);
+        fs.writeFileSync(path.join(dir, 'src/lazy.js'), 'export const v = 2;\n');
+        const second = built(dir);
+        const mains = (b: { files: string[] }) => b.files.filter((f) => f.startsWith('main.') && f.endsWith('.js'));
+        expect(mains(second)).toEqual(mains(first));
+        expect(second.files.find((f) => f.startsWith('lazy.') && f.endsWith('.js'))).not.toBe(lazy);
+    });
+
     it('prints build errors without colour codes under NO_COLOR', () => {
         const r = build(project({ 'src/main.js': "import x from './missing.js';\nconsole.log(x);\n" }), { NO_COLOR: '1' });
         expect(r.status).not.toBe(0);
