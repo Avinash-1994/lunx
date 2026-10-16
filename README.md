@@ -160,10 +160,10 @@ export default defineConfig({ framework: 'solid' });
 
 ```bash
 npm install @angular/core @angular/common @angular/compiler @angular/platform-browser rxjs tslib
-npm install -D lunx-dev typescript
+npm install -D lunx-dev typescript @angular/compiler-cli
 ```
 
-Standalone components with `templateUrl` / `styleUrl` and signals; `lunx create --template angular` writes a zoneless starter. Angular projects built with the Angular CLI keep using it, or use [Analog](https://analogjs.org) (`--template analog`), which lunx builds.
+Standalone components with `templateUrl` / `styleUrl` and signals; `lunx create --template angular` writes a zoneless starter. With `@angular/compiler-cli` installed, `lunx build` compiles ahead of time as `ng build` does (the project's Angular compiler, Angular's linker for libraries, Angular's build optimizations), so the runtime template compiler is not shipped: the starter's bundle is 31.7 kB gzip against 31.9 kB from `ng build` (281 kB compiled at runtime), built in 3.8 s cold against 4.9 s. `lunx dev` compiles at runtime (JIT). Angular projects built with the Angular CLI keep using it, or use [Analog](https://analogjs.org) (`--template analog`), which lunx builds.
 
 ---
 
@@ -183,12 +183,14 @@ Set `LUNX_PLUGIN_HOST=0` to use a framework's own CLI instead. `npm run test:met
 ### 7. Desktop Apps (Electron & Tauri)
 
 #### Electron
-`npx lunx-dev create my-app --template electron` sets up a React renderer, `electron/main.ts` and `electron/preload.ts`, built by [`vite-plugin-electron`](https://github.com/electron-vite/vite-plugin-electron) on lunx:
+lunx builds Electron apps itself, with no plugin and nothing to configure. `npx lunx-dev create my-app --template electron` sets up a React renderer, `electron/main.ts` and `electron/preload.ts`. Any project with `electron` installed and an `electron/main.*` gets the same:
 
-- `lunx dev` serves the renderer with HMR, builds the main process and the preload into `dist-electron/` (rebuilt on change), and starts Electron on the dev server (`VITE_DEV_SERVER_URL`).
-- `lunx build` writes the renderer to `dist/` with relative URLs (it loads from disk) and the main process and the preload to `dist-electron/`. `package.json` `main` points at `dist-electron/main.js`, ready for electron-builder or Electron Forge.
+- `lunx dev` serves the renderer with HMR, builds the main process and the preload into `dist-electron/`, and starts Electron with the dev server's URL in `LUNX_DEV_SERVER_URL` (also `VITE_DEV_SERVER_URL`). An edit to the main process restarts Electron; an edit to the preload reloads the window. Quitting the app ends `lunx dev`.
+- `lunx build` writes the renderer to `dist/` with relative URLs (Electron loads it from disk), and, in parallel, the main process (`dist-electron/main.js`, ESM or CommonJS like the package; `dependencies` stay external) and the preload (`dist-electron/preload.cjs`, one CommonJS file, which sandboxed preloads require). `package.json` `main` points at `dist-electron/main.js`, ready for electron-builder or Electron Forge.
+- `lunx preview` starts the build in Electron.
+- Other entries or output folder: `electron: { main, preload, outDir }` in lunx.config; `electron: false` turns it off. `LUNX_ELECTRON_ARGS="--inspect=5858"` passes switches to Electron.
 
-An existing Vite + `vite-plugin-electron` project runs on lunx unchanged. `npm run test:templates` builds both starters, runs them in Electron and checks the window, the preload and `lunx dev`.
+An existing Vite + `vite-plugin-electron` project runs on lunx unchanged; lunx leaves Electron to the plugin. `npm run test:templates` builds both starters and checks them in Electron: the window, the counter and the preload, after `lunx preview`, after `lunx dev`, and after a main-process edit restarts it.
 
 #### Tauri
 With `@tauri-apps/api` in `package.json`, lunx builds the web frontend for Tauri's WebView (set `devUrl` / `frontendDist` in `tauri.conf.json` to lunx's dev server and `dist/`); the Rust side in `src-tauri/` builds with the Tauri CLI.
@@ -228,15 +230,44 @@ export default defineConfig({
     open: true,
     proxy: {
       '/api': 'http://localhost:8080'
-    }
+    },
+    // As Vite: only localhost / IPs answered and only localhost pages get CORS, unless listed
+    allowedHosts: ['.example.test'],
+  },
+
+  // Every page, in dev and builds
+  html: {
+    title: 'My app',
+    meta: { description: 'Fast app', 'theme-color': '#0b1020' },
+    favicon: '/favicon.svg',
+    preconnect: ['https://api.example.com'],
+    tags: [{ tag: 'script', attrs: { src: 'https://cdn.example.com/analytics.js', defer: true }, injectTo: 'body' }],
+    cspNonce: 'NONCE', // on every script and stylesheet (Vite's html.cspNonce)
   },
   
   // Production build options
   build: {
     minify: true,
     sourcemap: 'external',
-    splitting: true,
-    targets: ['chrome90', 'firefox88', 'safari14']
+    // Browsers to compile JS and CSS for (default: the project's browserslist,
+    // else Vite's 'baseline-widely-available'); 'esnext' keeps syntax as written
+    target: ['chrome90', 'firefox88', 'safari14'],
+    // .vite/manifest.json for server-rendered backends (Laravel, Rails, Django…)
+    manifest: true,
+    // Third-party license notices: 'linked' (default: <chunk>.LICENSE.txt), 'inline' or 'none'
+    legalComments: 'linked',
+    assetPrefix: 'https://cdn.example.com/app/', // load built files from a CDN (or renderBuiltUrl)
+    entryFileNames: 'js/[name]-[hash].js',        // also chunkFileNames, assetFileNames
+    external: ['three'],                           // left to an import map / CDN
+    drop: ['console', 'debugger'],
+    prefetch: true,                                // <link rel="prefetch"> for lazy chunks
+    ssrManifest: true,                             // .vite/ssr-manifest.json
+    // also: cssMinify, emptyOutDir, copyPublicDir, chunkSizeWarningLimit (kB, default 500)
+  },
+
+  // Share compile results between machines (CI, teammates): 'http' or 's3'
+  cache: {
+    remote: { provider: 'http', baseUrl: 'https://cache.example.com/lunx', token: process.env.CACHE_TOKEN },
   },
 
   // Supply-chain security settings
@@ -244,6 +275,32 @@ export default defineConfig({
     vulnSeverity: 'high' // 'critical' | 'high' | 'medium' | 'low' | 'off'
   }
 });
+```
+
+### Vite-based tools: `lunx exec`
+
+```bash
+lunx exec storybook dev -p 6006   # Storybook on lunx's engine
+lunx exec storybook build
+lunx exec vitest run              # Vitest: node, jsdom / happy-dom, snapshots
+```
+
+The tool runs unchanged with `vite` (and Rollup, vite-node) pointing at lunx, in its process and the ones it starts.
+
+### JavaScript API
+
+```js
+import { build, createServer } from 'lunx-dev';
+
+await build({ root: 'apps/web', build: { sourcemap: true } }); // lunx.config underneath
+
+// The dev server inside your own server (Express, Fastify, plain http)
+const app = express();
+const httpServer = http.createServer(app);
+const lunx = await createServer({ server: { middlewareMode: true, hmr: { server: httpServer } } });
+app.use('/api', api);
+app.use(lunx.middlewares);
+httpServer.listen(3000);
 ```
 
 ---
@@ -321,7 +378,9 @@ export function App() {
 - `remoteEntry.js` is an ES module exporting the webpack 5 container API (`init`, `get`); `mf-manifest.json` lists exposes, shared versions and CSS. Remotes can be lunx ES module containers or webpack containers (`name@url` with a global).
 - **Shared** packages go through a webpack-format share scope: `singleton`, `requiredVersion` (defaults to your package.json range), `strictVersion` and `eager`. Each app's own copy is a separate chunk, downloaded only if the scope picks it, so a remote using the host's React never fetches its own.
 - **Dev and build mix freely**: a dev host can load a built remote and the other way round. In dev, a remote's modules fast-refresh inside the host page, state kept.
+- **Types across apps**, in `@module-federation`'s format (so lunx, webpack and Rspack apps read each other's): a TypeScript remote's build writes `@mf-types.zip` beside `remoteEntry.js` (its dev server serves it too), and a host downloads each remote's into `@mf-types/<remote>/` when it starts or builds. Add `"paths": { "*": ["./@mf-types/*"] }` to the host's tsconfig and `import Button from 'remote/Button'` is typed. `federation: { dts: false }` turns it off, `{ generateTypes, consumeTypes }` picks a side.
 - `npm run test:federation-e2e` runs all four dev/build pairings in Chromium.
+- **With webpack 5 and Rspack**, both ways (`npm run test:mf-interop`, production builds in Chromium, React shared as a singleton): a lunx host loads their remotes as `name@url`; their hosts load a lunx remote, an ES module, with `remoteType: 'import'` (or `'import <url>'` beside script remotes) and, for webpack, `target: ['web', 'es2020']`. A shell mixing lunx, webpack and Rspack remotes shares one React across all of them.
 
 ---
 
@@ -401,9 +460,9 @@ lunx security report
 
 ## 🔌 Plugins
 
-Vite and Rollup plugins go in `plugins` (in `lunx.config.ts`, or an existing `vite.config.*`) and run with Vite's lifecycle in dev and in the build: `apply`, `enforce`, `config`, `configResolved`, `resolveId` / `load` / `transform` (virtual modules included), `transformIndexHtml`, `configureServer`, `renderChunk`, `generateBundle`, `writeBundle` and `closeBundle` (once the whole app is on disk). Plugins that import `vite` get lunx's stand-in, so Vite does not need to be installed. Framework projects (SvelteKit, Nuxt, Astro, React Router…) run on lunx's Vite-compatible plugin host. esbuild plugins in `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
+Vite and Rollup plugins go in `plugins` (in `lunx.config.ts`, or an existing `vite.config.*`; with both, `lunx.config` applies on top of the Vite config) and run with Vite's lifecycle in dev and in the build: `apply`, `enforce`, `config`, `configResolved`, `resolveId` / `load` / `transform` (virtual modules included), `transformIndexHtml`, `configureServer`, `renderChunk`, `generateBundle`, `writeBundle` and `closeBundle` (once the whole app is on disk). Plugins that import `vite` get lunx's stand-in, so Vite does not need to be installed. Framework projects (SvelteKit, Nuxt, Astro, React Router…) run on lunx's Vite-compatible plugin host. esbuild plugins in `optimizeDeps.esbuildOptions.plugins` run in the dependency optimizer.
 
-`npm run test:vite-plugins` builds, previews and runs on the dev server, in Chromium, a React app with each of: `vite-plugin-pwa`, `@tailwindcss/vite`, `unocss`, `vite-plugin-svgr`, `vite-tsconfig-paths`, `unplugin-auto-import`, `unplugin-icons`, `vite-plugin-html`, `vite-plugin-static-copy`, `rollup-plugin-visualizer`, `@mdx-js/rollup`, `vite-plugin-glsl`, `vite-imagetools`, `vite-plugin-wasm`, `vite-plugin-node-polyfills`, `vite-plugin-checker` and `vite-plugin-inspect` ([report](reports/VITE_PLUGINS_MATRIX.json)). Not supported: `@vitejs/plugin-legacy`, whose legacy chunks need a SystemJS build that Rolldown does not write.
+`npm run test:vite-plugins` builds, previews and runs on the dev server, in Chromium, a React app with each of: `vite-plugin-pwa`, `@tailwindcss/vite`, `unocss`, `vite-plugin-svgr`, `vite-tsconfig-paths`, `unplugin-auto-import`, `unplugin-icons`, `vite-plugin-html`, `vite-plugin-static-copy`, `rollup-plugin-visualizer`, `@mdx-js/rollup`, `vite-plugin-glsl`, `vite-imagetools`, `vite-plugin-wasm`, `vite-plugin-node-polyfills`, `vite-plugin-checker` and `vite-plugin-inspect`, then the built-ins below with no plugin installed ([report](reports/VITE_PLUGINS_MATRIX.json)). Not supported: `@vitejs/plugin-legacy`, whose legacy chunks need a SystemJS build that Rolldown does not write.
 
 ```typescript
 import { defineConfig } from 'lunx-dev';
@@ -420,7 +479,25 @@ export default defineConfig({
 });
 ```
 
-Framework plugins (`@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`, `@preact/preset-vite`) are not needed: their compilers are built in. Plugins that ask for permissions (`fs:write`, `env:read`, network) run in lunx's permission sandbox (`lunx security plugins`).
+### Built in: no plugin needed
+
+| You'd install | lunx has it built in |
+|---|---|
+| `@vitejs/plugin-react`, `@vitejs/plugin-vue`, `@sveltejs/vite-plugin-svelte`, `vite-plugin-solid`, `@preact/preset-vite` | Framework compilers (Oxc, Vue, Svelte, Solid) |
+| `vite-plugin-svgr`, `vite-svg-loader` | `import Logo from './logo.svg?react'` (React, Preact) or `?component` (React, Preact, Vue): the root `<svg>`'s attributes are props you can override |
+| `vite-plugin-wasm` (for `?init`) | `import init from './module.wasm?init'`, then `const instance = await init(imports)`, as in Vite |
+| `vite-tsconfig-paths` | `compilerOptions.paths` from `tsconfig.json` / `jsconfig.json` |
+| `vite-plugin-electron` | Electron apps ([above](#electron)) |
+| `rollup-plugin-visualizer` | `lunx analyze` |
+| `vite-plugin-checker` | `server: { typecheck: true }`: `lunx dev` runs your TypeScript (`vue-tsc` in Vue projects that have it) in watch mode and lists type errors in the terminal and in the overlay's Type Errors tab |
+| `vite-plugin-pwa` | `pwa: { manifest: { name, short_name, icons… } }` in lunx.config: `manifest.webmanifest`, a service worker that precaches the build (cache-first, offline navigations fall back to `index.html`, old caches dropped on deploy) and its registration, linked from every page |
+| — | `%VITE_APP_TITLE%`, `%MODE%`… (any `import.meta.env` value) in `index.html`, as in Vite |
+
+An installed plugin still wins: with `vite-plugin-svgr` in the config, `?react` imports go to it; with `vite-plugin-pwa`, lunx writes no service worker.
+
+TypeScript types for all of these (assets, `?raw`, `?url`, `?react`, `.wasm?init`, CSS modules, `import.meta.env`, `import.meta.hot`, `import.meta.glob`) come with lunx: `/// <reference types="lunx-dev/client" />` in a `.d.ts` file (the TypeScript starters have it in `src/lunx-env.d.ts`), or `"types": ["lunx-dev/client"]` in tsconfig.json.
+
+Plugins that ask for permissions (`fs:write`, `env:read`, network) run in lunx's permission sandbox (`lunx security plugins`).
 
 ---
 
@@ -430,29 +507,42 @@ Every tool installed from npm, same React + TypeScript app, median of 7 runs, al
 
 **Small app**
 
-| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
+| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS (gzip) |
 |---|---|---|---|---|---|---|
-| **lunx** | 229 ms | 234 ms | 39 ms | 341 ms | 322 ms | 221 KB |
-| Vite 8 | 437 ms | 511 ms | 42 ms | 548 ms | 461 ms | 220 KB |
-| Rspack | 378 ms | 409 ms | 188 ms | 323 ms | 368 ms | 219 KB |
-| Parcel | 1317 ms | 1326 ms | 34 ms | 1640 ms | 1569 ms | 222 KB |
-| webpack | 1599 ms | 1749 ms | 265 ms | 4009 ms | 3891 ms | 225 KB |
-| esbuild (bundler only) | – | – | – | 63 ms | 56 ms | 223 KB |
-| Bun (bundler only) | – | – | – | 38 ms | 39 ms | 212 KB |
+| **lunx** | 248 ms | 252 ms | 30 ms | 369 ms | 385 ms | 66.2 KB |
+| Vite 8 | 409 ms | 491 ms | 40 ms | 663 ms | 487 ms | 66.4 KB |
+| Rsbuild 2 | 432 ms | 459 ms | 86 ms | 511 ms | 487 ms | 67.6 KB |
+| Rspack 2 | 376 ms | 414 ms | 208 ms | 386 ms | 370 ms | 67.4 KB |
+| Parcel | 1449 ms | 1458 ms | 35 ms | 1693 ms | 1761 ms | 68.0 KB |
+| webpack | 1578 ms | 1745 ms | 275 ms | 4313 ms | 4066 ms | 68.7 KB |
+| esbuild (bundler only) | – | – | – | 66 ms | 65 ms | 67.3 KB |
+| Bun (bundler only) | – | – | – | 41 ms | 46 ms | 64.0 KB |
 
 **Large app: 2,000 components** (`--scale 2000`)
 
-| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS out |
+| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS (gzip) |
 |---|---|---|---|---|---|---|
-| **lunx** | 250 ms | 255 ms | 161 ms | 626 ms | 545 ms | 470 KB |
-| Vite 8 | 400 ms | 706 ms | 178 ms | 918 ms | 718 ms | 470 KB |
-| Rspack | 693 ms | 829 ms | 677 ms | 823 ms | 842 ms | 493 KB |
-| Parcel | 4855 ms | 4895 ms | 189 ms | 5358 ms | 5143 ms | 455 KB |
-| webpack | 4374 ms | 4608 ms | 1165 ms | 9115 ms | 8860 ms | 516 KB |
-| esbuild (bundler only) | – | – | – | 141 ms | 148 ms | 493 KB |
-| Bun (bundler only) | – | – | – | 92 ms | 97 ms | 430 KB |
+| **lunx** | 243 ms | 247 ms | 151 ms | 583 ms | 547 ms | 83.4 KB |
+| Vite 8 | 389 ms | 717 ms | 161 ms | 829 ms | 651 ms | 83.7 KB |
+| Rsbuild 2 | 944 ms | 1062 ms | 440 ms | 777 ms | 754 ms | 88.5 KB |
+| Rspack 2 | 700 ms | 839 ms | 656 ms | 804 ms | 878 ms | 89.3 KB |
+| Parcel | 4523 ms | 4542 ms | 177 ms | 5042 ms | 5060 ms | 88.9 KB |
+| webpack | 4268 ms | 4522 ms | 1113 ms | 8763 ms | 8715 ms | 87.3 KB |
+| esbuild (bundler only) | – | – | – | 145 ms | 144 ms | 85.2 KB |
+| Bun (bundler only) | – | – | – | 106 ms | 82 ms | 80.5 KB |
 
-Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support; on the small app Rspack's cold build (323 vs 341 ms) and Parcel's HMR (34 vs 39 ms) are within run-to-run noise (±30% on shared cores) of lunx's. `lunx build` also writes gzip/brotli copies, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
+**Build output against Vite 8** (same app per framework, both built and run in Chromium; `npm run test:parity`, `reports/OUTPUT_PARITY.json`). Each app has a component with state, global CSS, a CSS module, an emitted image, a JSON named import, a lazy chunk, a worker, an env value and dev-only code; the `app` row adds two pages, base `/sub/`, source maps, lazy routes with their own CSS, CSS `@import` / `url()` and `public/`. Every probe passes for both tools.
+
+| JS, gzip | vanilla | React | Preact | Vue | Svelte | Solid | Lit | app |
+|---|---|---|---|---|---|---|---|---|
+| **lunx** | 0.6 KB | 66.4 KB | 5.8 KB | 24.7 KB | 10.1 KB | 4.3 KB | 6.2 KB | 67.3 KB |
+| Vite 8 | 1.5 KB | 67.2 KB | 6.7 KB | 24.9 KB | 10.9 KB | 5.3 KB | 7.0 KB | 68.1 KB |
+
+**Meta-frameworks against their own CLI** (the client build, JS gzip; `npm run test:meta-parity`, `reports/META_PARITY.json`): SvelteKit 27.7 vs 30.2 KB, Nuxt 53.8 vs 53.5, React Router 93.9 vs 96.7, Remix 80.9 vs 83.4, VitePress 52.7 vs 55.6, SolidStart 16.8 vs 17.6, Waku 84.1 vs 83.5, TanStack Start 96.8 vs 101.0, Qwik City 35.5 vs 36.0, Analog 67.3 vs 70.4 (Astro and Marko Run pages ship no JS with either). Next.js and Docusaurus run their own CLI under lunx.
+
+CSS is within a few bytes of Vite's in every app, and CSS that only lazy chunks import loads with them (`build.cssCodeSplit: false` for one file). Vite's extra kilobyte in the small apps is its modulepreload polyfill, which lunx leaves out (every browser that runs ES modules supports modulepreload).
+
+Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support; Bun's JS is 3–4% smaller (it removes more unused code inside React's CommonJS files); on the small app Rspack's warm build (370 vs 385 ms) is within run-to-run noise (±30% on shared cores) of lunx's. `lunx build` also writes gzip/brotli copies, license files, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
 
 ---
 

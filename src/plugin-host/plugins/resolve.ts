@@ -58,6 +58,54 @@ export function shouldExternalize(envConfig: any, spec: string, resolved: string
     return /\.(m|c)?js$/.test(resolved) || resolved.endsWith('.json') || resolved.endsWith('.node');
 }
 
+/**
+ * A resolved file's package.json `sideEffects`, as Vite's resolver reports it: Rolldown does not
+ * look it up for ids a plugin resolved, so without this a `sideEffects: false` package's unused
+ * modules stayed in the bundle (h3 pulled node-mock-http and iron-webcrypto into Nuxt's client).
+ */
+const packages = new Map<string, { root: string; test: ((file: string) => boolean) | null } | null>();
+function packageSideEffects(file: string): boolean | undefined {
+    const pkg = packageFor(path.dirname(file));
+    if (!pkg?.test) return undefined;
+    return pkg.test(file);
+}
+function packageFor(dir: string): { root: string; test: ((file: string) => boolean) | null } | null {
+    if (packages.has(dir)) return packages.get(dir)!;
+    let found: { root: string; test: ((file: string) => boolean) | null } | null = null;
+    const manifest = path.join(dir, 'package.json');
+    let json: any = null;
+    try {
+        json = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+    } catch {
+        // none here
+    }
+    if (json && json.name) {
+        const se = json.sideEffects;
+        let test: ((file: string) => boolean) | null = null;
+        if (se === false) test = () => false;
+        else if (Array.isArray(se)) {
+            // As webpack and Vite: a pattern without "/" matches the file name anywhere in the package.
+            const res = se.filter((x: unknown) => typeof x === 'string').map((x: string) => globToRegExp(x.includes('/') ? x.replace(/^\.\//, '') : `**/${x}`));
+            test = (f) => {
+                const rel = path.relative(dir, f).split(path.sep).join('/');
+                return res.some((re: RegExp) => re.test(rel));
+            };
+        }
+        found = { root: dir, test };
+    } else {
+        const parent = path.dirname(dir);
+        found = parent === dir ? null : packageFor(parent);
+    }
+    packages.set(dir, found);
+    return found;
+}
+
+/** `id` (a resolved file plus its query) with its package's side effects, when they are declared. */
+function withSideEffects(id: string): string | { id: string; moduleSideEffects: boolean } {
+    const effects = packageSideEffects(splitQuery(id)[0]);
+    return effects === undefined ? id : { id, moduleSideEffects: effects };
+}
+
 export function resolvePlugin(config: any): any {
     const resolvers = new Map<string, ModuleResolver>();
     const resolverFor = (env: any): ModuleResolver => {
@@ -112,10 +160,10 @@ export function resolvePlugin(config: any): any {
                 // A root-relative URL first, then an absolute file system path.
                 const inRoot = path.join(root, file);
                 const found = tryFs(resolver, inRoot);
-                if (found) return found + query;
+                if (found) return withSideEffects(found + query);
                 if (path.isAbsolute(file) && (isFile(file) || fs.existsSync(path.dirname(file)))) {
                     const abs = tryFs(resolver, file);
-                    if (abs) return abs + query;
+                    if (abs) return withSideEffects(abs + query);
                 }
                 return null;
             }
@@ -125,13 +173,13 @@ export function resolvePlugin(config: any): any {
 
             if (file.startsWith('.')) {
                 const found = tryFs(resolver, path.resolve(basedir, file));
-                return found ? found + query : null;
+                return found ? withSideEffects(found + query) : null;
             }
 
             // Package subpath imports (`#internal/x`): resolved inside the importing package, never externalized.
             if (file.startsWith('#')) {
                 const found = resolver.resolve(basedir, file);
-                return found ? found + query : null;
+                return found ? withSideEffects(found + query) : null;
             }
 
             if (/^[A-Za-z]:[\\/]/.test(file)) {
@@ -156,7 +204,7 @@ export function resolvePlugin(config: any): any {
                 // Builds mark server externals here (Rolldown needs it). In dev, as in Vite, resolveId returns the
                 // file and import analysis keeps the bare import (vite-node / transformRequest resolve directly).
                 if (!isClient && config.command === 'build' && shouldExternalize(env.config, file, resolved)) return { id: file, external: true };
-                return resolved + query;
+                return withSideEffects(resolved + query);
             }
             return null;
         },

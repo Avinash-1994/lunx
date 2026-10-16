@@ -86,6 +86,12 @@ async function runOrExit(task: () => Promise<void>): Promise<void> {
 }
 
 async function main() {
+  // `lunx exec <tool> …`: the tool's arguments are its own, so they skip lunx's parser.
+  if (process.argv[2] === 'exec') {
+    const { runExec } = await import('./commands/exec.js');
+    process.exitCode = await runExec(process.argv.slice(3));
+    return;
+  }
   // BUG-CLI-01: short-circuit block REMOVED — yargs is the single handler for all commands
 
   const { log } = await import('./utils/logger.js');
@@ -438,6 +444,12 @@ async function main() {
         const { createLunxProject } = await import('./create/index.js');
         await runOrExit(() => createLunxProject(args.name, { template: args.template, ts: args.ts, tailwind: args.tailwind }));
       }
+    )
+    .command(
+      'exec <tool..>',
+      'Run a Vite-based tool (Storybook, Vitest…) on lunx\'s engine: lunx exec storybook dev',
+      () => {},
+      () => {} // run before argument parsing (below), so the tool's own flags pass through untouched
     )
     .command(
       'info',

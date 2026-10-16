@@ -77,6 +77,8 @@ export interface BundleInput {
     extensions?: string[];
     /** tsconfig.json used for paths and decorator settings. */
     tsconfig?: string;
+    /** Syntax to lower to (Oxc targets: 'es2020', 'chrome90'…); unset keeps it as written. */
+    target?: string[];
     /** Suppress all bundler warnings (internal bundles: pre-bundling, config loading). */
     quiet?: boolean;
     /** Called for warnings; return false to drop one. */
@@ -99,6 +101,8 @@ export interface BundleOutputOptions {
     minify?: boolean;
     /** Keep `@__PURE__` annotations in minified output (libraries: downstream bundlers tree-shake with them). */
     keepAnnotations?: boolean;
+    /** Minified output: keep `@license` / `/*!` comments in the code (default true). */
+    legalComments?: boolean;
     sourcemap?: boolean | 'inline' | 'hidden';
     inlineDynamicImports?: boolean;
     /** Named chunks: modules whose id matches go into that chunk. */
@@ -114,6 +118,8 @@ export interface OutputChunk {
     facadeModuleId: string | null;
     /** Static imports of other chunks (file names). */
     imports: string[];
+    /** Chunks this one loads with import(). */
+    dynamicImports?: string[];
     moduleIds: string[];
 }
 

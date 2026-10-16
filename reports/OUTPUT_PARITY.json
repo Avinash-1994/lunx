@@ -1,0 +1,313 @@
+{
+  "lunx": "1.2.0",
+  "vite": "8.3.4",
+  "node": "v22.22.0",
+  "results": [
+    {
+      "framework": "vanilla",
+      "lunx": {
+        "buildMs": 360,
+        "jsFiles": 3,
+        "jsBytes": 929,
+        "jsGzip": 617,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 725,
+        "jsFiles": 3,
+        "jsBytes": 3123,
+        "jsGzip": 1574,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "react",
+      "lunx": {
+        "buildMs": 581,
+        "jsFiles": 3,
+        "jsBytes": 219818,
+        "jsGzip": 68038,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/main.B4y7bcJf.js.LICENSE.txt",
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 504,
+        "jsFiles": 3,
+        "jsBytes": 221984,
+        "jsGzip": 68846,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "preact",
+      "lunx": {
+        "buildMs": 273,
+        "jsFiles": 3,
+        "jsBytes": 13866,
+        "jsGzip": 5961,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 829,
+        "jsFiles": 3,
+        "jsBytes": 16078,
+        "jsGzip": 6881,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "vue",
+      "lunx": {
+        "buildMs": 982,
+        "jsFiles": 3,
+        "jsBytes": 64886,
+        "jsGzip": 25274,
+        "cssFiles": 1,
+        "cssBytes": 181,
+        "cssGzip": 165,
+        "assets": [
+          "assets/main.D8Fb9QSF.js.LICENSE.txt",
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 833,
+        "jsFiles": 3,
+        "jsBytes": 65019,
+        "jsGzip": 25482,
+        "cssFiles": 1,
+        "cssBytes": 184,
+        "cssGzip": 162,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "svelte",
+      "lunx": {
+        "buildMs": 727,
+        "jsFiles": 3,
+        "jsBytes": 25576,
+        "jsGzip": 10301,
+        "cssFiles": 1,
+        "cssBytes": 132,
+        "cssGzip": 130,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 1326,
+        "jsFiles": 3,
+        "jsBytes": 27814,
+        "jsGzip": 11198,
+        "cssFiles": 1,
+        "cssBytes": 135,
+        "cssGzip": 129,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "solid",
+      "lunx": {
+        "buildMs": 562,
+        "jsFiles": 3,
+        "jsBytes": 10825,
+        "jsGzip": 4428,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 627,
+        "jsFiles": 3,
+        "jsBytes": 13191,
+        "jsGzip": 5383,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "lit",
+      "lunx": {
+        "buildMs": 367,
+        "jsFiles": 3,
+        "jsBytes": 15990,
+        "jsGzip": 6318,
+        "cssFiles": 1,
+        "cssBytes": 62,
+        "cssGzip": 82,
+        "assets": [
+          "assets/main.BJ06aL9f.js.LICENSE.txt",
+          "assets/photo.8f774d6f.png"
+        ],
+        "htmlBytes": 739,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 434,
+        "jsFiles": 3,
+        "jsBytes": 18118,
+        "jsGzip": 7132,
+        "cssFiles": 1,
+        "cssBytes": 65,
+        "cssGzip": 85,
+        "assets": [
+          "assets/photo-CYvRAYMo.png"
+        ],
+        "htmlBytes": 530,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "failures": []
+      },
+      "losses": []
+    },
+    {
+      "framework": "app",
+      "lunx": {
+        "buildMs": 1629,
+        "jsFiles": 6,
+        "jsBytes": 221038,
+        "jsGzip": 68919,
+        "cssFiles": 3,
+        "cssBytes": 151,
+        "cssGzip": 203,
+        "assets": [
+          "assets/bg.0176aa64.png",
+          "assets/main.DVr0ug0C.js.LICENSE.txt",
+          "robots.txt"
+        ],
+        "htmlBytes": 645,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "sharedModuleCopies": 1,
+        "routeCssInInitialCss": false,
+        "initialCssGzip": 117,
+        "jsWithoutMap": 0,
+        "jsWithoutMapComment": 0,
+        "aboutPage": true,
+        "failures": []
+      },
+      "vite": {
+        "buildMs": 2107,
+        "jsFiles": 7,
+        "jsBytes": 222971,
+        "jsGzip": 69727,
+        "cssFiles": 3,
+        "cssBytes": 151,
+        "cssGzip": 206,
+        "assets": [
+          "assets/bg-DyNdNJJq.png",
+          "robots.txt"
+        ],
+        "htmlBytes": 778,
+        "devCodeLeft": false,
+        "unusedJsonLeft": false,
+        "sharedModuleCopies": 1,
+        "routeCssInInitialCss": false,
+        "initialCssGzip": 118,
+        "jsWithoutMap": 1,
+        "jsWithoutMapComment": 1,
+        "aboutPage": true,
+        "failures": []
+      },
+      "losses": []
+    }
+  ]
+}

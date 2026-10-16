@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { remoteCache } from './remote-cache.js';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.lunx', '.lunx_cache', '.cache', '.turbo', '.next', '.nuxt', '.svelte-kit', '.output', 'coverage']);
 /** Above this many files the fingerprint costs more than it saves. */
@@ -120,8 +121,8 @@ const waitingScans = new Set<() => unknown>();
 
 /**
  * Start reading the first build's inputs. Called once Rolldown is rendering in
- * Rust: started earlier, thousands of stats fill libuv's four threads and the
- * config load and every other file read before the bundle wait behind them.
+ * Rust and the main thread is idle: started earlier, thousands of stats hold
+ * up the config load and every file read before the bundle.
  */
 export function startInputScans(): void {
     for (const start of waitingScans) start();
@@ -146,9 +147,10 @@ export function checkBuild(root: string, options: Record<string, unknown>): { hi
     } catch {
         // no previous build
     }
-    if (!entry) {
-        // Nothing to compare against: read the inputs while Rolldown renders (in Rust threads, so
-        // the main thread is mostly waiting) instead of before the build starts.
+    // Settled without the inputs (other options, or the output was removed or changed): it
+    // rebuilds whatever they are, so read them while Rolldown renders (in Rust threads, the main
+    // thread mostly waiting) instead of before the build starts.
+    if (!entry || entry.key !== key || !Object.keys(entry.outputs).length || !same(entry.outputs, walk(entry.outDir, new Set()) ?? {})) {
         let started: Promise<Record<string, Stamp> | null> | null = null;
         const scan = () => (started ??= inputsOfAsync(root).catch(() => null));
         waitingScans.add(scan);
@@ -156,11 +158,8 @@ export function checkBuild(root: string, options: Record<string, unknown>): { hi
     }
     const outDir = entry.outDir;
     const inputs = inputsOf(root, outDir);
-    const pending: Pending = { file, key, outDir, inputs };
-    if (!inputs || entry.key !== key || !same(entry.inputs, inputs)) return { hit: false, pending };
-    const outputs = walk(entry.outDir, new Set()) ?? {};
-    const hit = Object.keys(entry.outputs).length > 0 && same(entry.outputs, outputs);
-    return { hit, outDir: entry.outDir, pending };
+    const hit = !!inputs && same(entry.inputs, inputs);
+    return { hit, outDir, pending: { file, key, outDir, inputs } };
 }
 
 function inputsOf(root: string, outDir: string): Record<string, Stamp> | null {
@@ -183,39 +182,36 @@ async function inputsOfAsync(root: string): Promise<Record<string, Stamp> | null
     return inputs;
 }
 
-/** `walk`, without blocking the event loop. */
+/**
+ * `walk` while Rolldown renders: synchronous stats (a few µs each; a promise
+ * and a libuv round trip per file cost ~4× the CPU, which Rolldown's threads
+ * need), yielding every few hundred files so its JS hooks are not held up.
+ */
 async function walkAsync(root: string): Promise<Record<string, Stamp> | null> {
     const out: Record<string, Stamp> = {};
     let count = 0;
-    let overflow = false;
-    const visit = async (dir: string): Promise<void> => {
+    const dirs = [root];
+    while (dirs.length) {
+        const dir = dirs.pop()!;
         let entries: fs.Dirent[];
         try {
-            entries = await fsp.readdir(dir, { withFileTypes: true });
+            entries = fs.readdirSync(dir, { withFileTypes: true });
         } catch {
-            return;
+            continue;
         }
-        await Promise.all(entries.map(async (e) => {
-            if (overflow) return;
+        for (const e of entries) {
             const full = path.join(dir, e.name);
             if (e.isDirectory()) {
-                if (!SKIP_DIRS.has(e.name)) await visit(full);
+                if (!SKIP_DIRS.has(e.name)) dirs.push(full);
             } else if (e.isFile()) {
-                if (++count > MAX_FILES) {
-                    overflow = true;
-                    return;
-                }
-                try {
-                    const st = await fsp.stat(full);
-                    out[path.relative(root, full)] = [Math.round(st.mtimeMs), st.size];
-                } catch {
-                    // removed meanwhile
-                }
+                if (++count > MAX_FILES) return null;
+                const st = fs.statSync(full, { throwIfNoEntry: false });
+                if (st) out[path.relative(root, full)] = [Math.round(st.mtimeMs), st.size];
+                if (count % 256 === 0) await new Promise((resolve) => setImmediate(resolve));
             }
-        }));
-    };
-    await visit(root);
-    return overflow ? null : out;
+        }
+    }
+    return out;
 }
 
 /** After a successful build: remember its inputs (as they were before it ran) and its output. */
@@ -264,9 +260,13 @@ export class TransformCache {
     private readonly used = new Map<string, unknown>();
     private dirty = false;
 
+    /** The shared copy (`cache.remote`), keyed by scope and compiler versions. */
+    private readonly remoteKey: string;
+
     constructor(root: string, scope: string, salt: string) {
         this.file = path.join(root, '.lunx', 'transform-cache', `${scope}.json`);
         this.salt = `${lunxVersion()}\0${salt}`;
+        this.remoteKey = `transform-cache/${scope}.${crypto.createHash('sha256').update(this.salt).digest('hex').slice(0, 16)}.json`;
     }
 
     private key(parts: string[]): string {
@@ -277,11 +277,10 @@ export class TransformCache {
 
     private load(): Promise<Map<string, unknown>> {
         if (this.entries) return Promise.resolve(this.entries);
-        return (this.loading ??= fsp
-            .readFile(this.file, 'utf8')
-            .then((text) => new Map(Object.entries(JSON.parse(text))))
-            .catch(() => new Map<string, unknown>())
-            .then((m) => (this.entries = m)));
+        return (this.loading ??= Promise.all([
+            fsp.readFile(this.file, 'utf8').then((text) => Object.entries(JSON.parse(text))).catch(() => []),
+            remoteCache()?.get(this.remoteKey).then((b) => (b ? Object.entries(JSON.parse(b.toString('utf8'))) : [])).catch(() => []) ?? [],
+        ]).then(([local, shared]) => (this.entries = new Map<string, unknown>([...shared, ...local]))));
     }
 
     async get(parts: string[]): Promise<any | null> {
@@ -305,8 +304,11 @@ export class TransformCache {
         try {
             await fsp.mkdir(path.dirname(this.file), { recursive: true });
             const tmp = `${this.file}.${process.pid}.tmp`;
-            await fsp.writeFile(tmp, JSON.stringify(Object.fromEntries(this.used)));
+            const text = JSON.stringify(Object.fromEntries(this.used));
+            await fsp.writeFile(tmp, text);
             await fsp.rename(tmp, this.file);
+            const shared = remoteCache();
+            if (shared && !shared.readOnly && this.dirty) await shared.put(this.remoteKey, Buffer.from(text));
         } catch {
             // ignore
         }

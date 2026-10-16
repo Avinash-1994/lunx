@@ -1,0 +1,221 @@
+{
+  "node": "v22.22.0",
+  "results": [
+    {
+      "name": "sveltekit",
+      "lunx": {
+        "ms": 1889,
+        "jsFiles": 9,
+        "jsGzip": 28329,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 4629,
+        "jsFiles": 11,
+        "jsGzip": 30945,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "nuxt",
+      "lunx": {
+        "ms": 5864,
+        "jsFiles": 5,
+        "jsGzip": 55103,
+        "cssFiles": 2,
+        "cssGzip": 1571
+      },
+      "native": {
+        "ms": 10233,
+        "jsFiles": 4,
+        "jsGzip": 54830,
+        "cssFiles": 2,
+        "cssGzip": 1573
+      },
+      "losses": []
+    },
+    {
+      "name": "astro",
+      "lunx": {
+        "ms": 1293,
+        "jsFiles": 0,
+        "jsGzip": 0,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 1837,
+        "jsFiles": 0,
+        "jsGzip": 0,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "react-router",
+      "lunx": {
+        "ms": 1314,
+        "jsFiles": 5,
+        "jsGzip": 96124,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 3622,
+        "jsFiles": 5,
+        "jsGzip": 98999,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "remix",
+      "lunx": {
+        "ms": 1403,
+        "jsFiles": 6,
+        "jsGzip": 82870,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 13448,
+        "jsFiles": 6,
+        "jsGzip": 85451,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "vitepress",
+      "lunx": {
+        "ms": 2594,
+        "jsFiles": 4,
+        "jsGzip": 53958,
+        "cssFiles": 2,
+        "cssGzip": 18966
+      },
+      "native": {
+        "ms": 5364,
+        "jsFiles": 5,
+        "jsGzip": 56950,
+        "cssFiles": 2,
+        "cssGzip": 19313
+      },
+      "losses": []
+    },
+    {
+      "name": "solidstart",
+      "lunx": {
+        "ms": 8342,
+        "jsFiles": 3,
+        "jsGzip": 17200,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 12356,
+        "jsFiles": 3,
+        "jsGzip": 18047,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "waku",
+      "lunx": {
+        "ms": 2027,
+        "jsFiles": 3,
+        "jsGzip": 86162,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 1936,
+        "jsFiles": 2,
+        "jsGzip": 85474,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "tanstack-start",
+      "lunx": {
+        "ms": 1603,
+        "jsFiles": 2,
+        "jsGzip": 99117,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 4494,
+        "jsFiles": 2,
+        "jsGzip": 103428,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "qwik-city",
+      "lunx": {
+        "ms": 899,
+        "jsFiles": 34,
+        "jsGzip": 36357,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 2043,
+        "jsFiles": 21,
+        "jsGzip": 36874,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "marko-run",
+      "lunx": {
+        "ms": 804,
+        "jsFiles": 1,
+        "jsGzip": 20,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 1529,
+        "jsFiles": 0,
+        "jsGzip": 0,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    },
+    {
+      "name": "analog",
+      "lunx": {
+        "ms": 13249,
+        "jsFiles": 2,
+        "jsGzip": 68947,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "native": {
+        "ms": 22258,
+        "jsFiles": 2,
+        "jsGzip": 72092,
+        "cssFiles": 0,
+        "cssGzip": 0
+      },
+      "losses": []
+    }
+  ]
+}

@@ -20,6 +20,12 @@ import { anomalyDetector } from '../security/anomaly.js';
 import type { WebSocketServer, WebSocket } from '../lib/ws.js';
 import { fileURLToPath } from 'url';
 import { BuildConfig } from '../config/index.js';
+import { metaEnvFrom, replaceHtmlEnv } from '../build/html-env.js';
+import { addNonce, applyHtmlOptions } from '../build/html-options.js';
+import { corsOrigin, hostAllowed } from './access.js';
+import { declaresReactCompiler } from '../core/react-compiler.js';
+import { wasmEsmModule, wasmInitModule } from '../build/wasm-init.js';
+import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from '../build/svg-component.js';
 import { log } from '../utils/logger.js';
 import { PluginManager } from '../plugins/index.js';
 import type { AppDev } from '../plugin-host/app-dev.js';
@@ -102,6 +108,10 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
 
         if (federation?.isRemote(specifier)) {
           replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.remoteUrl(specifier)) });
+          return;
+        }
+        if (federation?.isRuntime(specifier)) {
+          replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.runtimeUrl) });
           return;
         }
         if (federation?.isShared(specifier)) {
@@ -364,7 +374,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
   // 3. Initialize Universal Transformer
   const { UniversalTransformer } = await import('../core/universal-transformer.js');
-  const universalTransformer = new UniversalTransformer(cfg.root);
+  const universalTransformer = new UniversalTransformer(cfg.root, { react: (cfg as any).react });
   const workerThreads = Math.max(2, require('os').cpus().length - 2); // Leave 2 for OS + watcher
   const nativeWorker = new NativeWorker(workerThreads);
   const pluginManager = new PluginManager();
@@ -498,7 +508,9 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       mithril: ['mithril']
     };
 
-    const defaultDeps = frameworkDeps[primaryFramework] || [];
+    const defaultDeps = [...(frameworkDeps[primaryFramework] || [])];
+    // The React Compiler's output imports react/compiler-runtime, which no source file names.
+    if ((cfg as any).react?.compiler !== false && ((cfg as any).react?.compiler || declaresReactCompiler(cfg.root))) defaultDeps.push('react/compiler-runtime');
 
     // Scanning the sources for imports and pre-bundling run in the background, as in
     // Vite: the server answers at once, and module requests wait for prebundleReady.
@@ -645,6 +657,14 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
   let port = cfg.server?.port || cfg.port || 5173;
   const host = cfg.server?.host || 'localhost';
+
+  // `server.middlewareMode`: requests come through the app's own server (createServer().middlewares),
+  // and HMR rides on the server given as server.hmr.server, if any.
+  const middlewareMode = !!(cfg.server as any)?.middlewareMode;
+  if (middlewareMode && !existingServer) {
+    existingServer = (cfg.server as any)?.hmr?.server ?? http.createServer();
+    if (!(cfg.server as any)?.hmr?.server) log.info('[lunx] middleware mode without server.hmr.server: pages load, but without live updates.', { category: 'server' });
+  }
 
   // Dynamic port detection - skip if existingServer provided (minimal server already bound the port)
   if (!cfg.server?.strictPort && !existingServer) {
@@ -905,15 +925,27 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     return rewriteImports(out, cfg.root, preBundledDeps, devFederation, aliases, appDev, onDisk ? file : path.join(cfg.root, 'index.html'));
   };
 
+  const access = { host: cfg.server?.host, allowedHosts: (cfg.server as any)?.allowedHosts, cors: (cfg.server as any)?.cors };
   const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    // DNS rebinding: a page on another domain must not reach this server through it.
+    if (!hostAllowed(req.headers.host, access)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end(`Blocked request. This host (${JSON.stringify(req.headers.host)}) is not allowed.\nTo allow it, add it to server.allowedHosts in lunx.config.`);
+      return;
+    }
     if (appDev && await appDev.handle(req, res)) return;
     const reqPath = (req.url || '/').split('?')[0]!;
     if (reqPath !== '/' && !reqPath.endsWith('.html') && !reqPath.startsWith('/@lunx/hmr-client') && !reqPath.startsWith('/__lunx')) {
       await prebundleReady;
     }
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    // CORS for pages on localhost only, unless server.cors says otherwise (as Vite).
+    const allowOrigin = corsOrigin(req.headers.origin, access);
+    if (allowOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      if (allowOrigin !== '*') res.setHeader('Vary', 'Origin');
+    }
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -1168,6 +1200,9 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       }
 
       try {
+        data = replaceHtmlEnv(String(data), { ...metaEnvFrom(devDefines), BASE_URL: '/' });
+        // `html` in lunx.config (title, meta, favicon, tags…), as in the build; the nonce comes last, below.
+        data = applyHtmlOptions(data, { ...(cfg as any).html, cspNonce: undefined }, '/');
         if (appDev) data = await appDev.indexHtml(url, data);
         // Inject entry point if not present (simple heuristic)
         // Angular CLI projects often don't have the script tag in source index.html
@@ -1249,6 +1284,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           // Fallback if no head tag found
           data = registryScript + federationRuntime + clientScript + data;
         }
+        // `html.cspNonce`: on every script and stylesheet, lunx's own included.
+        if ((cfg as any).html?.cspNonce) data = addNonce(data, (cfg as any).html.cspNonce);
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(data);
@@ -1448,7 +1485,9 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
       if (file) {
         const { openInEditor } = await import('../lib/open-editor.js');
-        openInEditor(file, line, column);
+        // Overlay paths are relative to the project ('src/App.tsx', '/src/App.tsx').
+        const target = /^[a-z][\w+.-]*:/i.test(file) || existsSync(file) ? file : path.join(cfg.root, file.replace(/^\/+/, ''));
+        openInEditor(target, line, column);
         res.writeHead(200);
         res.end('Opened in editor');
       } else {
@@ -1718,6 +1757,19 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
       const ext = path.extname(filePath);
 
+        // `import MyWorker from './worker.js?worker'` (Vite's): a constructor for the
+        // worker, which loads the module itself as a module worker.
+        const workerQuery = /[?&](shared)?worker\b/.exec(url);
+        if (workerQuery && /\.[mc]?[jt]sx?$/.test(ext)) {
+          const ctor = workerQuery[1] ? 'SharedWorker' : 'Worker';
+          const workerUrl = `new URL(${JSON.stringify(cleanUrl)}, import.meta.url)`;
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+          res.end(/[?&]url\b/.test(url)
+            ? `export default ${workerUrl}.href;\n`
+            : `export default function WorkerWrapper(options) {\n  return new ${ctor}(${workerUrl}, { type: 'module', name: options?.name });\n}\n`);
+          return;
+        }
+
         if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs' || ext === '.vue' || ext === '.svelte' || ext === '.astro') {
         let raw = await fs.readFile(filePath, 'utf-8');
 
@@ -1864,6 +1916,29 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
         res.end(`export default ${JSON.stringify(await fs.readFile(filePath, 'utf-8'))};`);
         return;
       }
+      // `./logo.svg?react` → a component (vite-plugin-svgr, when installed, keeps it).
+      if (ext === '.svg' && SVG_COMPONENT_QUERY.test(url) && !appDev?.app.plugins.some((p: any) => p.name === 'vite-plugin-svgr')) {
+        const runtime = svgRuntimeFor(primaryFramework, url.slice(url.indexOf('?')));
+        if (runtime) {
+          const code = svgComponent(await fs.readFile(filePath, 'utf-8'), runtime);
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+          res.end(await rewriteImports(code, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath));
+          return;
+        }
+      }
+      // `.wasm?init` → a function resolving to the instance, as in Vite.
+      if (ext === '.wasm' && /[?&]init\b/.test(url)) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(wasmInitModule(JSON.stringify(url.split('?')[0])));
+        return;
+      }
+      // `import { add } from './add.wasm'`: the WebAssembly ESM integration, as in the build.
+      if (ext === '.wasm' && /[?&]import\b/.test(url) && !appDev?.app.plugins.some((p: any) => p.name === 'vite-plugin-wasm')) {
+        const code = wasmEsmModule(await fs.readFile(filePath), JSON.stringify(url.split('?')[0]));
+        res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+        res.end(await rewriteImports(code, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath));
+        return;
+      }
       if (url.includes('?url') || /[?&]import\b/.test(url)) {
         const publicPath = url.split('?')[0];
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
@@ -1874,9 +1949,10 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       let data: Buffer | string = await fs.readFile(filePath);
       let mime = 'application/octet-stream';
       if (ext === '.map') mime = 'application/json';
+      if (ext === '.wasm') mime = 'application/wasm';
       if (ext === '.html') {
         mime = 'text/html';
-        let html = data.toString('utf-8');
+        let html = replaceHtmlEnv(data.toString('utf-8'), { ...metaEnvFrom(devDefines), BASE_URL: '/' });
         if (appDev) html = await appDev.indexHtml(url, html);
         let clientScript = `\n<script type="module" src="/@lunx/hmr-client"></script>\n`;
         let preamble = `
@@ -1987,7 +2063,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   wss = (server as any).wsServer;
   if (!wss) {
     const { WebSocketServer } = await import('../lib/ws.js');
-    wss = new WebSocketServer({ server });
+    // On the app's own server (middleware mode), only lunx's HMR path: its other sockets stay its own.
+    wss = new WebSocketServer({ server, ...(middlewareMode ? { path: '/__lunx_hmr' } : {}) });
     (server as any).wsServer = wss;
   }
 
@@ -2181,9 +2258,52 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     }
   });
 
+  // `server.typecheck`: type errors in the terminal and the overlay, as the project's TypeScript finds them.
+  if ((cfg.server as any)?.typecheck) {
+    let latest: string | null = null;
+    let hadErrors = false;
+    (wss as any)?.on('connection', (ws: any) => {
+      if (latest) ws.send(latest);
+    });
+    const { startTypecheck } = await import('./typecheck.js');
+    const checking = await startTypecheck(cfg.root, primaryFramework, (errors, checker) => {
+      if (errors.length) {
+        log.warn(`[${checker}] ${errors.length} type error${errors.length === 1 ? '' : 's'}`, { category: 'server' });
+        for (const e of errors.slice(0, 5)) console.log(`  ${path.relative(cfg.root, e.file)}:${e.line}:${e.column} ${e.code}: ${e.message.split('\n')[0]}`);
+        if (errors.length > 5) console.log(`  … and ${errors.length - 5} more`);
+      } else if (hadErrors) {
+        log.info(`[${checker}] no type errors`, { category: 'server' });
+      }
+      hadErrors = errors.length > 0;
+      latest = JSON.stringify({
+        type: 'typecheck',
+        errors: errors.map((e) => ({ file: path.relative(cfg.root, e.file).split(path.sep).join('/'), line: e.line, column: e.column, message: `${e.code}: ${e.message}` })),
+      });
+      broadcast(latest);
+    });
+    if (!checking) log.warn('server.typecheck: this project has no TypeScript or tsconfig.json', { category: 'server' });
+  }
+
+  // An Electron app: lunx builds its main process and preload, and runs Electron on this server.
+  const startElectron = async () => {
+    const electron = await import('../electron/index.js');
+    const app = electron.resolveElectron(cfg.root, cfg);
+    if (!app) return;
+    try {
+      await electron.devElectron(app, `${httpsOptions ? 'https' : 'http'}://localhost:${port}/`, {
+        reload: () => broadcast(JSON.stringify({ type: 'full-reload' })),
+        log: (message) => log.info(message, { category: 'server' }),
+        error: (message) => log.error(message),
+      });
+    } catch (e: any) {
+      log.error(`[electron] ${e.message}`);
+    }
+  };
+
   if (!existingServer) {
     server.listen(port, () => {
       appDev?.listening();
+      void startElectron();
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;
       // Phase 5.1 — print timing breakdown to stderr
@@ -2195,6 +2315,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     // If we're using the minimal server, it already handles port binding and logs.
     // We just handle the 'open' browser request here if needed.
     appDev?.listening();
+    void startElectron();
     if (cfg.server?.open) {
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;

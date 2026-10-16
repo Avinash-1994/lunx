@@ -14,7 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import type http from 'http';
 import { parse } from '../engines/index.js';
-import { normalizeShared, type FederationOptions } from './engine.js';
+import { normalizeRemotes, normalizeShared, runtimeExtras, RUNTIME_ALIASES, type FederationOptions } from './engine.js';
 import { runtimeSource, type RuntimeShared } from './runtime-source.js';
 
 const RUNTIME_URL = '/@lunx-mf/runtime.js';
@@ -59,17 +59,30 @@ export function exportNames(file: string, code: string): string[] {
 export class DevFederation {
     readonly shared: Record<string, RuntimeShared>;
     private readonly remoteNames: string[];
+    private readonly remotes: Record<string, string>;
     private readonly fileName: string;
     private nextId = 0;
 
     constructor(private options: FederationOptions, private ctx: DevFederationContext) {
         this.shared = normalizeShared(ctx.root, options.shared);
-        this.remoteNames = Object.keys(options.remotes ?? {});
+        this.remotes = normalizeRemotes(options.remotes);
+        this.remoteNames = Object.keys(this.remotes);
         this.fileName = '/' + (options.filename ?? 'remoteEntry.js').replace(/\.json$/, '.js').replace(/^\/+/, '');
+        // A host: the remotes' type hints into @mf-types/, in the background.
+        import('./types.js').then(({ consumeRemoteTypes, dtsSides }) => (dtsSides(options).consume ? consumeRemoteTypes(ctx.root, options) : null)).catch(() => {});
     }
 
     isRemote(spec: string): boolean {
         return this.remoteNames.some((n) => spec === n || spec.startsWith(n + '/'));
+    }
+
+    /** `lunx-mf:runtime` / `@module-federation/runtime`: the runtime API, served at its URL. */
+    isRuntime(spec: string): boolean {
+        return RUNTIME_ALIASES.has(spec);
+    }
+
+    get runtimeUrl(): string {
+        return RUNTIME_URL;
     }
 
     isShared(spec: string): boolean {
@@ -112,6 +125,17 @@ export class DevFederation {
     /** Serve the federation URLs; false for any other request. */
     async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
         const url = (req.url ?? '').split('?')[0]!;
+        // A remote: its type hints, compiled on request (hosts ask once, as they start).
+        if ((url === '/@mf-types.zip' || url === '/@mf-types.d.ts') && this.options.exposes && Object.keys(this.options.exposes).length) {
+            const { dtsSides, generateRemoteTypes } = await import('./types.js');
+            if (!dtsSides(this.options).generate) return false;
+            const dir = path.join(this.ctx.root, '.lunx', 'mf-types');
+            const files = await generateRemoteTypes(this.ctx.root, dir, this.options, projectSources(this.ctx.root)).catch(() => null);
+            if (!files) return false;
+            res.writeHead(200, { 'Content-Type': url.endsWith('.zip') ? 'application/zip' : 'text/plain', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-cache' });
+            res.end(fs.readFileSync(path.join(dir, url.slice(1))));
+            return true;
+        }
         let code: string | null = null;
         if (url === RUNTIME_URL) code = await this.runtime();
         else if (url.startsWith(SHARED_URL)) code = await this.sharedModule(url.slice(SHARED_URL.length).replace(/\.js$/, ''));
@@ -129,10 +153,10 @@ export class DevFederation {
 
     private async runtime(): Promise<string> {
         const deps = await this.ctx.deps();
-        return runtimeSource(this.options.name, this.shared, this.options.remotes ?? {}, (pkg) => {
+        return runtimeSource(this.options.name, this.shared, this.remotes, (pkg) => {
             const url = deps.get(pkg) ?? `/@lunx-deps/${safeName(pkg)}.js`;
             return `() => import(${JSON.stringify(url)}).then((m) => () => m)`;
-        });
+        }, runtimeExtras(this.options, (f) => '/' + path.relative(this.ctx.root, path.resolve(this.ctx.root, f)).split(path.sep).join('/')));
     }
 
     private async sharedModule(safe: string): Promise<string | null> {
@@ -184,15 +208,37 @@ if (typeof globalThis.$RefreshReg$ === 'undefined') {
     globalThis.$RefreshSig$ = () => (type) => type;
 }
 
+// webpack and Rspack hosts treat exports without __esModule as CommonJS: mark them (live bindings kept).
+function asExports(mod) {
+    const out = { __esModule: true };
+    for (const key of Object.keys(mod)) Object.defineProperty(out, key, { enumerable: true, get: () => mod[key] });
+    return out;
+}
+
 export async function get(request) {
     const load = exposes[request] || exposes['./' + String(request).replace(/^\\.?\\//, '')];
     if (!load) throw new Error('[lunx mf] module "' + request + '" is not exposed by ${this.options.name}; exposed: ' + Object.keys(exposes).join(', '));
     await ensureShared();
-    const mod = await load();
+    const mod = asExports(await load());
     return () => mod;
 }
 
 export default { name, init, get };
 `;
     }
+}
+
+/** The project's TypeScript sources (outside node_modules and build output), for dev-time type hints. */
+function projectSources(root: string): string[] {
+    const out: string[] = [];
+    const skip = new Set(['node_modules', '.git', '.lunx', 'dist', 'build', '@mf-types', 'coverage']);
+    const walk = (dir: string) => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (e.isDirectory()) {
+                if (!skip.has(e.name) && !e.name.startsWith('.')) walk(path.join(dir, e.name));
+            } else if (/\.(m|c)?tsx?$/.test(e.name) && !e.name.endsWith('.d.ts')) out.push(path.join(dir, e.name));
+        }
+    };
+    walk(root);
+    return out;
 }

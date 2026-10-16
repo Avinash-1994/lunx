@@ -108,9 +108,11 @@ function config(o: StarterOptions, options = ''): Record<string, string> {
     };
 }
 
-function tsconfig(o: StarterOptions, compilerOptions: Record<string, unknown> = {}, include = ['src']): Record<string, string> {
+function tsconfig(o: StarterOptions, compilerOptions: Record<string, unknown> = {}, include = ['src'], app = true): Record<string, string> {
     if (!o.ts) return {};
     return {
+        // Types for asset imports, `?raw` / `?react` / `.wasm?init`, `import.meta.env` and `import.meta.hot`.
+        ...(app ? { 'src/lunx-env.d.ts': lines('/// <reference types="lunx-dev/client" />') } : {}),
         'tsconfig.json': json({
             compilerOptions: {
                 target: 'ES2022',
@@ -454,7 +456,8 @@ const angular: Starter = {
         rxjs: '^7.8.2',
         tslib: '^2.8.1',
     }),
-    devDependencies: () => ({ typescript: '~5.9.3' }),
+    // Ahead-of-time compilation in `lunx build`, as `ng build` does.
+    devDependencies: () => ({ '@angular/compiler-cli': ANGULAR, typescript: '~5.9.3' }),
     files: (o) => ({
         'index.html': html(o, 'src/main.ts', '<app-root></app-root>'),
         'src/main.ts': lines(
@@ -570,6 +573,8 @@ const nuxt = framework({
     label: 'Nuxt',
     aliases: ['nuxt-app'],
     deps: { nuxt: '^4.1.2', vue: VUE },
+    // @vitejs/devtools 0.8's peer set crashes npm 10's resolver ("reading 'edgesOut'"); 0.7 installs everywhere.
+    packageJson: { overrides: { '@vitejs/devtools': '~0.7.6' } },
     files: (name) => ({
         'app/app.vue': lines('<template>', `  <h1>${name}</h1>`, '</template>'),
         'nuxt.config.ts': lines('export default defineNuxtConfig({', '  devtools: { enabled: false },', '});'),
@@ -933,7 +938,7 @@ const library: Starter = {
             '  return `Hello, ${name}!`;',
             '}',
         ),
-        ...tsconfig(o, { declaration: true }),
+        ...tsconfig(o, { declaration: true }, ['src'], false),
     }),
 };
 
@@ -956,7 +961,7 @@ const edge: Starter = {
             '};',
         ),
         ...config(o, `platform: 'edge', entry: ['src/index.${ext(o)}']`),
-        ...tsconfig(o, { lib: ['ES2022', 'WebWorker'] }),
+        ...tsconfig(o, { lib: ['ES2022', 'WebWorker'] }, ['src'], false),
     }),
 };
 
@@ -973,16 +978,14 @@ const electron: Starter = {
     devDependencies: (o) => ({
         electron: '^44.7.2',
         '@types/node': '^24.10.1',
-        'vite-plugin-electron': '^1.1.2',
         ...(o.ts ? { '@types/react': '^19.2.2', '@types/react-dom': '^19.2.2' } : {}),
         ...typescript(o),
         ...tailwindDeps(o),
     }),
+    // lunx builds electron/main and electron/preload into dist-electron/ and, in dev, runs Electron on the dev server.
     files: (o) => {
-        const files = react.files(o);
-        delete files[`lunx.config.${o.ts ? 'ts' : 'js'}`];
         return {
-            ...files,
+            ...react.files(o),
             [`electron/main.${ext(o)}`]: lines(
                 "import { app, BrowserWindow } from 'electron';",
                 "import path from 'node:path';",
@@ -991,9 +994,9 @@ const electron: Starter = {
                 'const dir = path.dirname(fileURLToPath(import.meta.url));',
                 '',
                 'function createWindow() {',
-                "  const win = new BrowserWindow({ width: 900, height: 700, webPreferences: { preload: path.join(dir, 'preload.mjs') } });",
+                "  const win = new BrowserWindow({ width: 900, height: 700, webPreferences: { preload: path.join(dir, 'preload.cjs') } });",
                 '  // `lunx dev` serves the renderer; a build loads it from disk.',
-                "  if (process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL);",
+                "  if (process.env.LUNX_DEV_SERVER_URL) win.loadURL(process.env.LUNX_DEV_SERVER_URL);",
                 "  else win.loadFile(path.join(dir, '../dist/index.html'));",
                 '}',
                 '',
@@ -1009,16 +1012,6 @@ const electron: Starter = {
                 "import { contextBridge } from 'electron';",
                 '',
                 "contextBridge.exposeInMainWorld('versions', { electron: process.versions.electron, node: process.versions.node });",
-            ),
-            [`lunx.config.${o.ts ? 'ts' : 'js'}`]: lines(
-                "import { defineConfig } from 'lunx-dev';",
-                "import electron from 'vite-plugin-electron/simple';",
-                '',
-                'export default defineConfig({',
-                '  plugins: [',
-                "    electron({ main: { entry: 'electron/main." + ext(o) + "' }, preload: { input: 'electron/preload." + ext(o) + "' } }),",
-                '  ],',
-                '});',
             ),
             ...(o.ts ? tsconfig(o, { jsx: 'react-jsx', types: ['node'] }, ['src', 'electron']) : {}),
         };

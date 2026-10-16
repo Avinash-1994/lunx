@@ -34,12 +34,29 @@ export const BuildConfigSchema = z.object({
   preset: z.enum(['spa', 'ssr', 'ssg']).default('spa'),
   // Library mode (src/build/library.ts): `lunx build` writes a package instead of an app.
   lib: z.any().optional(),
+  // A web app manifest and precaching service worker (src/build/pwa.ts).
+  pwa: z.union([z.boolean(), z.object({
+    manifest: z.union([z.record(z.string(), z.any()), z.literal(false)]).optional(),
+    register: z.boolean().optional(),
+    navigateFallback: z.union([z.string(), z.literal(null)]).optional(),
+    exclude: z.array(z.any()).optional(),
+  })]).optional(),
+  // Electron (src/electron): the main process and preload lunx builds, or `false` to leave Electron alone.
+  electron: z.union([z.literal(false), z.object({
+    main: z.string().optional(),
+    preload: z.union([z.string(), z.literal(false)]).optional(),
+    outDir: z.string().optional(),
+  })]).optional(),
   federation: z.object({
     name: z.string(),
     filename: z.string().optional(),
     singletonHost: z.string().optional(),
     exposes: z.record(z.string(), z.string()).optional(),
-    remotes: z.record(z.string(), z.string()).optional(),
+    remotes: z.record(z.string(), z.union([z.string(), z.object({ entry: z.string(), name: z.string().optional(), type: z.enum(['module', 'script', 'var']).optional() })])).optional(),
+    /** How shared versions are picked: 'loaded-first' (default) or 'version-first' (every remote joins the scope first). */
+    shareStrategy: z.enum(['loaded-first', 'version-first']).optional(),
+    /** Runtime plugin files (beforeRequest, onLoad, errorLoadRemote), as @module-federation/runtime's. */
+    runtimePlugins: z.array(z.string()).optional(),
     shared: z.union([
       z.array(z.string()),
       z.record(z.string(), z.union([z.boolean(), z.string(), z.object({
@@ -48,8 +65,12 @@ export const BuildConfigSchema = z.object({
         strictVersion: z.boolean().optional(),
         eager: z.boolean().optional(),
         version: z.string().optional(),
+        /** false: no copy of its own, it must come from another app's share scope. */
+        import: z.literal(false).optional(),
       })])),
     ]).optional(),
+    /** Type hints across apps (`@mf-types`, as `@module-federation`'s dts plugin): on by default in TypeScript projects. */
+    dts: z.union([z.boolean(), z.object({ generateTypes: z.boolean().optional(), consumeTypes: z.boolean().optional() })]).optional(),
     prefetch: z.array(z.string()).optional(),
     fallback: z.string().optional(),
     mock: z.boolean().optional(),
@@ -79,12 +100,65 @@ export const BuildConfigSchema = z.object({
     splitting: z.boolean().optional(),
     cssModules: z.boolean().default(false),
     targets: z.array(z.string()).optional(),
+    /** Browsers to compile JS for: 'es2020', ['chrome90', 'safari14'], 'baseline-widely-available', 'esnext' (default: the project's browserslist, else no lowering). */
+    target: z.union([z.string(), z.array(z.string())]).optional(),
+    /** Load built files from here instead of `base` (a CDN): 'https://cdn.example.com/app/'. */
+    assetPrefix: z.string().optional(),
+    /** Vite's renderBuiltUrl: (fileName, { hostType }) => URL string for a built file. */
+    renderBuiltUrl: z.any().optional(),
+    /** Empty outDir before building (default true). */
+    emptyOutDir: z.boolean().optional(),
+    /** Copy public/ into outDir (default true). */
+    copyPublicDir: z.boolean().optional(),
+    /** Warn about JS chunks larger than this many kB after minification (default 500). */
+    chunkSizeWarningLimit: z.number().optional(),
+    /** Output file name templates (Rollup's): '[name]', '[hash]', '[extname]'. */
+    entryFileNames: z.string().optional(),
+    chunkFileNames: z.string().optional(),
+    assetFileNames: z.string().optional(),
+    /** Imports left out of the bundle (resolved by the page: an import map, a CDN script). */
+    external: z.any().optional(),
+    /** Statements removed when minifying, as esbuild's `drop`. */
+    drop: z.array(z.enum(['console', 'debugger'])).optional(),
+    /** Minify CSS (default: as `minify`). */
+    cssMinify: z.boolean().optional(),
+    /** Write `.vite/ssr-manifest.json`: source module → files to preload when it rendered on the server. */
+    ssrManifest: z.union([z.boolean(), z.string()]).optional(),
+    /** `<link rel="prefetch">` for the lazy chunks each page can load. */
+    prefetch: z.boolean().optional(),
+    /** Third-party license notices in minified output: 'linked' (default, `<chunk>.LICENSE.txt` beside each chunk), 'inline' or 'none'. */
+    legalComments: z.enum(['inline', 'none', 'linked']).optional(),
+    /** Write `.vite/manifest.json` (or this path in the output): source files → output files, for server-rendered backends. */
+    manifest: z.union([z.boolean(), z.string()]).optional(),
+    /** core-js polyfills for `target`: 'entry' (all the targets need) or 'usage' (what the code uses); default off. */
+    polyfill: z.enum(['entry', 'usage', 'off']).optional(),
+    /** Browsers to compile CSS for, when they differ from `target`. */
+    cssTarget: z.union([z.string(), z.array(z.string())]).optional(),
     manualChunks: z.record(z.string(), z.array(z.string())).optional(),
     /** Production bundler: 'rolldown' (Rust, default) or the 'legacy' JS engine. */
     bundler: z.enum(['rolldown', 'legacy']).optional(),
     /** Assets smaller than this many bytes are inlined as data URLs (default 4096; 0 disables). */
     assetsInlineLimit: z.number().optional(),
+    /** CSS imported only by lazy chunks loads with them (default true); false puts all CSS in one file. */
+    cssCodeSplit: z.boolean().optional(),
   }).optional(),
+  /** Page options in dev and builds: title, meta, favicon, preconnect, dnsPrefetch, tags, cspNonce (src/build/html-options.ts). */
+  html: z.object({
+    title: z.string().optional(),
+    meta: z.record(z.string(), z.string()).optional(),
+    favicon: z.string().optional(),
+    preconnect: z.array(z.string()).optional(),
+    dnsPrefetch: z.array(z.string()).optional(),
+    tags: z.array(z.object({
+      tag: z.string(),
+      attrs: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
+      children: z.string().optional(),
+      injectTo: z.enum(['head', 'head-prepend', 'body', 'body-prepend']).optional(),
+    })).optional(),
+    cspNonce: z.string().optional(),
+  }).optional(),
+  /** React: `compiler` runs the React Compiler (babel-plugin-react-compiler) on components; on when it is installed. */
+  react: z.object({ compiler: z.union([z.boolean(), z.record(z.string(), z.any())]).optional() }).optional(),
   /** Public base path the app is served from, e.g. '/my-app/'. */
   base: z.string().optional(),
   /** Global constant replacements, e.g. { __APP_VERSION__: '"1.2.3"' }. */
@@ -99,11 +173,18 @@ export const BuildConfigSchema = z.object({
     host: z.string().optional(),
     port: z.number().optional(),
     strictPort: z.boolean().optional(),
-    cors: z.boolean().optional(),
+    /** CORS: pages on localhost only by default (as Vite); true for any origin, or { origin }. */
+    cors: z.union([z.boolean(), z.object({ origin: z.any().optional() })]).optional(),
+    /** Host names the dev server answers besides localhost and IPs ('.example.test' for subdomains), or true for any. */
+    allowedHosts: z.union([z.array(z.string()), z.literal(true)]).optional(),
+    /** Dev server as a middleware for your own server (lunx's createServer API): no port of its own. */
+    middlewareMode: z.boolean().optional(),
     open: z.union([z.boolean(), z.string()]).optional(),
     proxy: z.record(z.string(), z.union([z.string(), z.any()])).optional(),
     https: z.union([z.boolean(), z.object({ key: z.string(), cert: z.string() })]).optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    /** Type errors in the terminal and the browser overlay, from the project's tsc / vue-tsc in watch mode. */
+    typecheck: z.boolean().optional(),
   }).optional(),
   cacheDir: z.string().optional(),
   prebundle: z.object({
@@ -114,7 +195,8 @@ export const BuildConfigSchema = z.object({
   // Phase 4.2 — Remote cache (new optional key)
   cache: z.object({
     remote: z.object({
-      provider: z.union([z.enum(['s3', 'lunx-cloud']), z.literal(false)]).default(false),
+      /** 'http' (GET / PUT under baseUrl, `token` as a bearer token) or 's3' (AWS_* credentials from the environment). */
+      provider: z.union([z.enum(['http', 's3']), z.literal(false)]).default(false),
       bucket: z.string().optional(),
       token: z.string().optional(),
       region: z.string().optional(),
@@ -138,6 +220,8 @@ export type BuildConfig = {
   platform: 'browser' | 'node' | 'edge';
   preset: 'spa' | 'ssr' | 'ssg';
   lib?: import('../build/library.js').LibraryOptions;
+  electron?: import('../electron/index.js').ElectronOptions | false;
+  pwa?: import('../build/pwa.js').PwaOptions | boolean;
   federation?: {
     name: string;
     filename?: string;
@@ -222,7 +306,8 @@ const VALID_TOP_LEVEL_KEYS = [
   'entry', 'outDir', 'framework', 'preset', 'mode', 'platform', 'port',
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
-  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib'
+  'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib',
+  'electron', 'pwa', 'html', 'experimental', 'react',
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {
@@ -343,6 +428,22 @@ async function detectFramework(root: string): Promise<string | undefined> {
 }
 
 
+/** A `{ … }` literal, whatever realm it was made in (a config module's objects may come from another one). */
+const isPlainObject = (v: unknown): v is Record<string, any> => {
+  if (Object.prototype.toString.call(v) !== '[object Object]') return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === null || Object.getPrototypeOf(proto) === null;
+};
+
+/** `override` on top of `base`: objects merge key by key, anything else (arrays included) is replaced. */
+function mergeConfig(base: Record<string, any>, override: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    out[key] = isPlainObject(value) && isPlainObject(out[key]) ? mergeConfig(out[key], value) : value;
+  }
+  return out;
+}
+
 export async function loadConfig(cwd: string): Promise<BuildConfig> {
   const lunxTsPath = path.join(cwd, 'lunx.config.ts');
   const lunxJsPath = path.join(cwd, 'lunx.config.js');
@@ -416,6 +517,16 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
         platform: 'browser',
         preset: 'spa',
       };
+    }
+
+    // lunx.config beside a vite.config (added for lunx-only options such as pwa or electron, or
+    // kept by `lunx migrate`): the Vite config still applies underneath, and its plugins still run.
+    if (!foreign && /^lunx\.config\./.test(loadedConfigPath) && rawConfig && typeof rawConfig === 'object'
+      && (foreign = await (await import('./vite-compat.js')).readViteConfig(cwd))) {
+      const own = new Set(((rawConfig.plugins ?? []) as any[]).flat(Infinity).map((p: any) => p?.name).filter(Boolean));
+      foreign.plugins = foreign.plugins.filter((p: any) => !own.has(p?.name));
+      rawConfig = mergeConfig(foreign.config, rawConfig);
+      log.info(`[lunx] ${loadedConfigPath} on top of ${foreign.file}`);
     }
 
     if (rawConfig && typeof rawConfig === 'object') {

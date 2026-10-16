@@ -141,3 +141,51 @@ export type { CommunityPlugin } from './marketplace/plugin-adapter.js';
  * 
  * Using these will break your code in future versions.
  */
+
+// ============================================================================
+// JAVASCRIPT API (as Vite's build() and createServer())
+// ============================================================================
+
+export interface InlineConfig extends Record<string, any> {
+    /** Project root (default: the current directory). Its lunx.config / vite.config applies underneath. */
+    root?: string;
+    mode?: string;
+}
+
+/** Build the app in `root`, as `lunx build`: the project's config, with `inline` over it. */
+export async function build(inline: InlineConfig = {}) {
+    const path = await import('node:path');
+    const root = path.resolve(inline.root ?? process.cwd());
+    const { loadConfig } = await import('./config/index.js');
+    const { mergeConfig } = await import('./config-loader.js');
+    const config: any = mergeConfig((await loadConfig(root)) as any, inline as any);
+    config.root = root;
+    config.mode = inline.mode ?? 'production';
+    const { build: runBuild } = await import('./build/bundler.js');
+    return runBuild(config);
+}
+
+/**
+ * The dev server, as `lunx dev`. With `server: { middlewareMode: true }` it does not
+ * listen: mount `middlewares` in your own server, and pass that server as
+ * `server.hmr.server` for live updates.
+ *
+ *   const lunx = await createServer({ server: { middlewareMode: true, hmr: { server: httpServer } } });
+ *   app.use(lunx.middlewares);
+ */
+export async function createServer(inline: InlineConfig = {}) {
+    const path = await import('node:path');
+    const root = path.resolve(inline.root ?? process.cwd());
+    const { startDevServer } = await import('./dev/devServer.js');
+    const server: any = await startDevServer({ ...inline, root, mode: inline.mode ?? 'development' } as any);
+    const handler = () => server.__lunx_handler ?? server.requestHandler;
+    return {
+        httpServer: server,
+        /** Connect / Express middleware: lunx answers what it serves. */
+        middlewares: (req: any, res: any) => handler()(req, res),
+        async close(): Promise<void> {
+            server.wsServer?.close?.();
+            if (!inline.server?.middlewareMode) await new Promise<void>((resolve) => (server.close ? server.close(() => resolve()) : resolve()));
+        },
+    };
+}

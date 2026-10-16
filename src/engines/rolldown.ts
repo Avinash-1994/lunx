@@ -35,6 +35,7 @@ export const rolldownBundler: Bundler = {
             transform: {
                 ...(input.define ? { define: input.define } : {}),
                 ...(input.jsx ? { jsx: input.jsx } : {}),
+                ...(input.target ? { target: input.target } : {}),
             },
             onLog(level: string, log: any, handler: (level: any, log: any) => void) {
                 if (level === 'warn' && input.onWarning?.({ code: log.code, message: log.message }) === false) return;
@@ -52,7 +53,7 @@ export const rolldownBundler: Bundler = {
             assetFileNames: output.assetFileNames,
             minify: output.minify,
             // Minified apps drop @__PURE__ annotations (they were for this bundler); licences stay.
-            ...(output.minify && !output.keepAnnotations ? { comments: { legal: true, annotation: false, jsdoc: false } } : {}),
+            ...(output.minify && !output.keepAnnotations ? { comments: { legal: output.legalComments !== false, annotation: false, jsdoc: false } } : {}),
             sourcemap: output.sourcemap,
             globals: output.globals,
             exports: output.exports,
@@ -73,6 +74,7 @@ export const rolldownBundler: Bundler = {
                           isEntry: item.isEntry,
                           facadeModuleId: item.facadeModuleId ?? null,
                           imports: item.imports ?? [],
+                          dynamicImports: item.dynamicImports ?? [],
                           moduleIds: item.moduleIds ?? [],
                       }
                     : { type: 'asset', fileName: item.fileName, source: item.source },
@@ -96,4 +98,14 @@ export async function rollupCompatibleBuild(inputOptions: Record<string, any>, o
     } finally {
         await bundle.close();
     }
+}
+
+/**
+ * Rolldown's built-in support for `` import(`./locales/${lang}.js`) `` (Vite's):
+ * the import becomes a lookup in the files the pattern matches, each its own
+ * chunk. `resolver` maps an aliased pattern (`@/locales/${x}.js`) to a relative one.
+ */
+export async function dynamicImportVarsPlugin(resolver: (id: string, importer: string) => string | undefined): Promise<any> {
+    const { viteDynamicImportVarsPlugin } = await import('rolldown/experimental');
+    return viteDynamicImportVarsPlugin({ exclude: [/node_modules/], resolver: async (id: string, importer: string) => resolver(id, importer) });
 }

@@ -268,8 +268,11 @@ export async function resolveConfig(inlineConfig: InlineConfig, command: Command
 
     const assetsIncludeList = arraify(config.assetsInclude ?? []);
     const { createFilter } = await import('./utils.js');
-    const assetsPatterns = assetsIncludeList.filter(Boolean);
-    const assetsFilter = assetsPatterns.length ? createFilter(assetsPatterns, undefined, { resolve: false }) : () => false;
+    // Patterns, or functions (a resolved config's `assetsInclude`, which Vitest passes back in).
+    const assetsFunctions = assetsIncludeList.filter((p: unknown): p is (file: string) => boolean => typeof p === 'function');
+    const assetsPatterns = assetsIncludeList.filter((p: unknown) => p && typeof p !== 'function');
+    const patternFilter = assetsPatterns.length ? createFilter(assetsPatterns, undefined, { resolve: false }) : () => false;
+    const assetsFilter = (file: string) => patternFilter(file) || assetsFunctions.some((fn) => fn(file));
 
     const resolved: any = {
         ...config,

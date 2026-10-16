@@ -27,6 +27,8 @@ export interface CompileCssOptions {
     minify: boolean;
     /** Map a `url()` found in `from` to what the output should reference. */
     resolveUrl: (from: string, url: string) => string;
+    /** LightningCSS browser targets (src/build/targets.ts): prefixes and lowering for them. */
+    targets?: Record<string, number> | null;
 }
 
 type PostcssRunner = (css: string, from: string) => Promise<{ css: string; dependencies: string[] }>;
@@ -102,6 +104,7 @@ export async function compileCss(opts: CompileCssOptions): Promise<CompiledCss> 
         analyzeDependencies: true,
         errorRecovery: true,
         drafts: { customMedia: true },
+        ...(opts.targets ? { targets: opts.targets } : {}),
     } as any);
 
     let code = result.code.toString();

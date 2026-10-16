@@ -1,6 +1,6 @@
 {
   "name": "lunx-dev",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "⚡ Lunx — a fast build tool for web apps on Rolldown and Oxc: dev server with instant HMR, production builds, module federation and library mode for React, Vue, Svelte, Solid, Angular, Qwik and the meta-frameworks built on them.",
   "homepage": "https://lunx.dev",
   "type": "module",
@@ -11,6 +11,9 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./client": {
+      "types": "./client.d.ts"
     },
     "./package.json": "./package.json",
     "./dist/*": "./dist/*"
@@ -24,6 +27,7 @@
   },
   "files": [
     "dist",
+    "client.d.ts",
     "README.md",
     "LICENSE",
     "packages/lunx-adapter-core/package.json",
@@ -83,6 +87,9 @@
     "test:meta": "tsx scripts/meta-matrix.mjs",
     "test:templates": "node scripts/template-matrix.mjs",
     "test:vite-plugins": "node scripts/vite-plugins-matrix.mjs",
+    "test:parity": "node scripts/output-parity.mjs",
+    "test:meta-parity": "node scripts/meta-parity.mjs",
+    "test:mf-interop": "node scripts/federation-interop.mjs",
     "test:federation-e2e": "node scripts/federation-e2e.mjs"
   },
   "keywords": [
@@ -207,6 +214,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.4.2",
     "vue": "^3.5.26",
+    "ws": "^8.22.0",
     "yargs": "^17.7.2",
     "zod": "^4.1.12"
   }

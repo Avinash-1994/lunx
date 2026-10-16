@@ -17,13 +17,25 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
-import { CompilePool, MIN_POOL_FILES } from './compile-pool.js';
+import { dynamicImportVarsPlugin } from '../engines/rolldown.js';
+import { resolveTargets } from './targets.js';
+import { entryPolyfills, POLYFILLS_ID, usagePolyfiller, type PolyfillMode } from './polyfills.js';
+import { compileReact, declaresReactCompiler, mayHaveComponents, reactCompiler, type ReactCompilerConfig } from '../core/react-compiler.js';
+import { addNonce, applyHtmlOptions } from './html-options.js';
+import { CompilePool, MIN_POOL_FILES, type Compiled } from './compile-pool.js';
 import { transformGlobImports } from './glob-import.js';
 import { TransformCache } from './build-cache.js';
+import { configureRemoteCache } from './remote-cache.js';
 import { federationEnginePlugin, federationInputs, writeRemoteEntry, type FederationOptions } from '../federation/engine.js';
+import { consumeRemoteTypes, dtsSides, generateRemoteTypes } from '../federation/types.js';
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
+import { metaEnvFrom, replaceHtmlEnv } from './html-env.js';
+import { wasmEsmModule, wasmInitModule } from './wasm-init.js';
+import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from './svg-component.js';
+import { pwaFiles, pwaHeadTags, pwaOptions, writeServiceWorker } from './pwa.js';
 import type { AppPlugins } from '../plugin-host/app-plugins.js';
+import { log } from '../utils/logger.js';
 
 // zlib (~8ms to load) is first needed after the bundle; the engine-busy hook loads it while Rolldown works.
 let zlibModule: Promise<typeof import('node:zlib')> | null = null;
@@ -90,6 +102,8 @@ async function precompress(file: string, data: Buffer, brotliQuality: number): P
 }
 
 const hash8 = (data: string | Uint8Array) => crypto.createHash('sha256').update(data).digest('hex').slice(0, 8);
+/** The stylesheet module a Vue / Svelte component's CSS is imported under (`App.vue?lunx-component.css`). */
+export const COMPONENT_CSS = /[?&]lunx-component\.css$/;
 const cleanId = (id: string) => id.split('?')[0]!;
 const toPosix = (p: string) => p.split(path.sep).join('/');
 
@@ -109,7 +123,21 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     let base = ensureSlashes((config as any).base ?? '/');
     const build = config.build ?? {};
     const minify = build.minify !== false;
+    const cssCodeSplit = (build as any).cssCodeSplit !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
+    const b = build as any;
+    // CSS minified with the JS unless `build.cssMinify` says otherwise.
+    const cssMinify = b.cssMinify ?? minify;
+    /** Output file names: Rollup-style templates (`assets/[name].[hash][extname]`). */
+    const assetFileNames: string = typeof b.assetFileNames === 'string' ? b.assetFileNames : 'assets/[name].[hash][extname]';
+    const assetFileName = (name: string, ext: string, data: string | Buffer) =>
+        assetFileNames.replace(/\[name\]/g, name).replace(/\[hash(?::\d+)?\]/g, hash8(data)).replace(/\[extname\]/g, ext).replace(/\[ext\]/g, ext.slice(1));
+
+    // Third-party license notices: in the code, dropped, or (default) beside each chunk.
+    const legalComments: 'inline' | 'none' | 'linked' = minify ? ((build as any).legalComments ?? 'linked') : 'inline';
+
+    // A shared cache for compile results (`cache.remote`).
+    configureRemoteCache((config as any).cache?.remote);
 
     // Vite plugins (from vite.config or lunx.config), with Vite's lifecycle.
     const app = await resolveVitePlugins(config, root, outDir);
@@ -146,13 +174,17 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         }
     }
 
+    // A web app manifest and service worker (an installed vite-plugin-pwa keeps them).
+    const pwa = app?.plugins.some((p: any) => typeof p.name === 'string' && p.name.startsWith('vite-plugin-pwa')) ? null : pwaOptions((config as any).pwa);
+    // `%VITE_APP_TITLE%`, `%MODE%`… in the pages.
+    const htmlEnv = { ...metaEnvFrom((config as any).__envDefines), MODE: config.mode, PROD: config.mode === 'production', DEV: config.mode !== 'production', BASE_URL: base };
     for (const entry of entries) {
         if (!fs.existsSync(entry)) throw new Error(`Entry not found: ${path.relative(root, entry) || entry}`);
         if (!entry.endsWith('.html')) {
             input[nameFor(entry)] = entry;
             continue;
         }
-        let source = await fsp.readFile(entry, 'utf8');
+        let source = replaceHtmlEnv(await fsp.readFile(entry, 'utf8'), htmlEnv);
         if (vp) source = await vp.transformIndexHtml(app!, 'pre', source, { path: '/' + toPosix(path.relative(root, entry)), filename: entry });
         const html: HtmlEntry = { file: entry, source, scripts: new Map(), styles: [] };
         for (const m of source.matchAll(/<script\b[^>]*\btype=["']module["'][^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi)) {
@@ -184,22 +216,39 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     }
     const appEntries = new Set(Object.values(input));
     if (federation) Object.assign(input, federationInputs(federation, root));
+    // The remotes' type hints, fetched while this app builds.
+    const remoteTypes = federation && dtsSides(federation).consume ? consumeRemoteTypes(root, federation).catch(() => []) : null;
     if (Object.keys(input).length === 0 && htmlEntries.every((h) => h.styles.length === 0)) {
         throw new Error('No module scripts found in the HTML entry. Add <script type="module" src="/src/main.ts"></script>.');
     }
 
     // ── Plugins ──────────────────────────────────────────────────────────────
-    const css = new CssCollector(root, base, minify, inlineLimit);
+    // Browsers to compile for: `build.target`, else the project's browserslist, else as written.
+    const targets = resolveTargets(root, (build as any).target ?? (build as any).targets, (build as any).cssTarget);
+    const css = new CssCollector(root, base, cssMinify, inlineLimit, targets.css);
     const assets = new Map<string, string>(); // source file → public URL
+    const assetFiles = new Map<string, string>(); // source file → output file name
     const emittedAssets: BuildArtifact[] = [];
+    /**
+     * Where the page loads a built file from: `build.renderBuiltUrl(fileName, { hostType })`
+     * (Vite's `experimental.renderBuiltUrl`), else `build.assetPrefix` (a CDN), else `base`.
+     */
+    const renderBuiltUrl = b.renderBuiltUrl ?? (config as any).experimental?.renderBuiltUrl;
+    const assetPrefix: string | undefined = typeof b.assetPrefix === 'string' ? b.assetPrefix.replace(/\/?$/, '/') : undefined;
+    const urlFor = (fileName: string, hostType: 'js' | 'css' | 'html'): string => {
+        const custom = typeof renderBuiltUrl === 'function' ? renderBuiltUrl(fileName, { hostType, type: 'asset', hostId: '', ssr: false }) : undefined;
+        if (typeof custom === 'string') return custom;
+        return (assetPrefix ?? base) + fileName;
+    };
 
     const emitAsset = (ctx: any, file: string, data: Buffer): string => {
         const known = assets.get(file);
         if (known) return known;
         const ext = path.extname(file);
-        const fileName = `assets/${path.basename(file, ext)}.${hash8(data)}${ext}`;
+        const fileName = assetFileName(path.basename(file, ext), ext, data);
         ctx.emitFile({ type: 'asset', fileName, source: data });
-        const url = base + fileName;
+        assetFiles.set(file, fileName);
+        const url = urlFor(fileName, 'js');
         assets.set(file, url);
         return url;
     };
@@ -210,7 +259,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         cssPost.transform = {
             async handler(this: any, code: string, id: string) {
                 const file = cleanId(id);
-                css.add(file, (await css.process(this, file, code, false)).code);
+                css.add(file, (await css.process(this, file, code, false)).code, id);
                 return { code: '', map: null };
             },
         };
@@ -232,7 +281,18 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const selfContained = (code: string): boolean => !/<(?:template|script|style)\b[^>]*\bsrc=/.test(code);
     // Many components to compile: start worker threads on them now, before Rolldown asks.
     // Angular stays on the main thread (its compiler reads other files itself).
-    const compilePool = framework === 'angular' ? null : await startCompilePool();
+    const compilePool = framework === 'angular' || !compilesInJs() ? null : await startCompilePool();
+    /** Whether any source can need the JS compilers (React, Lit… compile in Rolldown): else no file scan. */
+    function compilesInJs(): boolean {
+        if (compileJsx || framework === 'vue' || framework === 'svelte') return true;
+        try {
+            const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+            const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+            return 'vue' in deps || 'svelte' in deps;
+        } catch {
+            return true;
+        }
+    }
     async function startCompilePool(): Promise<CompilePool | null> {
         const files = CompilePool.candidates(fs.realpathSync(root), compileJsx ? /\.(vue|svelte|[jt]sx)$/ : /\.(vue|svelte)$/, config.outDir);
         if (!files || files.length < MIN_POOL_FILES) return null;
@@ -249,6 +309,46 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return pool;
     }
 
+    // Angular: compiled ahead of time with the project's @angular/compiler-cli, as `ng build` does.
+    const ngAot = framework === 'angular' && config.mode === 'production' ? await prepareAngular() : null;
+    async function prepareAngular() {
+        const { prepareAngularAot } = await import('./angular/aot.js');
+        const aot = await prepareAngularAot({
+            root,
+            entries: Object.values(input),
+            sourcemap: !!build.sourcemap,
+            cache: compileCache !== null,
+            compileStyle: async (file, source) => (await compileCss({ root, file, source, modules: false, minify, resolveUrl: (_from, url) => url })).code,
+        });
+        if (!aot) log.warn('Angular: @angular/compiler-cli is not installed, so the app is compiled at runtime (JIT) and ships @angular/compiler. Install it for an ahead-of-time build.');
+        return aot;
+    }
+
+    /**
+     * `?worker` / `?sharedworker` imports: the default export constructs the
+     * worker (`new MyWorker({ name })`); `&url` exports its URL, and `&inline`
+     * puts the bundled worker in a blob URL (a separate one-file build).
+     */
+    async function workerModule(ctx: any, file: string, shared: boolean, query: string): Promise<string> {
+        const ctor = shared ? 'SharedWorker' : 'Worker';
+        if (/[?&]inline\b/.test(query)) {
+            const [chunk] = (await getBundler().bundle(
+                { input: { worker: file }, cwd: root, platform: 'browser', plugins: [], define: { 'process.env.NODE_ENV': JSON.stringify(config.mode === 'production' ? 'production' : config.mode) }, extensions: ['.ts', '.tsx', '.js', '.mjs', '.jsx', '.json'] },
+                { format: 'iife', minify, inlineDynamicImports: true },
+            )).filter((o) => o.type === 'chunk') as any[];
+            ctx.addWatchFile?.(file);
+            const source = JSON.stringify(chunk.code);
+            return `const source = ${source};\nexport default function WorkerWrapper(options) {\n  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));\n  try { return new ${ctor}(url, { name: options?.name }); } finally { URL.revokeObjectURL(url); }\n}\n`;
+        }
+        const ref = ctx.emitFile({ type: 'chunk', id: file, name: path.basename(file).replace(/\.[^.]+$/, '') });
+        const url = `new URL(__LUNX_FILE_URL_${ref}__, import.meta.url)`;
+        if (/[?&]url\b/.test(query)) return `export default ${url}.href;\n`;
+        return `export default function WorkerWrapper(options) {\n  return new ${ctor}(${url}, { type: 'module', name: options?.name });\n}\n`;
+    }
+
+    /** Vue / Svelte components' CSS, by the module id each component imports it under. */
+    const componentCss = new Map<string, string>();
+
     /** A stylesheet as a module: compiled (plugins' transforms around lunx's compiler), collected for the CSS file. */
     const stylesheetModule = async (ctx: any, id: string, raw: string) => {
         const file = cleanId(id);
@@ -257,7 +357,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         const result = await css.process(ctx, file, raw, isCssModule(file));
         if (vp) result.code = await vp.transformCss(app!, 'post', ctx, result.code, id);
         if (/[?&]inline\b/.test(query)) return { code: `export default ${JSON.stringify(result.code)};`, moduleType: 'js' };
-        css.add(file, result.code);
+        css.add(file, result.code, id);
         const exports = result.exports ? `export default ${JSON.stringify(result.exports)};` : 'export {};';
         return { code: exports, moduleType: 'js', moduleSideEffects: true };
     };
@@ -282,9 +382,25 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 pages.push(vp ? await vp.transformCss(app!, 'post', ctx, result.code, file) : result.code);
             }
         }
-        return [pages.join('\n'), css.order.map((f) => css.get(f)!).join('\n')].filter(Boolean).join('\n');
+        const sep = minify ? '' : '\n';
+        return [...pages, ...css.order.map((f) => css.get(f)!)].filter(Boolean).join(sep);
     };
     let cssFile: string | null = null;
+    /** A lazy chunk's own stylesheet (CSS code splitting), for the manifest. */
+    const chunkCss = new Map<string, string>();
+
+    const alias = normalizeAlias([...toAliasList((config as any).resolve?.alias), ...toAliasList(app?.config.resolve.alias)], root);
+    // `` import(`./locales/${lang}.js`) ``: every file the pattern matches, as lazy chunks.
+    const dynamicImportVars = await dynamicImportVarsPlugin((id, importer) => {
+        for (const [find, replacement] of Object.entries(alias ?? {})) {
+            if (id !== find && !id.startsWith(find.endsWith('/') ? find : `${find}/`)) continue;
+            const target = path.isAbsolute(replacement) ? replacement + id.slice(find.length) : null;
+            if (!target) return undefined;
+            const rel = toPosix(path.relative(path.dirname(importer), target));
+            return rel.startsWith('.') ? rel : `./${rel}`;
+        }
+        return undefined;
+    });
 
     const plugins: any[] = [
         // Vite's order: `enforce: 'pre'`, the built-ins, the rest, `enforce: 'post'`.
@@ -294,33 +410,62 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             // Hook filters keep Rolldown from calling into JS for modules a
             // plugin would ignore anyway (one Rust<->JS round trip per module).
             transform: {
-              filter: { id: { include: compileJsx || framework === 'angular' ? /\.(vue|svelte|[mc]?[jt]sx?)(\?.*)?$/ : /\.(vue|svelte)(\?.*)?$/, exclude: /node_modules/ } },
+              filter: { id: { include: compileJsx || framework === 'angular' ? /\.(vue|svelte|[mc]?[jt]sx?)(\?.*)?$/ : /\.(vue|svelte)(\?.*)?$/, exclude: [/node_modules/, COMPONENT_CSS] } },
               async handler(code: string, id: string) {
                 const file = cleanId(id);
                 const isSfc = /\.(vue|svelte)$/.test(file);
                 const isFrameworkJsx = compileJsx && !file.includes('node_modules') && (/\.[jt]sx$/.test(file) || (/\.m?js$/.test(file) && looksLikeJsx(code)));
                 const isAngular = framework === 'angular' && /\.ts$/.test(file) && !file.includes('node_modules');
                 if (!isSfc && !isFrameworkJsx && !isAngular) return null;
+                if (isAngular && ngAot) {
+                    const aot = ngAot.output(file);
+                    if (aot) return { code: aot.code, map: aot.map, moduleType: 'js' };
+                }
                 const fw = frameworkOf(file);
                 const cacheable = compileCache && !isAngular && selfContained(code);
                 const parts = [file, fw, code];
+                // A component's own CSS (Vue, Svelte) goes to the app's stylesheet, through a module
+                // the component imports, so it lands in the cascade where the component does.
+                const withCss = (out: Compiled) => {
+                    if (!out.css) return { code: out.code, map: null, moduleType: 'js' };
+                    const cssId = `${file}?lunx-component.css`;
+                    componentCss.set(cssId, out.css);
+                    return { code: `${out.code}\nimport ${JSON.stringify(cssId)};`, map: null, moduleType: 'js' };
+                };
                 if (cacheable) {
                     const hit = await compileCache!.get(parts);
-                    if (hit) return { code: hit.code, map: null, moduleType: 'js' };
+                    if (hit) return withCss(hit as Compiled);
                 }
                 const pool = isAngular ? null : compilePool;
-                const compiled = pool && !pool.failed
+                const pooled = pool && !pool.failed
                     ? await pool.compile(file, code, fw).catch((err) => {
                           if (!pool.failed) throw err; // a compile error, as on the main thread
                           return null; // the worker died: compile here instead
                       })
                     : null;
-                const outCode = compiled ?? (await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false })).code;
-                if (cacheable) await compileCache!.set(parts, { code: outCode });
-                return { code: outCode, map: null, moduleType: 'js' };
+                const out: Compiled = pooled ?? (await (await getTransformer()).transform({ filePath: file, code, framework: fw as any, root, isDev: false }));
+                if (cacheable) await compileCache!.set(parts, { code: out.code, ...(out.css ? { css: out.css } : {}) });
+                return withCss(out);
               },
             },
         },
+        ...(ngAot
+            ? [{
+                  // Angular's linker and build optimizations on the packages.
+                  name: 'lunx:angular',
+                  transform: {
+                      filter: { id: /[\\/]node_modules[\\/].*\.[mc]?js(\?.*)?$/ },
+                      async handler(code: string, id: string) {
+                          const out = await ngAot.optimize(cleanId(id), code);
+                          return out === null ? null : { code: out, map: null };
+                      },
+                  },
+              }]
+            : []),
+        dynamicImportVars,
+        ...(legalComments === 'linked' ? [legalCommentsPlugin()] : []),
+        ...(await reactCompilerPlugin(root, framework, (config as any).react, app)),
+        ...polyfillPlugins(root, b.polyfill, targets.js, appEntries),
         {
             name: 'lunx:glob-import',
             transform: {
@@ -349,6 +494,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             load: {
               filter: { id: /\.(css|pcss|postcss|scss|sass|less|styl|stylus)(\?.*)?$/ },
               async handler(this: any, id: string) {
+                const component = componentCss.get(id);
+                if (component !== undefined) return stylesheetModule(this, id, component);
                 const file = cleanId(id);
                 // Not a file: a virtual stylesheet some plugin loads.
                 if (!CSS_EXT.test(file) || !fs.existsSync(file)) return null;
@@ -361,10 +508,24 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         {
             name: 'lunx:assets',
             load: {
-              filter: { id: /(\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)|[?&](url|raw)\b.*)$/i },
+              filter: { id: /(\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)|[?&](url|raw|init|react|component|worker|sharedworker)\b.*)$/i },
               async handler(this: any, id: string) {
                 const file = cleanId(id);
                 const query = id.slice(file.length);
+                // `import MyWorker from './worker.js?worker'` (Vite's): a constructor for the worker, bundled as its own chunk.
+                const worker = /[?&](shared)?worker\b/.exec(query);
+                if (worker) return { code: await workerModule(this, file, !!worker[1], query), moduleType: 'js' };
+                // `./logo.svg?react`: a component (vite-plugin-svgr, when installed, keeps it).
+                const svgRuntime = /\.svg$/i.test(file) && SVG_COMPONENT_QUERY.test(query) && !app?.plugins.some((p: any) => p.name === 'vite-plugin-svgr') ? svgRuntimeFor(framework, query) : null;
+                if (svgRuntime) return { code: svgComponent(await fsp.readFile(file, 'utf8'), svgRuntime), moduleType: 'js' };
+                if (/\.wasm$/i.test(file) && /[?&]init\b/.test(query)) {
+                    return { code: wasmInitModule(JSON.stringify(emitAsset(this, file, await fsp.readFile(file)))), moduleType: 'js' };
+                }
+                // `import { add } from './add.wasm'` (WebAssembly ESM integration, Vite 8.1); vite-plugin-wasm, when installed, keeps it.
+                if (/\.wasm$/i.test(file) && !query && !app?.plugins.some((p: any) => p.name === 'vite-plugin-wasm')) {
+                    const bytes = await fsp.readFile(file);
+                    return { code: wasmEsmModule(bytes, JSON.stringify(emitAsset(this, file, bytes))), moduleType: 'js' };
+                }
                 const wantsUrl = /[?&]url\b/.test(query);
                 const wantsRaw = /[?&]raw\b/.test(query);
                 if (!wantsUrl && !wantsRaw && !ASSET_EXT.test(file)) return null;
@@ -459,16 +620,30 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 // Extracted CSS modules are empty JS, so they vanish from
                 // chunk.moduleIds; walk the import graph instead. Depth-first
                 // in import order is exactly the cascade order of the source.
-                const order: string[] = [];
+                // Only through the modules that lead to a stylesheet: in a big
+                // app most import none, and each getModuleInfo is a call into Rust.
+                const leadsToCss = new Set<string>();
+                const climb = [...css.ids];
+                while (climb.length) {
+                    const info = this.getModuleInfo(climb.pop()!);
+                    for (const importer of [...(info?.importers ?? []), ...(info?.dynamicImporters ?? [])]) {
+                        if (!leadsToCss.has(importer)) {
+                            leadsToCss.add(importer);
+                            climb.push(importer);
+                        }
+                    }
+                }
+                const order = new Set<string>();
                 const visited = new Set<string>();
                 const visit = (id: string) => {
                     if (visited.has(id)) return;
                     visited.add(id);
                     const file = cleanId(id);
                     if (css.has(file)) {
-                        if (!order.includes(file)) order.push(file);
+                        order.add(file);
                         return;
                     }
+                    if (!leadsToCss.has(id)) return;
                     const info = this.getModuleInfo(id);
                     for (const dep of info?.importedIds ?? []) visit(dep);
                     for (const dep of info?.dynamicallyImportedIds ?? []) visit(dep);
@@ -476,16 +651,123 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 const chunks = Object.values(bundle).filter((c) => c.type === 'chunk');
                 chunks.sort((x, y) => Number(y.isEntry) - Number(x.isEntry));
                 for (const chunk of chunks) if (chunk.facadeModuleId) visit(chunk.facadeModuleId);
-                css.order = order;
+                const rank = new Map([...order].map((file, i) => [file, i]));
+
+                // CSS code splitting, as Vite: a chunk loaded only through import() brings its own
+                // stylesheet, and the page's stylesheet holds only what the pages load up front.
+                const split = cssCodeSplit && !federation;
+                const initial = new Set<string>();
+                const ownSheets = (chunk: any): string[] => {
+                    const found: string[] = [];
+                    for (const id of chunk.moduleIds ?? []) {
+                        if (!leadsToCss.has(id)) continue;
+                        for (const dep of this.getModuleInfo(id)?.importedIds ?? []) if (css.has(cleanId(dep))) found.push(cleanId(dep));
+                    }
+                    return found;
+                };
+                const byName = new Map(chunks.map((c) => [c.fileName, c]));
+                const statically = (from: any[]): Set<any> => {
+                    const seen = new Set<any>(from);
+                    const queue = [...from];
+                    while (queue.length) for (const f of queue.pop().imports ?? []) {
+                        const dep = byName.get(f);
+                        if (dep && !seen.has(dep)) {
+                            seen.add(dep);
+                            queue.push(dep);
+                        }
+                    }
+                    return seen;
+                };
+                const sorted = (files: Iterable<string>) => [...new Set(files)].sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+                if (split) {
+                    const upFront = statically(chunks.filter((c) => c.isEntry));
+                    for (const chunk of upFront) for (const file of ownSheets(chunk)) initial.add(file);
+                    // Sheets no chunk claims (a page's script that imports nothing else) stay up front.
+                    const claimed = new Set<string>(initial);
+                    const lazy = chunks.filter((c) => !upFront.has(c) && c.isDynamicEntry);
+                    for (const chunk of lazy) {
+                        const sheets = sorted([...statically([chunk])].flatMap(ownSheets)).filter((f) => !initial.has(f));
+                        for (const f of sheets) claimed.add(f);
+                        if (!sheets.length) continue;
+                        const sep = minify ? '' : '\n';
+                        const text = sheets.map((f) => css.get(f)!).join(sep);
+                        const fileName = assetFileName(chunk.name, '.css', text);
+                        this.emitFile({ type: 'asset', fileName, source: text });
+                        chunkCss.set(chunk.fileName, fileName);
+                        // The chunk's module finishes evaluating once its stylesheet has loaded, so
+                        // import() resolves with the CSS in place (no flash of unstyled content).
+                        // Appended, so the chunk's source map is unaffected.
+                        const href = path.posix.relative(path.posix.dirname(chunk.fileName), fileName);
+                        const loader = `\nawait new Promise((r)=>{const h=new URL(${JSON.stringify(href.startsWith('.') ? href : './' + href)},import.meta.url).href;if(document.querySelector('link[rel="stylesheet"][href="'+h+'"]'))return r();const l=document.createElement("link");l.rel="stylesheet";l.href=h;l.onload=l.onerror=()=>r();document.head.appendChild(l)});\n`;
+                        const mapComment = chunk.code.lastIndexOf('\n//# sourceMappingURL=');
+                        chunk.code = mapComment === -1 ? chunk.code + loader : chunk.code.slice(0, mapComment) + loader + chunk.code.slice(mapComment);
+                    }
+                    for (const file of order) if (!claimed.has(file)) initial.add(file);
+                }
+                css.order = split ? sorted(initial) : [...order];
                 // Emitted here, so the plugins' generateBundle sees (and may rewrite) it, as Vite's CSS.
                 const all = await collectCss(this);
                 if (all.trim()) {
-                    cssFile = `assets/style.${hash8(all)}.css`;
+                    cssFile = assetFileName('style', '.css', all);
                     this.emitFile({ type: 'asset', fileName: cssFile, source: all });
                 }
             },
         },
     ];
+
+    if ((build as any).manifest || b.ssrManifest) {
+        // Vite's `build.manifest` (.vite/manifest.json): source file → output files, for
+        // server frameworks that render the page themselves (Laravel, Rails, Django…).
+        plugins.push({
+            name: 'lunx:manifest',
+            generateBundle(this: any, _opts: unknown, bundle: Record<string, any>) {
+                const chunks = Object.values(bundle).filter((o: any) => o.type === 'chunk') as any[];
+                const keyOf = new Map<string, string>();
+                for (const c of chunks) keyOf.set(c.fileName, c.facadeModuleId && !c.facadeModuleId.startsWith('\0') ? toPosix(path.relative(root, cleanId(c.facadeModuleId))) : `_${path.posix.basename(c.fileName)}`);
+                const assetFile = (file: string) => assetFiles.get(file) ?? null;
+                const manifest: Record<string, any> = {};
+                for (const c of chunks) {
+                    const entry: Record<string, any> = { file: c.fileName, name: c.name };
+                    if (c.facadeModuleId && !c.facadeModuleId.startsWith('\0')) entry.src = keyOf.get(c.fileName);
+                    if (c.isEntry) entry.isEntry = true;
+                    if (c.isDynamicEntry) entry.isDynamicEntry = true;
+                    const imports = (c.imports ?? []).map((f: string) => keyOf.get(f)).filter(Boolean);
+                    const dynamicImports = (c.dynamicImports ?? []).map((f: string) => keyOf.get(f)).filter(Boolean);
+                    if (imports.length) entry.imports = imports;
+                    if (dynamicImports.length) entry.dynamicImports = dynamicImports;
+                    const sheets = [...(c.isEntry && cssFile ? [cssFile] : []), ...(chunkCss.has(c.fileName) ? [chunkCss.get(c.fileName)!] : [])];
+                    if (sheets.length) entry.css = sheets;
+                    const used = [...new Set((c.moduleIds ?? []).map((id: string) => assetFile(cleanId(id))).filter(Boolean))];
+                    if (used.length) entry.assets = used;
+                    manifest[keyOf.get(c.fileName)!] = entry;
+                }
+                for (const [file] of assets) {
+                    const out = assetFile(file);
+                    const key = toPosix(path.relative(root, file));
+                    if (out && !manifest[key]) manifest[key] = { file: out, src: key };
+                }
+                if ((build as any).manifest) {
+                    const where = typeof (build as any).manifest === 'string' ? (build as any).manifest : '.vite/manifest.json';
+                    this.emitFile({ type: 'asset', fileName: where, source: JSON.stringify(manifest, null, 2) + '\n' });
+                }
+                // Vite's `build.ssrManifest`: each source module → the files to preload when a server render used it.
+                if (b.ssrManifest) {
+                    const ssr: Record<string, string[]> = {};
+                    for (const c of chunks) {
+                        const entry = manifest[keyOf.get(c.fileName)!];
+                        const files = [c.fileName, ...(entry.css ?? []), ...(entry.assets ?? [])].map((f: string) => urlFor(f, 'html'));
+                        for (const id of c.moduleIds ?? []) {
+                            if (id.startsWith('\0')) continue;
+                            const key = toPosix(path.relative(root, cleanId(id)));
+                            ssr[key] = [...new Set([...(ssr[key] ?? []), ...files])];
+                        }
+                    }
+                    const where = typeof b.ssrManifest === 'string' ? b.ssrManifest : '.vite/ssr-manifest.json';
+                    this.emitFile({ type: 'asset', fileName: where, source: JSON.stringify(ssr, null, 2) + '\n' });
+                }
+            },
+        });
+    }
 
     if (vp) {
         plugins.push(...vp.forRolldown(app!, [...app!.normal, ...app!.post], pluginCss));
@@ -542,6 +824,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     delete envDefines['import.meta.env'];
     const define: Record<string, string> = {
         ...envDefines,
+        ...(ngAot?.defines ?? {}),
         'process.env.NODE_ENV': JSON.stringify(config.mode === 'production' ? 'production' : config.mode),
         'import.meta.env': JSON.stringify(metaEnv),
         ...Object.fromEntries(Object.entries(metaEnv).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)])),
@@ -550,11 +833,16 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         ...Object.fromEntries(Object.entries(app?.config.define ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])),
     };
 
-    const alias = normalizeAlias([...toAliasList((config as any).resolve?.alias), ...toAliasList(app?.config.resolve.alias)], root);
     const tsconfig = ['tsconfig.json', 'jsconfig.json'].map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
     const jsxImportSource = framework === 'preact' ? 'preact' : undefined;
 
-    await emptyDir(outDir, root);
+    if (b.emptyOutDir !== false) await emptyDir(outDir, root);
+    else await fsp.mkdir(outDir, { recursive: true });
+
+    const externals: Array<string | RegExp> = Array.isArray(b.external) ? b.external : b.external ? [b.external] : [];
+    const externalTest = externals.length
+        ? (id: string) => externals.some((e) => (typeof e === 'string' ? id === e || id.startsWith(`${e}/`) : e.test(id)))
+        : null;
 
     const manualChunks = build.manualChunks;
     const output: OutputItem[] = Object.keys(input).length === 0 ? [] : await getBundler().bundle({
@@ -568,16 +856,23 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         // Never `development`: dev-only builds of React/Vue are 3–10× larger.
         conditions: ['browser', 'import', 'module', config.mode === 'production' ? 'production' : 'development', 'default'],
         define,
+        ...(targets.js ? { target: targets.js } : {}),
+        // `build.external`: imports left to the page (an import map, a CDN script…).
+        ...(externalTest ? { external: externalTest } : {}),
         jsx: jsxImportSource ? { runtime: 'automatic', importSource: jsxImportSource } : undefined,
         // Normal in app code; not worth a warning on every build.
         onWarning: (w) => !['EVAL', 'CIRCULAR_DEPENDENCY', 'MIXED_EXPORT'].includes(w.code ?? ''),
     }, {
         dir: outDir,
         format: 'es',
-        entryFileNames: 'assets/[name].[hash].js',
-        chunkFileNames: 'assets/[name].[hash].js',
-        assetFileNames: 'assets/[name].[hash][extname]',
-        minify,
+        entryFileNames: typeof b.entryFileNames === 'string' ? b.entryFileNames : 'assets/[name].[hash].js',
+        chunkFileNames: typeof b.chunkFileNames === 'string' ? b.chunkFileNames : 'assets/[name].[hash].js',
+        assetFileNames,
+        // `build.drop: ['console', 'debugger']` (esbuild's): those statements removed when minifying.
+        minify: minify && Array.isArray(b.drop) && b.drop.length
+            ? ({ compress: { dropConsole: b.drop.includes('console'), dropDebugger: b.drop.includes('debugger') }, mangle: true } as any)
+            : minify,
+        legalComments: legalComments === 'inline',
         sourcemap: sourcemapOption(build.sourcemap),
         chunkGroups: manualChunks
             ? Object.entries(manualChunks).map(([name, pkgs]) => ({
@@ -585,7 +880,15 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                   test: new RegExp(`[\\\\/]node_modules[\\\\/](${pkgs.map(escapeRe).join('|')})[\\\\/]`),
               }))
             : undefined,
-    }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush()]));
+    }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush(), ngAot?.flush()]));
+
+    // Vite's `build.chunkSizeWarningLimit` (kB, default 500): a hint to split a chunk that big.
+    const sizeLimit = typeof b.chunkSizeWarningLimit === 'number' ? b.chunkSizeWarningLimit : 500;
+    const large = output.filter((o) => o.type === 'chunk' && o.code.length / 1000 > sizeLimit) as any[];
+    if (large.length) {
+        log.warn(`Some chunks are larger than ${sizeLimit} kB after minification: ${large.map((c) => `${c.fileName} (${Math.round(c.code.length / 1000)} kB)`).join(', ')}. ` +
+            'Split them with dynamic import() or build.manualChunks, or raise build.chunkSizeWarningLimit.');
+    }
 
     // ── CSS ──────────────────────────────────────────────────────────────────
     // Emitted in the bundle (lunx:css-emit); a page with only stylesheets has no bundle.
@@ -604,26 +907,34 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     // ── HTML ─────────────────────────────────────────────────────────────────
     const chunkByName = new Map<string, any>();
     for (const item of output) if (item.type === 'chunk' && item.isEntry) chunkByName.set(item.name, item);
+    // Externals (`build.external`) are in chunk.imports too, but are not files of this build.
+    const chunkFiles = new Set(output.filter((o) => o.type === 'chunk').map((o) => o.fileName));
     for (const html of htmlEntries) {
         let page = html.source;
         const preloads = new Set<string>();
+        const prefetches = new Set<string>();
         for (const [src, name] of html.scripts) {
             const chunk = chunkByName.get(name);
             if (!chunk) continue;
-            page = page.replace(new RegExp(`(<script\\b[^>]*\\bsrc=["'])${escapeRe(src)}(["'][^>]*>)`), `$1${base}${chunk.fileName}$2`);
-            for (const dep of chunk.imports as string[]) preloads.add(dep);
+            page = page.replace(new RegExp(`(<script\\b[^>]*\\bsrc=["'])${escapeRe(src)}(["'][^>]*>)`), `$1${urlFor(chunk.fileName, 'html')}$2`);
+            for (const dep of chunk.imports as string[]) if (chunkFiles.has(dep)) preloads.add(dep);
+            // `build.prefetch`: the lazy chunks this page can load, fetched while the browser is idle.
+            if (b.prefetch) for (const lazy of (chunk.dynamicImports ?? []) as string[]) prefetches.add(lazy);
         }
         page = page.replace(/<link\b[^>]*\brel=["']stylesheet["'][^>]*\bhref=["']([^"']+)["'][^>]*>\s*/gi, (tag, href) =>
             html.styles.some((s) => s === (href.startsWith('/') ? path.join(root, href) : path.resolve(path.dirname(html.file), href))) ? '' : tag,
         );
         const head = [
-            ...[...preloads].map((f) => `<link rel="modulepreload" crossorigin href="${base}${f}">`),
-            ...(cssFile ? [`<link rel="stylesheet" crossorigin href="${base}${cssFile}">`] : []),
+            ...[...preloads].map((f) => `<link rel="modulepreload" crossorigin href="${urlFor(f, 'html')}">`),
+            ...(cssFile ? [`<link rel="stylesheet" crossorigin href="${urlFor(cssFile, 'html')}">`] : []),
+            ...[...prefetches].filter((f) => !preloads.has(f)).map((f) => `<link rel="prefetch" crossorigin href="${urlFor(f, 'html')}">`),
+            ...(pwa ? pwaHeadTags(pwa, base) : []),
         ];
         if (head.length) {
             const tags = head.map((t) => `    ${t}\n`).join('');
             page = /<\/head>/i.test(page) ? page.replace(/<\/head>/i, `${tags}  </head>`) : tags + page;
         }
+        page = applyHtmlOptions(page, (config as any).html, base);
         if (vp) {
             const entryChunk = [...html.scripts.values()].map((name) => chunkByName.get(name)).find(Boolean);
             page = await vp.transformIndexHtml(app!, 'post', page, {
@@ -633,10 +944,17 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 chunk: entryChunk,
             });
         }
+        // Tags the plugins added get the nonce too.
+        if ((config as any).html?.cspNonce) page = addNonce(page, (config as any).html.cspNonce);
         const target = path.join(outDir, path.relative(root, html.file));
         await fsp.mkdir(path.dirname(target), { recursive: true });
         await fsp.writeFile(target, page);
         emittedAssets.push({ fileName: toPosix(path.relative(outDir, target)), type: 'asset', source: page });
+    }
+
+    for (const file of pwa ? pwaFiles(pwa, base) : []) {
+        await fsp.writeFile(path.join(outDir, file.fileName), file.source);
+        emittedAssets.push({ ...file, type: 'asset' });
     }
 
     // ── Module federation container ──────────────────────────────────────────
@@ -645,11 +963,26 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         for (const item of output) if (item.type === 'chunk' && item.isEntry) entryFiles.set(item.name, item.fileName);
         const remoteEntry = await writeRemoteEntry(federation, root, outDir, entryFiles, cssFile ? [cssFile] : []);
         if (remoteEntry) emittedAssets.push({ fileName: remoteEntry.fileName, type: 'asset', source: remoteEntry.code });
+        // Type hints for hosts (lunx, webpack, Rspack): @mf-types.zip next to remoteEntry.js.
+        if (remoteEntry && dtsSides(federation).generate) {
+            const modules = output.flatMap((item) => (item.type === 'chunk' ? item.moduleIds : []));
+            const types = await generateRemoteTypes(root, outDir, federation, modules).catch((err) => {
+                log.warn(`[lunx mf] no type hints for the exposed modules: ${err?.message ?? err}`);
+                return null;
+            });
+            if (types) {
+                const manifestFile = path.join(outDir, 'mf-manifest.json');
+                const manifest = JSON.parse(await fsp.readFile(manifestFile, 'utf8'));
+                manifest.metaData = { ...manifest.metaData, types: { path: '', name: '', zip: types[0], api: types[1] } };
+                await fsp.writeFile(manifestFile, JSON.stringify(manifest, null, 2));
+            }
+        }
+        if (remoteTypes) await remoteTypes;
     }
 
     // ── public/ ──────────────────────────────────────────────────────────────
     const publicDir = path.resolve(root, (config as any).publicDir ?? 'public');
-    if (fs.existsSync(publicDir) && fs.statSync(publicDir).isDirectory()) {
+    if (b.copyPublicDir !== false && fs.existsSync(publicDir) && fs.statSync(publicDir).isDirectory()) {
         await fsp.cp(publicDir, outDir, { recursive: true, force: false, errorOnExist: false });
     }
 
@@ -689,8 +1022,13 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const modules = new Set<string>();
     for (const o of output) if (o.type === 'chunk') for (const id of o.moduleIds as string[]) if (path.isAbsolute(cleanId(id))) modules.add(cleanId(id));
 
-    // Plugins' writeBundle / closeBundle (a service worker over the finished app…).
-    const afterWrite = vp ? () => vp.runAfterWrite(app!, outDir, artifacts) : undefined;
+    // Plugins' writeBundle / closeBundle (a service worker over the finished app…), then lunx's own service worker.
+    const afterWrite = vp || pwa
+        ? async () => {
+              if (vp) await vp.runAfterWrite(app!, outDir, artifacts);
+              if (pwa) writeServiceWorker(outDir, pwa);
+          }
+        : undefined;
     if (afterWrite && !options.deferAfterWrite) await afterWrite();
 
     return {
@@ -726,13 +1064,18 @@ async function resolveVitePlugins(config: BuildConfig, root: string, outDir: str
 class CssCollector {
     private sheets = new Map<string, string>();
     order: string[] = [];
+    /** The module ids the stylesheets were collected under. */
+    ids = new Set<string>();
     emitAsset!: (ctx: any, file: string, data: Buffer) => string;
 
-    constructor(private root: string, private base: string, private minify: boolean, private inlineLimit: number) {}
+    constructor(private root: string, private base: string, private minify: boolean, private inlineLimit: number, private targets: Record<string, number> | null = null) {}
 
     has(file: string) { return this.sheets.has(file); }
     get(file: string) { return this.sheets.get(file); }
-    add(file: string, code: string) { this.sheets.set(file, code); }
+    add(file: string, code: string, id?: string) {
+        this.sheets.set(file, code);
+        if (id) this.ids.add(id);
+    }
 
     process(ctx: any, file: string, source: string, modules: boolean): Promise<CompiledCss> {
         return compileCss({
@@ -741,6 +1084,7 @@ class CssCollector {
             source,
             modules,
             minify: this.minify,
+            targets: this.targets,
             resolveUrl: (from, url) => {
                 // A relative base: url()s resolve against the CSS file, which is in assets/.
                 const relative = this.base === './';
@@ -859,4 +1203,99 @@ async function emptyDir(outDir: string, root: string): Promise<void> {
     for (const entry of await fsp.readdir(outDir)) {
         await fsp.rm(path.join(outDir, entry), { recursive: true, force: true });
     }
+}
+
+/**
+ * `build.legalComments: 'linked'` (the default): the `@license` / `/*!` notices of
+ * the packages in each chunk go to `<chunk>.LICENSE.txt` beside it, linked from the
+ * end of the chunk, as Rsbuild and webpack do, instead of in the shipped code.
+ */
+function legalCommentsPlugin(): any {
+    const notices = new Map<string, string[]>();
+    const LEGAL = /\/\*\*?![\s\S]*?\*\/|\/\*[\s\S]*?(?:@license|@preserve|@copyright)[\s\S]*?\*\//g;
+    return {
+        name: 'lunx:legal-comments',
+        transform: {
+            filter: { id: /node_modules/, code: { include: [/@license|@preserve|@copyright|\/\*!/] } },
+            handler(code: string, id: string) {
+                const found = code.match(LEGAL);
+                if (found) notices.set(id, [...new Set(found)]);
+                return null;
+            },
+        },
+        generateBundle(this: any, _opts: unknown, bundle: Record<string, any>) {
+            for (const chunk of Object.values(bundle) as any[]) {
+                if (chunk.type !== 'chunk') continue;
+                const text = [...new Set((chunk.moduleIds ?? []).flatMap((id: string) => notices.get(id) ?? []))];
+                if (!text.length) continue;
+                const fileName = `${chunk.fileName}.LICENSE.txt`;
+                this.emitFile({ type: 'asset', fileName, source: text.join('\n\n') + '\n' });
+                const banner = `\n/*! Licenses: ${path.posix.basename(fileName)} */`;
+                const map = chunk.code.lastIndexOf('\n//# sourceMappingURL=');
+                chunk.code = map === -1 ? chunk.code + banner : chunk.code.slice(0, map) + banner + chunk.code.slice(map);
+            }
+        },
+    };
+}
+
+/**
+ * The React Compiler on the app's components and hooks (src/core/react-compiler.ts),
+ * before Oxc compiles JSX and TypeScript. Left to @vitejs/plugin-react when a
+ * vite.config uses it (its Babel options carry the compiler there).
+ */
+async function reactCompilerPlugin(root: string, framework: string, react: ReactCompilerConfig | undefined, app: AppPlugins | null): Promise<any[]> {
+    if (framework !== 'react' && !react?.compiler) return [];
+    if (react?.compiler === false || (!react?.compiler && !declaresReactCompiler(root))) return [];
+    if (app?.plugins.some((p: any) => typeof p.name === 'string' && p.name.startsWith('vite:react'))) return [];
+    const compiler = reactCompiler(root, react);
+    if (!compiler) return [];
+    return [{
+        name: 'lunx:react-compiler',
+        transform: {
+            filter: { id: { include: /\.[mc]?[jt]sx?(\?.*)?$/, exclude: /node_modules/ } },
+            async handler(code: string, id: string) {
+                const file = cleanId(id);
+                if (!mayHaveComponents(file, code)) return null;
+                return compileReact(compiler, file, code);
+            },
+        },
+    }];
+}
+
+/** `build.polyfill: 'entry' | 'usage'` (src/build/polyfills.ts): core-js for the build's targets. */
+function polyfillPlugins(root: string, mode: PolyfillMode, targets: string[] | null, entries: Set<string>): any[] {
+    if (!mode || mode === 'off') return [];
+    if (mode === 'entry') {
+        const code = entryPolyfills(root, targets);
+        return [{
+            name: 'lunx:polyfill-entry',
+            resolveId: { filter: { id: /^lunx:polyfills$/ }, handler: (id: string) => (id === POLYFILLS_ID ? `\0${POLYFILLS_ID}` : null) },
+            load: { filter: { id: /^\0lunx:polyfills$/ }, handler: (id: string) => (id === `\0${POLYFILLS_ID}` ? { code, moduleType: 'js', moduleSideEffects: true } : null) },
+            transform: {
+                filter: { id: { exclude: /node_modules/ } },
+                // On the first line, so the entry's own line numbers stay put.
+                handler: (src: string, id: string) => (entries.has(cleanId(id)) ? { code: `import ${JSON.stringify(POLYFILLS_ID)}; ${src}`, map: null } : null),
+            },
+        }];
+    }
+    const polyfiller = usagePolyfiller(root, targets);
+    // Each polyfill through a one-line module of its own: Rolldown split an entry that imports
+    // core-js's CommonJS modules directly into two chunks that import each other.
+    const PREFIX = 'lunx:polyfill/';
+    return [{
+        name: 'lunx:polyfill-usage',
+        resolveId: { filter: { id: /^lunx:polyfill\// }, handler: (id: string) => (id.startsWith(PREFIX) ? `\0${id}` : null) },
+        load: {
+            filter: { id: /^\0lunx:polyfill\// },
+            handler: (id: string) => ({ code: `import ${JSON.stringify(`core-js/modules/${id.slice(PREFIX.length + 1)}.js`)};\n`, moduleType: 'js', moduleSideEffects: true }),
+        },
+        transform: {
+            filter: { id: { include: /\.[mc]?[jt]sx?(\?.*)?$/, exclude: /node_modules/ } },
+            async handler(src: string, id: string) {
+                const out = await polyfiller.transform(cleanId(id), src);
+                if (!out) return null;
+                return { code: out.code.replace(/^import "core-js\/modules\/([\w.-]+)\.js";$/gm, (_m, name) => `import ${JSON.stringify(PREFIX + name)};`), map: out.map };
+            },
+        },
+    }];
 }

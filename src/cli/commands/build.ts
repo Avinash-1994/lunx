@@ -1,3 +1,4 @@
+import { forTerminal } from '../../utils/plain-text.js';
 import path from 'path';
 import { performance } from 'perf_hooks';
 import { createRequire } from 'module';
@@ -278,7 +279,7 @@ export default {
             const ms = Math.round(performance.now() - t1);
             console.log(`  ✓ Rebuilt in ${ms}ms`);
           } catch (e: any) {
-            console.error(`  ✗ Build failed: ${e.message}`);
+            console.error(forTerminal(`  ✗ Build failed: ${e.message}`));
           }
         };
 

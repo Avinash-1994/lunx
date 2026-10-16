@@ -24,8 +24,14 @@ export const MIN_POOL_FILES = 100;
 const MAX_PREFETCH_FILES = 20_000;
 const SKIP_DIRS = new Set(['node_modules', '.git', '.lunx', '.lunx_cache', '.cache', '.next', '.nuxt', '.svelte-kit', '.output', 'coverage', 'dist']);
 
+/** A component's compiled module, and its CSS for the app's stylesheet (Vue, Svelte). */
+export interface Compiled {
+    code: string;
+    css?: string;
+}
+
 interface Pending {
-    resolve: (code: string) => void;
+    resolve: (compiled: Compiled) => void;
     reject: (err: Error) => void;
 }
 
@@ -37,14 +43,14 @@ interface Slot {
 export class CompilePool {
     private slots: Slot[] = [];
     private pending = new Map<number, Pending>();
-    private prefetched = new Map<string, { code: string; framework: string; result: Promise<string> }>();
+    private prefetched = new Map<string, { code: string; framework: string; result: Promise<Compiled> }>();
     private nextId = 0;
     private broken: Error | null = null;
 
     private constructor(size: number, workerFile: URL, root: string, warm: string[]) {
         for (let i = 0; i < size; i++) {
             const worker = new Worker(workerFile, { workerData: { root, warm } });
-            worker.on('message', (msg: { id: number; code?: string; error?: { message: string; stack?: string } }) => {
+            worker.on('message', (msg: { id: number; code?: string; css?: string; error?: { message: string; stack?: string } }) => {
                 const p = this.pending.get(msg.id);
                 if (!p) return;
                 this.pending.delete(msg.id);
@@ -53,7 +59,7 @@ export class CompilePool {
                     if (msg.error.stack) err.stack = msg.error.stack;
                     p.reject(err);
                 } else {
-                    p.resolve(msg.code!);
+                    p.resolve({ code: msg.code!, ...(msg.css ? { css: msg.css } : {}) });
                 }
             });
             worker.on('error', (err) => this.fail(err));
@@ -93,7 +99,7 @@ export class CompilePool {
         this.prefetched.set(file, { code, framework, result });
     }
 
-    compile(file: string, code: string, framework: string): Promise<string> {
+    compile(file: string, code: string, framework: string): Promise<Compiled> {
         const hit = this.prefetched.get(file);
         if (hit) {
             this.prefetched.delete(file);
@@ -107,12 +113,12 @@ export class CompilePool {
         this.slots = [];
     }
 
-    private post(file: string, code: string, framework: string): Promise<string> {
+    private post(file: string, code: string, framework: string): Promise<Compiled> {
         if (this.broken) return Promise.reject(this.broken);
         const slot = this.slots.reduce((a, b) => (b.inFlight < a.inFlight ? b : a));
         const id = this.nextId++;
         slot.inFlight++;
-        return new Promise<string>((resolve, reject) => {
+        return new Promise<Compiled>((resolve, reject) => {
             this.pending.set(id, {
                 resolve: (c) => { slot.inFlight--; resolve(c); },
                 reject: (e) => { slot.inFlight--; reject(e); },

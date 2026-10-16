@@ -11,6 +11,15 @@ export interface RuntimeShared {
     singleton: boolean;
     strictVersion: boolean;
     eager: boolean;
+    /** false: no copy of its own; the package must come from another app's share scope. */
+    import?: boolean;
+}
+
+export interface RuntimeExtras {
+    /** 'loaded-first' (default): use the versions already in the scope. 'version-first': every remote joins first, the highest version wins. */
+    shareStrategy?: 'loaded-first' | 'version-first';
+    /** Module specifiers of runtime plugins (`federation.runtimePlugins`), each default-exporting a plugin or a function returning one. */
+    plugins?: string[];
 }
 
 /**
@@ -22,12 +31,17 @@ export function runtimeSource(
     shared: Record<string, RuntimeShared>,
     remotes: Record<string, string>,
     getter: (pkg: string) => string = (pkg) => `() => import(${JSON.stringify(`lunx-mf-real:${pkg}`)}).then((m) => m.default)`,
+    extras: RuntimeExtras = {},
 ): string {
     const getters = Object.keys(shared)
+        .filter((pkg) => shared[pkg]!.import !== false)
         .map((pkg) => `${JSON.stringify(pkg)}: ${getter(pkg)}`)
         .join(',\n    ');
-    return `
+    const plugins = extras.plugins ?? [];
+    return `${plugins.map((spec, i) => `import __mf_plugin_${i} from ${JSON.stringify(spec)};`).join('\n')}
 const NAME = ${JSON.stringify(name)};
+const STRATEGY = ${JSON.stringify(extras.shareStrategy ?? 'loaded-first')};
+const PLUGINS = [${plugins.map((_, i) => `__mf_plugin_${i}`).join(', ')}].map((p) => (typeof p === 'function' ? p() : p)).filter(Boolean);
 const SHARED = ${JSON.stringify(shared)};
 const GET = {
     ${getters}
@@ -96,7 +110,7 @@ function register() {
     for (const pkg of Object.keys(SHARED)) {
         const s = SHARED[pkg];
         const versions = scope[pkg] || (scope[pkg] = {});
-        if (!versions[s.version]) versions[s.version] = { get: GET[pkg], from: NAME, eager: s.eager, loaded: 0 };
+        if (s.import !== false && !versions[s.version]) versions[s.version] = { get: GET[pkg], from: NAME, eager: s.eager, loaded: 0 };
     }
 }
 
@@ -124,10 +138,13 @@ function pick(pkg) {
             if (s.strictVersion) throw new Error(msg);
             console.warn(msg);
         }
+        if (!versions[v]) throw new Error('[lunx mf] ' + NAME + ': no app provides shared "' + pkg + '" (it has import: false)');
         return versions[v];
     }
     const v = list.find((x) => !s.requiredVersion || satisfies(x, s.requiredVersion));
-    return versions[v] || versions[s.version];
+    const entry = versions[v] || versions[s.version];
+    if (!entry) throw new Error('[lunx mf] ' + NAME + ': no app provides shared "' + pkg + '"' + (s.requiredVersion ? ' ' + s.requiredVersion : ''));
+    return entry;
 }
 
 // Fetch now, evaluate on first use: a shared package that requires another
@@ -148,7 +165,11 @@ async function loadShared(pkg) {
 /** Settle every shared module before code that imports one runs. */
 export function ensureShared() {
     register();
-    return ready || (ready = Promise.all(Object.keys(SHARED).map(loadShared)));
+    return ready || (ready = (async () => {
+        // version-first: every remote's shared versions are in the scope before one is picked.
+        if (STRATEGY === 'version-first') await Promise.allSettled(Object.keys(REMOTES).map(joined));
+        await Promise.all(Object.keys(SHARED).map(loadShared));
+    })());
 }
 
 export function __shared(pkg) {
@@ -169,6 +190,14 @@ function loadScript(url) {
 }
 
 function container(name) {
+    return joined(name).then(async (c) => {
+        await ensureShared();
+        return c;
+    });
+}
+
+/** The remote's container, loaded and joined to this app's share scope. */
+function joined(name) {
     if (containers[name]) return containers[name];
     const spec = REMOTES[name];
     if (!spec) return Promise.reject(new Error('[lunx mf] unknown remote "' + name + '"; configured: ' + Object.keys(REMOTES).join(', ')));
@@ -190,10 +219,48 @@ function container(name) {
             c = g[global];
         }
         if (!c || typeof c.get !== 'function') throw new Error('[lunx mf] ' + url + ' is not a module federation container');
-        await ensureShared();
+        register();
         await c.init(scope);
         return c;
     })());
+}
+
+/** Run a hook through the runtime plugins; each may return new args. */
+async function hook(name, args) {
+    for (const p of PLUGINS) {
+        if (typeof p[name] !== 'function') continue;
+        const out = await p[name](args);
+        if (out !== undefined && out !== null) args = out;
+    }
+    return args;
+}
+
+/** Runtime plugins (as @module-federation/runtime's): beforeRequest, onLoad, errorLoadRemote. */
+export function registerPlugins(list) {
+    for (const p of list || []) {
+        const plugin = typeof p === 'function' ? p() : p;
+        if (plugin) PLUGINS.push(plugin);
+    }
+}
+
+/**
+ * Remotes added at run time (as @module-federation/runtime's registerRemotes):
+ * [{ name, entry, alias?, type?: 'module' | 'script' }] or { name: 'url' | 'global@url' }.
+ * \`force\` replaces one already registered, and drops what was loaded from it.
+ */
+export function registerRemotes(list, options) {
+    const force = !!(options && options.force);
+    const entries = Array.isArray(list)
+        ? list.map((r) => [r.alias || r.name, r.type === 'script' || r.type === 'var' || r.global ? (r.global || r.name) + '@' + r.entry : r.entry])
+        : Object.entries(list || {});
+    for (const [name, spec] of entries) {
+        if (REMOTES[name] && !force) continue;
+        REMOTES[name] = spec;
+        if (force) {
+            delete containers[name];
+            for (const id of Object.keys(remoteModules)) if (id === name || id.startsWith(name + '/')) delete remoteModules[id];
+        }
+    }
 }
 
 function asExports(m) {
@@ -206,12 +273,26 @@ function asExports(m) {
 
 /** import('remote/Module'): the exposed module's exports. */
 export async function loadRemote(id) {
+    if (PLUGINS.length) id = (await hook('beforeRequest', { id })).id;
     if (id in remoteModules) return remoteModules[id];
     const slash = id.indexOf('/');
     const name = slash < 0 ? id : id.slice(0, slash);
     const exposed = slash < 0 ? '.' : './' + id.slice(slash + 1);
-    const factory = await (await container(name)).get(exposed);
-    return (remoteModules[id] = typeof factory === 'function' ? await factory() : factory);
+    let mod;
+    try {
+        const factory = await (await container(name)).get(exposed);
+        mod = typeof factory === 'function' ? await factory() : factory;
+    } catch (error) {
+        // errorLoadRemote: the first plugin that returns something supplies the module instead.
+        for (const p of PLUGINS) {
+            if (typeof p.errorLoadRemote !== 'function') continue;
+            const fallback = await p.errorLoadRemote({ id, error, from: 'runtime' });
+            if (fallback !== undefined && fallback !== null) return (remoteModules[id] = fallback);
+        }
+        throw error;
+    }
+    if (PLUGINS.length) mod = (await hook('onLoad', { id, module: mod })).module;
+    return (remoteModules[id] = mod);
 }
 
 export function __remote(id) {

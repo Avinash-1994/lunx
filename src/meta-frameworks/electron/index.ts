@@ -2,9 +2,9 @@ import type { LunxAdapter, Plugin, LunxConfig, PackageJson, Middleware } from '@
 import { detectDependencies, registry } from '@lunx/adapter-core';
 
 /**
- * Electron: the renderer is a regular lunx app; the main process and preload
- * are built, and Electron started on the dev server, by vite-plugin-electron
- * (`lunx create --template electron`), which runs on lunx's plugin bridge.
+ * Electron: the renderer is a regular lunx app; lunx builds the main process
+ * and preload and runs Electron on the dev server (src/electron). A project
+ * that uses vite-plugin-electron keeps it, on lunx's plugin bridge.
  */
 export class ElectronAdapter implements LunxAdapter {
   name = 'electron';

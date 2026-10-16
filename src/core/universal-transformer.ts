@@ -4,6 +4,7 @@
  * Automatically adapts to the installed version
  */
 
+import { compileReact, declaresReactCompiler, reactCompiler, type ReactCompilerConfig } from './react-compiler.js';
 import path from 'path';
 import { createHash } from 'crypto';
 import { looksLikeJsx } from './jsx-detect.js';
@@ -33,8 +34,49 @@ export interface TransformResult {
     code: string;
     map?: string;
     dependencies?: string[];
+    /** A component's own CSS (Vue <style>, Svelte <style>), in a production build: for the app's stylesheet. */
+    css?: string;
     /** Already plain JavaScript: no TypeScript left and no defines to apply, so the final Oxc pass can be skipped. */
     plain?: boolean;
+}
+
+/**
+ * A component compiler's error, failing the build (or showing in the dev overlay) with its own
+ * message, position and code frame: handing the uncompiled source on made the bundler report a
+ * syntax error in it instead.
+ */
+function compileError(error: any, filePath: string): Error {
+    if (!(error instanceof Error)) return new Error(`${filePath}: ${String(error)}`);
+    if (!error.message.includes(filePath)) {
+        const at = error && (error as any).start ? `:${(error as any).start.line}:${(error as any).start.column}` : '';
+        error.message = `${filePath}${at}: ${error.message}`;
+    }
+    return error;
+}
+
+/** Dev: a component's CSS in one <style> per component, replaced in place on each edit. */
+function styleInjection(id: string, css: string): string {
+    return `if (typeof document !== 'undefined') {
+    let _style = document.querySelector('style[data-lunx-component="${id}"]');
+    if (!_style) { _style = document.createElement('style'); _style.setAttribute('data-lunx-component', "${id}"); document.head.appendChild(_style); }
+    _style.textContent = ${JSON.stringify(css)};
+}`;
+}
+
+/** `<style lang="scss">` (sass, less, stylus) in a Svelte component, compiled to CSS for the Svelte compiler. */
+async function preprocessSvelteStyles(code: string, filePath: string, root: string): Promise<string> {
+    const re = /<style\b([^>]*?)\blang=["'](scss|sass|less|styl|stylus)["']([^>]*)>([\s\S]*?)<\/style>/g;
+    if (!/<style\b[^>]*\blang=["'](scss|sass|less|styl|stylus)["']/.test(code)) return code;
+    const { compileCss } = await import('../build/css.js');
+    let out = '';
+    let last = 0;
+    for (const m of code.matchAll(re)) {
+        const ext = m[2] === 'stylus' ? 'styl' : m[2];
+        const compiled = await compileCss({ root, file: filePath.replace(/\.svelte$/, `.svelte.${ext}`), source: m[4]!, modules: false, minify: false, resolveUrl: (_from, url) => url });
+        out += code.slice(last, m.index) + `<style${m[1]}${m[3]}>${compiled.code}</style>`;
+        last = m.index! + m[0].length;
+    }
+    return out + code.slice(last);
 }
 
 export class UniversalTransformer {
@@ -44,9 +86,13 @@ export class UniversalTransformer {
     private transformCache: Map<string, TransformResult> = new Map();
     private cacheEnabled: boolean = true;
 
-    constructor(root: string, options?: { cache?: boolean }) {
+    /** `react` in lunx.config (the React Compiler setting). */
+    private readonly react?: ReactCompilerConfig;
+
+    constructor(root: string, options?: { cache?: boolean; react?: ReactCompilerConfig }) {
         this.root = root;
         this.cacheEnabled = options?.cache !== false;
+        this.react = options?.react;
     }
 
     /**
@@ -214,6 +260,13 @@ export class UniversalTransformer {
             const majorReact = reactVersion ? parseInt(reactVersion, 10) : NaN;
             const useAutomatic = !!jsxOptions?.importSource || !Number.isFinite(majorReact) || majorReact >= 17;
 
+            // The React Compiler (automatic memoization), when the project has it.
+            if (!jsxOptions?.importSource && !filePath.includes('node_modules') && (this.react?.compiler || (this.react?.compiler !== false && declaresReactCompiler(this.root)))) {
+                const compiler = reactCompiler(this.root, this.react);
+                const memoized = compiler ? await compileReact(compiler, filePath, code) : null;
+                if (memoized) code = memoized.code;
+            }
+
             const output = compile(filePath, code, {
                 lang: ext === '.tsx' ? 'tsx' : 'jsx',
                 jsx: {
@@ -379,16 +432,25 @@ if (import.meta.hot && __lunx_refresh) {
                 }
             }
 
+            // <style>, as @vitejs/plugin-vue compiles it: lang="scss" / "less" / "stylus" (or src="…"),
+            // scoped, and module (`$style`, or a name).
             let cssCode = '';
+            const cssModules: Record<string, Record<string, string>> = {};
             for (const style of descriptor.styles) {
-                const styleResult = compiler.compileStyle({
-                    source: style.content,
-                    filename: filePath,
+                const file = style.src ? path.resolve(path.dirname(filePath), style.src) : filePath;
+                const lang = style.lang ?? (style.src ? path.extname(style.src).slice(1) : undefined);
+                const styleResult = await compiler.compileStyleAsync({
+                    source: style.src ? await fs.readFile(file, 'utf-8') : style.content,
+                    filename: file,
                     id: scopeId,
                     scoped: style.scoped,
                     isProd: !isDev,
+                    modules: !!style.module,
+                    ...(lang && lang !== 'css' && lang !== 'postcss' ? { preprocessLang: lang === 'styl' ? 'stylus' : lang } : {}),
                 });
+                if (styleResult.errors?.length) throw styleResult.errors[0];
                 cssCode += styleResult.code;
+                if (style.module) cssModules[typeof style.module === 'string' ? style.module : '$style'] = styleResult.modules ?? {};
             }
 
             let output = `
@@ -397,15 +459,9 @@ if (import.meta.hot && __lunx_refresh) {
                 ${templateCode}
                 _sfc_main.render = _sfc_render;
                 ` : ''}
-                
-                // Inject CSS
-                ${cssCode ? `
-                if (typeof document !== 'undefined') {
-                    const _style = document.createElement('style');
-                    _style.innerHTML = ${JSON.stringify(cssCode)};
-                    document.head.appendChild(_style);
-                }
-                ` : ''}
+
+                ${Object.keys(cssModules).length ? `_sfc_main.__cssModules = ${JSON.stringify(cssModules)};` : ''}
+                ${cssCode && isDev ? styleInjection(scopeId, cssCode) : ''}
 
                 ${descriptor.styles.some((s: any) => s.scoped) ? `_sfc_main.__scopeId = "${scopeId}";` : ''}
                 ${isDev ? `_sfc_main.__file = "${filePath.replace(/\\/g, '/')}";` : ''}
@@ -432,10 +488,10 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
             // A production build without <script lang="ts"> is plain JavaScript already
             // (the bundler applies defines), so the final Oxc pass has nothing to do.
             const usesTs = [descriptor.script, descriptor.scriptSetup].some((b: any) => b?.lang && /^tsx?$/.test(b.lang));
-            return { code: output, plain: !isDev && !usesTs };
+            // A build takes the CSS out to the app's stylesheet, as Vite does; dev injects it (above).
+            return { code: output, plain: !isDev && !usesTs, ...(cssCode && !isDev ? { css: cssCode } : {}) };
         } catch (error: any) {
-            log.error(`Vue transform failed for ${filePath}:`, error.message);
-            return { code };
+            throw compileError(error, filePath);
         }
     }
 
@@ -462,10 +518,11 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
             const version = await this.getPackageVersion('svelte');
             const isSvelte5 = version && version.startsWith('5');
 
-            const result = svelte.compile(code, {
+            const result = svelte.compile(await preprocessSvelteStyles(code, filePath, this.root), {
                 filename: filePath,
                 dev: isDev,
-                css: 'injected' as any,
+                // A build takes the CSS out to the app's stylesheet, as Vite does; dev injects it.
+                css: (isDev ? 'injected' : 'external') as any,
                 generate: isSvelte5 ? 'client' : 'dom',
                 // Svelte 5 emits its own import.meta.hot handling.
                 ...(isSvelte5 && isDev ? { hmr: true } : {}),
@@ -477,11 +534,11 @@ if (import.meta.hot && typeof __VUE_HMR_RUNTIME__ !== 'undefined') {
 
             return {
                 code: finalCode,
-                map: result.js.map ? JSON.stringify(result.js.map) : undefined
+                map: result.js.map ? JSON.stringify(result.js.map) : undefined,
+                ...(!isDev && result.css?.code ? { css: result.css.code } : {}),
             };
         } catch (error: any) {
-            log.error(`Svelte transform failed for ${filePath}: ${error.stack || error.message}`);
-            return { code };
+            throw compileError(error, filePath);
         }
     }
 

@@ -10,6 +10,7 @@
  * Never show "Build failed" without context.
  */
 
+import { forTerminal } from '../../utils/plain-text.js';
 import kleur from '../../lib/colors.js';
 import path from 'path';
 
@@ -113,7 +114,7 @@ export class HeroError extends Error {
      * Display error to console
      */
     display(): void {
-        console.error(this.format());
+        console.error(forTerminal(this.format()));
     }
 }
 
@@ -323,6 +324,18 @@ export function createPluginHookError(
 export function wrapError(error: Error, context?: Partial<ErrorContext>): HeroError {
     if (error instanceof HeroError) {
         return error;
+    }
+
+    // An error in the project's code (a compiler's or the bundler's report on a source file), not in lunx.
+    if (/Build failed with \d+ error|\b(CompileError|ParseError|PARSE_ERROR|SyntaxError|UNRESOLVED_IMPORT|MISSING_EXPORT|INVALID_EXPORT)\b/.test(error.message)) {
+        return new HeroError({
+            code: 'BUILD_ERROR',
+            message: error.message,
+            severity: 'error',
+            suggestedFix: 'Fix the error reported above in your source, then build again.',
+            relatedDocs: ['https://lunx.dev/docs/troubleshooting'],
+            ...context
+        });
     }
 
     return new HeroError({

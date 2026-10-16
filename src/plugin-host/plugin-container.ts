@@ -91,6 +91,11 @@ export class PluginContainer {
 
     constructor(public environment: any, public plugins: any[]) {}
 
+    /** Vite's `environment.pluginContainer.getModuleInfo(id)` (Vitest reads it). */
+    getModuleInfo(id: string): any {
+        return this.context(null).getModuleInfo(id);
+    }
+
     private context(plugin: any, extra: Record<string, any> = {}): any {
         // Hook functions get `ctx` as `this`; keep a handle on the container.
         const { resolveId, moduleMeta, watchFiles } = { resolveId: this.resolveId.bind(this), moduleMeta: this.moduleMeta, watchFiles: this.watchFiles };

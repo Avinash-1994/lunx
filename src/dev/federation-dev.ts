@@ -4,7 +4,8 @@ import { BuildConfig } from '../config/index.js';
 import { getFetch } from '../utils/fetch.js';
 import http from 'http';
 
-function normalizeRemoteUrl(url: string): string {
+function normalizeRemoteUrl(spec: string | { entry: string }): string {
+  const url = typeof spec === 'string' ? spec : spec.entry;
   const webpackRemote = /^([A-Za-z0-9_$-]+)@(https?:\/\/.*)$/;
   const match = webpackRemote.exec(url);
   return match ? match[2] : url;

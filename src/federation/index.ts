@@ -203,7 +203,8 @@ ${sharedEntries}
  * This code runs in the host app browser.
  * It fetches remoteEntry.js files and resolves modules from them.
  */
-function normalizeRemoteUrl(url: string): string {
+function normalizeRemoteUrl(spec: string | { entry: string }): string {
+  const url = typeof spec === 'string' ? spec : spec.entry;
   const webpackRemote = /^([A-Za-z0-9_$-]+)@(https?:\/\/.*)$/;
   const match = webpackRemote.exec(url);
   if (match) {

@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-10-14T04:20:21.180Z",
+  "generatedAt": "2026-10-16T04:54:19.720Z",
   "node": "v22.22.0",
-  "passed": 17,
-  "total": 17,
+  "passed": 22,
+  "total": 22,
   "versions": {
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "typescript": "5.9.3",
@@ -39,7 +39,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 6
+      "seconds": 7
     },
     {
       "name": "tailwind",
@@ -79,7 +79,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 4
+      "seconds": 5
     },
     {
       "name": "auto-import",
@@ -139,7 +139,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 4
     },
     {
       "name": "glsl",
@@ -159,7 +159,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 4
+      "seconds": 5
     },
     {
       "name": "wasm",
@@ -169,7 +169,7 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 4
+      "seconds": 5
     },
     {
       "name": "node-polyfills",
@@ -189,12 +189,52 @@
       "preview": "pass",
       "dev": "pass",
       "errors": [],
-      "seconds": 5
+      "seconds": 6
     },
     {
       "name": "inspect",
       "plugin": "vite-plugin-inspect",
       "version": "12.1.0",
+      "build": "pass",
+      "preview": "pass",
+      "dev": "pass",
+      "errors": [],
+      "seconds": 4
+    },
+    {
+      "name": "builtin-svg",
+      "build": "pass",
+      "preview": "pass",
+      "dev": "pass",
+      "errors": [],
+      "seconds": 5
+    },
+    {
+      "name": "builtin-wasm-init",
+      "build": "pass",
+      "preview": "pass",
+      "dev": "pass",
+      "errors": [],
+      "seconds": 4
+    },
+    {
+      "name": "builtin-pwa",
+      "build": "pass",
+      "preview": "pass",
+      "dev": "pass",
+      "errors": [],
+      "seconds": 5
+    },
+    {
+      "name": "builtin-typecheck",
+      "build": "pass",
+      "preview": "pass",
+      "dev": "pass",
+      "errors": [],
+      "seconds": 5
+    },
+    {
+      "name": "builtin-html-env",
       "build": "pass",
       "preview": "pass",
       "dev": "pass",

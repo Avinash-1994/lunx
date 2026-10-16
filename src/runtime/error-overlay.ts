@@ -201,10 +201,13 @@ const styles = `
 }
 `;
 
+const escapeHtml = (text: string): string =>
+  text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
 export class ErrorOverlay extends HTMLElement {
   root: ShadowRoot;
   private _errors: any[] = [];
-  private _activeTab: 'build' | 'runtime' = 'build';
+  private _activeTab: 'build' | 'typecheck' | 'runtime' = 'build';
 
   constructor() {
     super();
@@ -229,6 +232,8 @@ export class ErrorOverlay extends HTMLElement {
     // Auto-switch tab based on error type
     if (errors.some(e => e.type === 'build')) {
       this._activeTab = 'build';
+    } else if (errors.some(e => e.type === 'typecheck')) {
+      this._activeTab = 'typecheck';
     } else if (errors.some(e => e.type === 'runtime')) {
       this._activeTab = 'runtime';
     }
@@ -254,8 +259,9 @@ export class ErrorOverlay extends HTMLElement {
     this.style.display = 'block';
 
     const buildErrors = this._errors.filter(e => e.type === 'build');
+    const typeErrors = this._errors.filter(e => e.type === 'typecheck');
     const runtimeErrors = this._errors.filter(e => e.type === 'runtime');
-    const activeErrors = this._activeTab === 'build' ? buildErrors : runtimeErrors;
+    const activeErrors = this._activeTab === 'build' ? buildErrors : this._activeTab === 'typecheck' ? typeErrors : runtimeErrors;
 
     this.root.innerHTML = `
       <style>${styles}</style>
@@ -267,6 +273,12 @@ export class ErrorOverlay extends HTMLElement {
                 <div class="tab ${this._activeTab === 'build' ? 'active build' : ''}" onclick="this.getRootNode().host.switchTab('build')">
                   Build Errors
                   <span class="badge">${buildErrors.length}</span>
+                </div>
+              ` : ''}
+              ${typeErrors.length > 0 ? `
+                <div class="tab ${this._activeTab === 'typecheck' ? 'active build' : ''}" onclick="this.getRootNode().host.switchTab('typecheck')">
+                  Type Errors
+                  <span class="badge">${typeErrors.length}</span>
                 </div>
               ` : ''}
               ${runtimeErrors.length > 0 ? `
@@ -290,29 +302,30 @@ export class ErrorOverlay extends HTMLElement {
     `;
   }
 
-  switchTab(tab: 'build' | 'runtime') {
+  switchTab(tab: 'build' | 'typecheck' | 'runtime') {
     this._activeTab = tab;
     this.render();
   }
 
   renderError(error: any) {
-    const file = error.location?.file || error.filename;
-    const line = error.location?.line || error.lineno;
-    const col = error.location?.column || error.colno;
-    const message = error.text || error.message || 'Unknown error';
+    const file = error.location?.file || error.filename || error.file;
+    const line = Number(error.location?.line || error.lineno || error.line) || 1;
+    const col = Number(error.location?.column || error.colno || error.column) || 1;
+    // Compiler messages hold markup-like text (`Promise<string>`, `<div>`): shown as text.
+    const message = escapeHtml(error.text || error.message || 'Unknown error');
 
     return `
       <div class="error-item">
         <div class="message">${message}</div>
         
         ${file ? `
-          <div class="file-link" onclick="this.getRootNode().host.openInEditor('${file}', ${line}, ${col})">
-            <span>📄 ${file}:${line}:${col}</span>
+          <div class="file-link" onclick="this.getRootNode().host.openInEditor(${escapeHtml(JSON.stringify(String(file)))}, ${line}, ${col})">
+            <span>📄 ${escapeHtml(String(file))}:${line}:${col}</span>
             <span style="margin-left: auto; font-size: 0.75rem; opacity: 0.7;">Click to open</span>
           </div>
         ` : ''}
 
-        ${error.frame ? `<pre class="code-frame">${error.frame}</pre>` : ''}
+        ${error.frame ? `<pre class="code-frame">${escapeHtml(String(error.frame))}</pre>` : ''}
         
         ${error.stack ? `
           <div class="stack-trace">
@@ -329,9 +342,9 @@ export class ErrorOverlay extends HTMLElement {
       const match = line.match(/\((.*):(\d+):(\d+)\)/);
       if (match) {
         const [_, file, l, c] = match;
-        return `<div class="stack-frame" onclick="this.getRootNode().host.openInEditor('${file}', ${l}, ${c})">${line}</div>`;
+        return `<div class="stack-frame" onclick="this.getRootNode().host.openInEditor(${escapeHtml(JSON.stringify(file))}, ${Number(l)}, ${Number(c)})">${escapeHtml(line)}</div>`;
       }
-      return `<div>${line}</div>`;
+      return `<div>${escapeHtml(line)}</div>`;
     }).join('');
   }
 }

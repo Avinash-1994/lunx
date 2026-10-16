@@ -63,9 +63,26 @@ function cjsExportNames(file: string, source: string, resolveRequire?: (spec: st
         const mod = resolveRequire ? evaluateCjs(file, resolveRequire) : require(file);
         if (mod && (typeof mod === 'object' || typeof mod === 'function')) keys = Object.keys(mod);
     } catch {
-        for (const m of source.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|Object\.defineProperty\(\s*(?:module\.)?exports\s*,\s*['"]([A-Za-z_$][\w$]*)['"]/g)) keys.push((m[1] ?? m[2])!);
+        keys = staticCjsExports(file, source);
     }
     return [...new Set(keys)].filter((k) => /^[A-Za-z_$][\w$]*$/.test(k) && !RESERVED.has(k));
+}
+
+/**
+ * Export names read from the source, when evaluating the module failed (it touches browser
+ * globals as it loads): `exports.x =` assignments, following React's
+ * `module.exports = require('./cjs/x.production.js')` re-exports.
+ */
+function staticCjsExports(file: string, source: string, depth = 0): string[] {
+    const keys: string[] = [];
+    for (const m of source.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|Object\.defineProperty\(\s*(?:module\.)?exports\s*,\s*['"]([A-Za-z_$][\w$]*)['"]/g)) keys.push((m[1] ?? m[2])!);
+    const reexport = /module\.exports\s*=\s*require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/.exec(source);
+    if (!keys.length && reexport && depth < 5) {
+        const target = path.resolve(path.dirname(file), reexport[1]!);
+        const resolved = [target, `${target}.js`, `${target}.cjs`].find((f) => fs.existsSync(f) && fs.statSync(f).isFile());
+        if (resolved) return staticCjsExports(resolved, fs.readFileSync(resolved, 'utf-8'), depth + 1);
+    }
+    return keys;
 }
 
 /** The package directory containing a resolved file. */
@@ -149,13 +166,18 @@ export class DepsOptimizer {
     /** Should this bare import be served pre-bundled? */
     shouldOptimize(spec: string, resolved: string): boolean {
         if (this.options.noDiscovery && !this.deps.has(spec)) return false;
-        return this.optimizable(spec, resolved);
+        return this.optimizable(spec, resolved, this.included(spec));
     }
 
-    private optimizable(spec: string, resolved: string): boolean {
+    /** Listed in `optimizeDeps.include` itself: pre-bundled even inside an excluded package (as Vite). */
+    private included(spec: string): boolean {
+        return arraify(this.options.include ?? []).some((e: string) => e.split('>').pop()!.trim() === spec);
+    }
+
+    private optimizable(spec: string, resolved: string, included = false): boolean {
         // JSX/TSX sources (Solid, Qwik libraries) need the framework's compiler: served raw, never bundled here.
         if (!/[\\/]node_modules[\\/]/.test(resolved) || !/\.(m|c)?js$/.test(resolved)) return false;
-        return !this.exclude(spec);
+        return included || !this.exclude(spec);
     }
 
     private _requireResolver?: (spec: string, dir: string) => string | null;
@@ -211,7 +233,7 @@ export class DepsOptimizer {
         }
         if (this.deps.has(spec) || builtinModules.includes(spec) || spec.startsWith('node:')) return false;
         const resolved = this.resolve(spec, fromDir);
-        if (!resolved || !this.optimizable(spec, resolved)) return false;
+        if (!resolved || !this.optimizable(spec, resolved, this.included(entry.trim()) || this.included(spec))) return false;
         this.deps.set(spec, resolved);
         return true;
     }
@@ -242,7 +264,54 @@ export class DepsOptimizer {
             }
         };
         walk(this.config.root, 0);
+        // `optimizeDeps.entries`: files (or globs) the app loads besides its sources, e.g. Storybook's
+        // preview annotations in node_modules, whose imports (React) must be pre-bundled too.
+        // Crawled through their relative imports, as Vite's scanner does (Storybook's preview entry
+        // reaches React through its own chunks).
+        const queue = this.entryFiles();
+        const crawled = new Set<string>();
+        while (queue.length && crawled.size < 2000) {
+            const file = queue.pop()!;
+            if (crawled.has(file)) continue;
+            crawled.add(file);
+            let code: string;
+            try {
+                code = fs.readFileSync(file, 'utf-8');
+            } catch {
+                continue;
+            }
+            for (const m of code.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]/g)) {
+                const spec = m[1]!;
+                if (spec.startsWith('.')) {
+                    const next = path.resolve(path.dirname(file), spec);
+                    if (/\.(m|c)?js$/.test(next) && !crawled.has(next)) queue.push(next);
+                } else if (!spec.startsWith('/') && !spec.startsWith('#') && !spec.startsWith('$') && !spec.includes(':')) found.add(spec);
+            }
+        }
         return found;
+    }
+
+    /** The files `optimizeDeps.entries` names: paths, or globs relative to the root. */
+    private entryFiles(): string[] {
+        const out = new Set<string>();
+        for (const entry of arraify(this.options.entries ?? []).flat().filter((e: unknown): e is string => typeof e === 'string')) {
+            // Glob-escaped paths (Storybook escapes `@`, `(`…): the file they name.
+            const unescaped = entry.replace(/\\(.)/g, '$1');
+            const abs = path.isAbsolute(unescaped) ? unescaped : path.join(this.config.root, unescaped);
+            if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+                out.add(abs);
+                continue;
+            }
+            if (!/[*?{[]/.test(entry)) continue;
+            const glob = (fs as any).globSync as undefined | ((pattern: string, opts: object) => string[]);
+            if (!glob) continue;
+            try {
+                for (const f of glob(entry, { cwd: this.config.root, exclude: (p: string) => p.includes('node_modules') })) out.add(path.resolve(this.config.root, f));
+            } catch {
+                // a pattern Node's glob does not take: the sources scan still ran
+            }
+        }
+        return [...out];
     }
 
     /** URL of the pre-bundled module for `spec`, registering it if it is new. */

@@ -16,7 +16,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { chromium, _electron } from 'playwright';
+import { chromium } from 'playwright';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const flag = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
@@ -159,23 +159,33 @@ function ensureDisplay() {
     return (display = ':97');
 }
 
-/** The Electron app in Electron: its window shows the page, the counter counts, the preload ran. */
-async function checkElectron(dir, name, env = {}) {
-    const app = await _electron.launch({
-        executablePath: path.join(dir, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : process.platform === 'darwin' ? 'Electron.app/Contents/MacOS/Electron' : 'electron'),
-        args: [dir, '--no-sandbox'],
-        cwd: dir,
-        env: { ...process.env, ...env, ...(ensureDisplay() ? { DISPLAY: display } : {}) },
-        timeout: 60_000,
-    });
+/**
+ * The Electron app that lunx started (with `LUNX_ELECTRON_ARGS=--remote-debugging-port=<cdp>`):
+ * its window shows the page, the counter counts, the preload ran.
+ */
+async function checkElectron(cdp, name, { click = true } = {}) {
+    const deadline = Date.now() + 90_000;
+    let browser;
+    while (!browser) {
+        browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdp}`).catch((err) => {
+            if (Date.now() > deadline) throw new Error(`Electron did not start: ${err.message.split('\n')[0]}`);
+            return new Promise((r) => setTimeout(r, 500)).then(() => undefined);
+        });
+    }
     try {
-        const win = await app.firstWindow();
+        let win;
+        while (!(win = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().startsWith('devtools:')))) {
+            if (Date.now() > deadline) throw new Error('Electron opened no window');
+            await new Promise((r) => setTimeout(r, 250));
+        }
         await win.waitForFunction((n) => document.querySelector('h1')?.textContent === n, name, { timeout: 30_000 });
-        await win.click('button');
-        await win.waitForFunction(() => /count is 1/.test(document.querySelector('button')?.textContent ?? ''), null, { timeout: 10_000 });
+        if (click) {
+            await win.click('button');
+            await win.waitForFunction(() => /count is 1/.test(document.querySelector('button')?.textContent ?? ''), null, { timeout: 10_000 });
+        }
         if (!(await win.evaluate(() => !!window.versions?.electron))) throw new Error('the preload did not run');
     } finally {
-        await app.close();
+        await browser.close();
     }
 }
 
@@ -247,39 +257,40 @@ for (const [id, ...flags] of VARIANTS) {
             if (body.app !== name || body.pathname !== '/hello') throw Object.assign(new Error(`fetch() answered ${JSON.stringify(body)}`), { step: 'build' });
         }
         if (id === 'electron') {
-            for (const f of ['dist-electron/main.js', 'dist-electron/preload.mjs', 'dist/index.html']) {
+            for (const f of ['dist-electron/main.js', 'dist-electron/preload.cjs', 'dist/index.html']) {
                 if (!fs.existsSync(path.join(dir, f))) throw Object.assign(new Error(`no ${f}`), { step: 'build' });
             }
         }
         result.build = 'pass';
 
         if (id === 'electron') {
-            // The build, loaded from disk; then the dev server, Electron started on it as vite-plugin-electron would.
-            try {
-                await checkElectron(dir, name);
-                result.preview = 'pass';
-            } catch (err) {
-                result.preview = 'fail';
-                result.previewError = err.message;
-            }
-            fs.rmSync(path.join(dir, 'dist-electron'), { recursive: true, force: true });
-            const port = await freePort();
-            const server = serve(dir, 'dev', port, { ELECTRON_STARTUP_PREVENT: '1' });
-            try {
-                await waitForHttp(`http://localhost:${port}/`, 120_000);
-                const deadline = Date.now() + 60_000;
-                while (!fs.existsSync(path.join(dir, 'dist-electron', 'main.js'))) {
-                    if (Date.now() > deadline) throw new Error('lunx dev did not build dist-electron/main.js');
-                    await new Promise((r) => setTimeout(r, 250));
+            // `lunx preview` starts the build in Electron; `lunx dev` starts it on the dev server and
+            // restarts it when the main process changes.
+            const electronEnv = (cdp) => ({ LUNX_ELECTRON_ARGS: `--remote-debugging-port=${cdp}`, ...(ensureDisplay() ? { DISPLAY: display } : {}) });
+            for (const script of ['preview', 'dev']) {
+                const cdp = await freePort();
+                if (script === 'dev') fs.rmSync(path.join(dir, 'dist-electron'), { recursive: true, force: true });
+                const server = serve(dir, script, await freePort(), electronEnv(cdp));
+                try {
+                    await checkElectron(cdp, name);
+                    if (script === 'dev') {
+                        const main = path.join(dir, 'electron', fs.readdirSync(path.join(dir, 'electron')).find((f) => f.startsWith('main.')));
+                        fs.appendFileSync(main, '\n// edited\n');
+                        const deadline = Date.now() + 30_000;
+                        while (!/main process rebuilt/.test(server.output)) {
+                            if (Date.now() > deadline) throw new Error('editing the main process did not restart Electron');
+                            await new Promise((r) => setTimeout(r, 250));
+                        }
+                        await new Promise((r) => setTimeout(r, 1_000)); // the old window closes first
+                        await checkElectron(cdp, name, { click: false });
+                    }
+                    result[script] = 'pass';
+                } catch (err) {
+                    result[script] = 'fail';
+                    result[`${script}Error`] = `${err.message}\n${server.output.trim().split('\n').slice(-6).join('\n')}`;
+                } finally {
+                    await server.stop();
                 }
-                await new Promise((r) => setTimeout(r, 500));
-                await checkElectron(dir, name, { VITE_DEV_SERVER_URL: `http://localhost:${port}/` });
-                result.dev = 'pass';
-            } catch (err) {
-                result.dev = 'fail';
-                result.devError = `${err.message}\n${server.output.trim().split('\n').slice(-6).join('\n')}`;
-            } finally {
-                await server.stop();
             }
         }
 

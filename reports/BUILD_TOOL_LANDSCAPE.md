@@ -1,127 +1,314 @@
-# The build-tool landscape, measured
+# lunx against every build tool, in every area
 
-Every tool below was installed from npm and run on **one identical React 19 +
-TypeScript app** (`index.html` → `src/main.tsx` → `src/App.tsx` with `useState`
-→ `src/app.css`), on this machine: Windows 11, Node v22.18.0, 8 cores.
-Reproduce with `npm run bench:arena`.
+Measured on 2026-10-16 (Linux, Node 22.22, 4 cores) with the versions below.
+Speed, size and install numbers come from running each tool here
+(`npm run bench:arena`, `scripts/footprint.sh`). The feature tables come from
+running lunx and reading each tool's installed type definitions (Vite's
+`UserConfig`, Rsbuild's `RsbuildConfig`…). Where a table cites a tool's own
+documentation instead, it says so.
 
-**Caveat on every lunx timing: the Rust engine has never been compiled here (no
-`cargo`), so lunx ran its JavaScript fallback (`@swc/core` + LightningCSS).**
+| tool | version | kind |
+|---|---|---|
+| **lunx** | 1.2.0 | dev server + build, Rolldown/Oxc |
+| Vite | 8.3.4 | dev server + build, Rolldown/Oxc |
+| Rsbuild | 2.2.13 | dev server + build on Rspack |
+| Rspack | 2.2.9 | bundler (webpack API, Rust) |
+| webpack | 5.111.1 | bundler |
+| Parcel | 2.16.4 | zero-config bundler |
+| Farm | 1.7.11 | dev server + build, Rust |
+| esbuild | 0.28.2 | bundler, no dev server |
+| Bun | 1.4.3 | runtime with a bundler |
+| Rolldown | 1.2.14 | bundler library (JS only) |
 
-## 1. Numbers
+Turbopack is not in the tables: it still ships only inside Next.js (stable
+there since Next 16), and Vercel has not released the standalone bundler.
 
-Medians of 3 runs. `dev boot` = process spawn until `/` returns 200.
-`app code` = spawn until the first `<script src>` in that HTML returns 200 —
-for a module server that is one transformed module, for a bundler it is the
-whole bundle, because that is what the browser needs before it can run
-anything.
+---
 
-| tool | kind | dev boot | app code | build cold | build warm | JS out | CSS out |
+## 1. Speed
+
+One React 19 + TypeScript app. Medians of 7 runs (5 at 2,000 components).
+HMR = save `App.tsx` until Chromium shows the change.
+
+**Small app**
+
+| tool | dev boot | HMR | build cold | build warm |
+|---|---|---|---|---|
+| **lunx** | **248 ms** | **30 ms** | **369 ms** | 385 ms |
+| Vite | 409 ms | 40 ms | 663 ms | 487 ms |
+| Rspack | 376 ms | 208 ms | 386 ms | **370 ms** |
+| Rsbuild | 432 ms | 86 ms | 511 ms | 487 ms |
+| Farm | 1,230 ms | 48 ms | 1,908 ms | 1,411 ms |
+| Parcel | 1,449 ms | 35 ms | 1,693 ms | 1,761 ms |
+| webpack | 1,578 ms | 275 ms | 4,313 ms | 4,066 ms |
+| esbuild | – | – | 66 ms | 65 ms |
+| Bun | – | – | **41 ms** | **46 ms** |
+| Rolldown | – | – | 233 ms | 256 ms |
+
+**2,000 components**
+
+| tool | dev boot | first module | HMR | build cold | build warm |
+|---|---|---|---|---|---|
+| **lunx** | **243 ms** | **247 ms** | **151 ms** | **583 ms** | **547 ms** |
+| Vite | 389 ms | 717 ms | 161 ms | 829 ms | 651 ms |
+| Rspack | 700 ms | 839 ms | 656 ms | 804 ms | 878 ms |
+| Rsbuild | 944 ms | 1,062 ms | 440 ms | 777 ms | 754 ms |
+| Parcel | 4,523 ms | 4,542 ms | 177 ms | 5,042 ms | 5,060 ms |
+| webpack | 4,268 ms | 4,522 ms | 1,113 ms | 8,763 ms | 8,715 ms |
+| Farm | failed¹ | | | | |
+| esbuild | – | – | – | 145 ms | 144 ms |
+| Bun | – | – | – | **106 ms** | **82 ms** |
+| Rolldown | – | – | – | 397 ms | 731 ms |
+
+¹ Farm 1.7 cannot resolve `react/jsx-dev-runtime` through a symlinked
+`node_modules` (the scaled app shares the small app's).
+
+The container was busier than on 2026-10-15 (every tool measured slower);
+the ranking is unchanged.
+
+**Verdict.** Among tools with a dev server, lunx is fastest at boot, HMR and
+cold build on both apps, and at warm build on the large one. Rspack's warm
+build of the small app is 15 ms faster, within run-to-run noise. esbuild and
+Bun build faster, but they are bundlers with no HMR dev server, CSS pipeline
+or framework compilers.
+
+## 2. Build output
+
+What the browser downloads: JS, gzip -9.
+
+| tool | small app | 2,000 components |
+|---|---|---|
+| Bun | **65,552 B** | **82,445 B** |
+| **lunx** | 67,776 B | 85,410 B |
+| Vite | 68,006 B | 85,702 B |
+| Rolldown | 68,130 B | 86,322 B |
+| esbuild | 68,967 B | 87,231 B |
+| Rspack | 69,026 B | 91,460 B |
+| Rsbuild | 69,256 B | 90,591 B |
+| Parcel | 69,675 B | 91,079 B |
+| webpack | 70,359 B | 89,442 B |
+| Farm | 72,422 B | failed |
+
+(Raw bytes rank differently: Rsbuild and Rspack are slightly smaller than
+lunx uncompressed but larger after gzip.)
+
+**lunx is now second, behind Bun only.** 1.2.0 moves third-party license
+notices into `<chunk>.LICENSE.txt` (`build.legalComments: 'linked'`, the
+default), which took ~280 B off the small app and put lunx ahead of Vite.
+
+**Why Bun is still smaller (3–4%).** Bun removes more unused code inside
+React's CommonJS files: functions and `Symbol.for(…)` constants that React
+defines but the app never reaches. Rolldown keeps a CommonJS module's body
+whole. Binding React's exports to local names (as Bun prints them) was tried:
+6% fewer raw bytes, no gzip change, so it was dropped. Closing the rest needs
+CommonJS tree shaking in Rolldown itself.
+
+**Per framework, lunx is smallest.** In `npm run test:parity` (vanilla,
+React, Preact, Vue, Svelte, Solid, Lit, a two-page app), lunx's gzip JS is
+smaller than Vite 8's in every scenario. Against their own CLIs
+(`npm run test:meta-parity`), lunx's client builds are smaller or within
+1% for all twelve meta-frameworks; for Angular, smaller than `ng build`'s
+(31.7 KB vs 31.9 KB).
+
+## 3. Frameworks
+
+✅ built in · 🔌 official/first-party plugin · 🧩 community plugin · ❌ none.
+Competitor cells follow each tool's own documentation.
+
+| | lunx | Vite | Rsbuild | Rspack / webpack | Parcel | Farm | Bun |
 |---|---|---|---|---|---|---|---|
-| **bun** 1.4.2 | bundler | – | – | 296 ms | **279 ms** | **211,811 B** | 30 B |
-| **esbuild** 0.28.2 | bundler | – | – | 380 ms | 390 ms | 222,973 B | 30 B |
-| **rolldown** 1.2.12 | bundler, JS only | – | – | 435 ms | 402 ms | 221,449 B | **unsupported** |
-| **rspack** 2.2.8 | bundler | 515 ms | 645 ms | **596 ms** | 548 ms | **219,460 B** | 29 B |
-| **vite** 8.3.1 | module server | **471 ms** | **649 ms** | 616 ms | 549 ms | 220,248 B | 30 B |
-| **lunx** 1.0.3 (JS fallback) | module server | 2042 ms | 2048 ms | 2842 ms | 1611 ms | 229,909 B | 30 B |
-| **parcel** 2.16.4 | bundler | 3030 ms | 3036 ms | 3862 ms | 2181 ms | 221,932 B | 77 B |
-| **webpack** 5.111.1 | bundler | 2212 ms | 2319 ms | 4204 ms | 4522 ms | 224,696 B | 0 B¹ |
+| React (Fast Refresh) | ✅ | 🔌 | 🔌 | 🔌 | ✅ | 🔌 | ✅ |
+| React Compiler | ✅ (project's Babel plugin, dev + build) | 🔌 (Babel) | ✅ Rust (2.1) | 🧩 | ❌ | ❌ | ❌ |
+| React Server Components | ✅ `@vitejs/plugin-rsc` apps, Waku, React Router | 🔌 `plugin-rsc` | ✅ (2.0) | experimental (2.0) | ✅ (beta) | ❌ | ❌ |
+| Vue (SFC, HMR) | ✅ | 🔌 | 🔌 | 🔌 loader | ✅ | 🔌 | 🧩 |
+| Svelte 5 | ✅ | 🔌 | 🔌 | 🧩 loader | 🧩 | 🔌 | 🧩 |
+| Solid | ✅ | 🧩 | 🔌 | 🧩 | ❌ | 🔌 | ❌ |
+| Preact | ✅ | 🔌 | 🔌 | 🧩 | ✅ | 🔌 | 🧩 |
+| Lit | ✅ | ✅ (vanilla) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Angular (AOT) | ✅ | via Analog / `@angular/build` | 🧩 Nx | ✅ Angular CLI (webpack) | ❌ | ❌ | ❌ |
+| Qwik | ✅ | 🔌 | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Alpine, Mithril, Inferno, Marko, Stencil | ✅ | 🧩 | partial | 🧩 | partial | ❌ | ❌ |
 
-¹ webpack's `style-loader` inlines CSS into the JS bundle, so its JS figure
-carries the stylesheet.
+**Meta-frameworks**
 
-**Where lunx actually sits: last on dev boot, last on bundle size, and sixth of
-eight on build time.** It beats webpack and parcel on build and nothing else.
+| | lunx | Vite | Rsbuild / Rspack | webpack |
+|---|---|---|---|---|
+| SvelteKit, Nuxt, Astro, React Router, Remix, TanStack Start, SolidStart, Qwik City, Analog, VitePress, Waku, Marko Run | ✅ built by lunx (Vite plugins on its engine; client size ≤ their own CLI, `npm run test:meta-parity`) | ✅ native | TanStack Start, Modern.js, Rspress | ❌ |
+| Next.js, Docusaurus, Gatsby, RedwoodJS | runs their own CLI | ❌ | Next (experimental), Docusaurus (Rspack) | ✅ |
+| Storybook | ✅ `lunx exec storybook` (its Vite builder on lunx) | ✅ builder | ✅ builder | ✅ builder |
+| Vitest, and other Vite-only tools (Vike, Histoire, Slidev…) | ✅ Vitest via `lunx exec vitest` (jsdom, snapshots); others untested | ✅ | ❌ | ❌ |
 
-### What you have to install
+## 4. Module federation
 
-A React app with a stylesheet, counted as packages in `node_modules` and bytes
-on disk:
+| | lunx | webpack / Rspack (`@module-federation/enhanced`) | Vite (`@module-federation/vite`) | Rsbuild |
+|---|---|---|---|---|
+| Expose / consume, shared singletons, `requiredVersion`, `strictVersion`, `eager` | ✅ | ✅ | ✅ | ✅ |
+| Interop with webpack / Rspack apps | ✅ both directions (6/6 pairings) | ✅ | ✅ | ✅ |
+| `mf-manifest.json` | ✅ | ✅ | ✅ | ✅ |
+| Dev HMR across host and remote | ✅ | ✅ | partial | ✅ |
+| `loadRemote`, `preloadRemote` | ✅ | ✅ | ✅ | ✅ |
+| `registerRemotes` (remotes added at runtime) | ✅ | ✅ | ✅ | ✅ |
+| Runtime plugins (retry, fallback, auth…) | ✅ `beforeRequest`, `onLoad`, `errorLoadRemote` | ✅ | ✅ | ✅ |
+| Type hints for remotes (`dts`) | ✅ `@mf-types.zip`, same layout as the MF dts plugin | ✅ | ✅ | ✅ |
+| `shareStrategy`, `shareScope`, `import: false` | ✅ | ✅ | ✅ | ✅ |
+| Remote as object (`{ entry, type }`) | ✅ | ✅ | ✅ | ✅ |
+| Chrome DevTools extension | ❌ | ✅ | ✅ | ✅ |
+
+## 5. Bundler features
+
+| | lunx | Vite | Rsbuild / Rspack | webpack | Parcel | esbuild | Bun |
+|---|---|---|---|---|---|---|---|
+| Tree shaking, scope hoisting, code splitting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CSS code splitting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CSS modules, PostCSS, Sass, Less, Stylus, Tailwind v4 | ✅ | ✅ | ✅ | loaders | ✅ | partial | partial |
+| `new Worker(new URL(…, import.meta.url))` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `import W from './w.js?worker'` (`&url`, `&inline`) | ✅ | ✅ | ✅ (2.1) | ❌ | ❌ | ❌ | ❌ |
+| `` import(`./locales/${lang}.js`) `` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `import.meta.glob` | ✅ | ✅ | ✅ (`import.meta.webpackContext`) | ✅ (`require.context`) | ✅ glob | ❌ | ❌ |
+| `.wasm?init` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
+| Wasm ESM import (`import { f } from './a.wasm'`) | ✅ | ✅ (8.1) | ✅ | ✅ | ❌ | ❌ | partial |
+| Syntax lowering for older browsers (`build.target` / browserslist) | ✅ default: Baseline widely available | ✅ | ✅ | ✅ | ✅ | ✅ | partial |
+| Polyfills (core-js usage, legacy `nomodule`) | ✅ `build.polyfill` entry / usage; no `nomodule` | 🔌 `plugin-legacy` | ✅ `output.polyfill` | ✅ | ✅ differential | ❌ | ❌ |
+| `build.manifest` (Laravel, Rails, Django backends) | ✅ | ✅ | ✅ | 🔌 | ✅ | ✅ metafile | ❌ |
+| `ssrManifest` | ✅ | ✅ | ✅ | 🔌 | ❌ | ❌ | ❌ |
+| Chunk import map (stable hashes) | ❌ | ✅ (8.1) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| CDN URLs per asset (`renderBuiltUrl` / `assetPrefix`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Drop `console` / `debugger` | ✅ `build.drop` | via minifier options | ✅ `removeConsole` | ✅ (Terser) | ❌ | ✅ `drop` | ✅ |
+| Legal comments (measured) | `.LICENSE.txt` per chunk (`build.legalComments`) | dropped | Rsbuild: `.LICENSE.txt`; Rspack: dropped | dropped | dropped | kept inline | dropped |
+| Library mode (es, cjs, umd, iife, `.d.ts`) | ✅ | ✅ (no dts) | ✅ Rslib | ✅ | ✅ | ✅ | ✅ |
+| Persistent build cache | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Remote (shared) cache | ✅ `cache.remote` (HTTP, S3) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Precompressed .gz / .br | ✅ | 🔌 | 🔌 | 🔌 | ✅ | ❌ | ❌ |
+| Bundled dev mode for 10k+ module apps | ❌ | ✅ experimental (8.1) | n/a (bundler) | n/a | n/a | n/a | n/a |
+| Single-file executable | ❌ | ❌ (Vite+: `vp pack`) | ❌ | ❌ | ❌ | ❌ | ✅ `--compile` |
+
+## 6. Advanced options
+
+Options a production project reaches for. A lunx ❌ means neither
+`lunx.config` nor a `vite.config` it reads can set it today.
+
+| option | lunx | Vite | Rsbuild |
+|---|---|---|---|
+| `base`, `outDir`, `publicDir`, `define`, `alias`, env files | ✅ | ✅ | ✅ |
+| `envPrefix`, `envDir` | partial | ✅ | ✅ |
+| `sourcemap` (inline, hidden, external) | ✅ | ✅ | ✅ |
+| `minify` on/off | ✅ | ✅ | ✅ |
+| `cssMinify`, `cssTarget` | ✅ | ✅ | ✅ |
+| `assetsInlineLimit` | ✅ | ✅ | ✅ |
+| `assetsInclude` | ✅ (vite.config, plugin host) | ✅ | ✅ |
+| `emptyOutDir` / `cleanDistPath` | ✅ | ✅ | ✅ |
+| `copyPublicDir` / `copy` | ✅ | ✅ | ✅ |
+| Output file name templates | ✅ entry / chunk / asset | ✅ | ✅ |
+| Chunk splitting | `manualChunks` by package | ✅ `advancedChunks` | ✅ strategies |
+| `chunkSizeWarningLimit`, `reportCompressedSize` | ✅ / always reported | ✅ | ✅ |
+| Preload / prefetch / preconnect hints | ✅ | ✅ | ✅ |
+| `externals` in apps | ✅ `build.external` | ✅ | ✅ |
+| HTML: title, meta, favicon, tags | ✅ `html` | 🔌 | ✅ |
+| `html.cspNonce` | ✅ | ✅ | ✅ `security.nonce` |
+| SRI | ✅ default | ❌ | ✅ |
+| `server.proxy`, `https`, `cors`, `headers`, `open`, `strictPort` | ✅ | ✅ | ✅ |
+| `server.allowedHosts` (DNS rebinding guard) | ✅ on by default, localhost-only CORS | ✅ | ✅ |
+| `server.warmup` | via plugin host | ✅ | n/a |
+| `middlewareMode` (embed in Express) | ✅ | ✅ | ✅ |
+| `writeToDisk` in dev | ❌ | ❌ | ✅ |
+| Environment API (client + SSR + edge in one config) | partial (plugin host) | ✅ | ✅ `environments` |
+| JS API (`build()`, `createServer()`) | ✅ | ✅ | ✅ |
+
+## 7. Toolchain around the bundler
+
+| | lunx | Vite (+ Vite+) | Rstack | Parcel | Bun |
+|---|---|---|---|---|---|
+| Scaffolding | ✅ `lunx create`, 27 templates | ✅ `create-vite`, `vp create` | ✅ | ❌ | ✅ |
+| Test runner | basic `lunx test`; Vitest runs on lunx via `lunx exec vitest` | ✅ Vitest | ✅ Rstest | ❌ | ✅ `bun test` |
+| · DOM environment (jsdom / happy-dom) | ❌ | ✅ | ✅ | | ✅ |
+| · Coverage | ❌ | ✅ | ✅ | | ✅ |
+| · Snapshots | ❌ | ✅ | ✅ | | ✅ |
+| · Browser mode | ❌ | ✅ | ✅ | | ❌ |
+| Type check | ✅ `lunx check`, dev overlay | ✅ `vp check` (tsgo) | ❌ | ❌ | ❌ |
+| Lint | ❌ | ✅ `vp lint` (Oxlint) | ❌ | ❌ | ❌ |
+| Format | ❌ | ✅ `vp fmt` (Oxfmt) | ❌ | ❌ | ❌ |
+| Monorepo task runner with cache | ❌ | ✅ `vp run` | ❌ | ❌ | partial (workspaces) |
+| Bundle analysis | ✅ `lunx analyze`, `lunx why` | 🔌 | ✅ Rsdoctor | ❌ | ❌ |
+| DevTools UI | `lunx inspect` | ✅ Vite DevTools | ✅ Rsdoctor | ❌ | ❌ |
+| Security: CVE gate, SBOM, SRI, secret scan, CSP | ✅ | ❌ | partial (SRI) | ❌ | ❌ |
+| PWA | ✅ built in | 🔌 | 🔌 | 🔌 | ❌ |
+| Electron | ✅ built in | 🔌 | 🔌 | ❌ | ❌ |
+| Plugin ecosystems run unchanged | Vite / Rollup plugins, esbuild plugins | Vite / Rollup | webpack loaders & plugins | Parcel | Bun / esbuild-style |
+| webpack loaders | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Node version manager, package manager | ❌ | ✅ `vp env`, `vp install` | ❌ | ❌ | ✅ |
+
+## 8. Install footprint
+
+Packages in `node_modules` and disk, for what a React + TypeScript app needs
+(lunx-dev alone; Vite with `@vitejs/plugin-react`; webpack with its CLI, dev
+server, HTML plugin and SWC / CSS loaders…).
 
 | tool | packages | disk |
 |---|---|---|
 | esbuild | **2** | **12 MB** |
-| bun | 2 | 83 MB (a whole runtime) |
-| rspack (+cli +dev-server) | 6 | 54 MB |
-| **lunx** | **13** | **35 MB** |
-| vite (+plugin-react) | 16 | 35 MB |
-| parcel | 116 | 109 MB |
-| webpack (+6 loaders/plugins) | 311 | 77 MB |
+| Bun | 2 | 85 MB (a whole runtime) |
+| Rspack (+ CLI, dev server) | 6 | 55 MB |
+| Rsbuild (+ React plugin) | 9 | 59 MB |
+| **lunx** | 11 | **33 MB** |
+| Vite (+ React plugin) | 16 | 34 MB |
+| webpack (+ 7 packages) | 343 | 91 MB |
+| Parcel | 122 | 111 MB |
+| Farm (+ CLI, React plugin) | 340 | 142 MB |
 
-This is the one quantitative column lunx already wins against every
-general-purpose competitor: 13 packages and a 436 KB tarball.
+lunx's 33 MB includes every framework compiler it ships (Vue, Svelte, Solid…
+are loaded only when used) and the security scanner.
 
-## 2. The bar moved in March 2026
+## 9. What others have and lunx does not
 
-Vite 8 ships **Rolldown** — a Rust bundler — as its default, replacing
-esbuild + Rollup, with no opt-in. So the `vite` row above is already a Rust
-pipeline, which is why its build lands at 549 ms rather than the multi-second
-Rollup builds Vite used to post.
+**Closed in 1.2.0** (every item tested: `tests/build/*.test.ts`, the
+browser, parity and template matrices)
 
-That reframes lunx's position: "faster than Vite" was a claim against
-JavaScript Rollup. Against Rolldown, lunx's JavaScript fallback is **3.5×
-behind on dev boot and 2.9× behind on build**. No amount of pipeline tuning in
-JavaScript closes that — the remaining gap is compiler and bundler work that
-belongs in `native/`.
+- P1, correctness: template-literal `import()`; `?worker` imports;
+  `build.target` / browserslist lowering; `build.manifest`; federation type
+  hints (were documented but missing); `cache.remote` (was accepted, did
+  nothing; now HTTP and S3); `NO_COLOR` in error frames.
+- P2, output size: `build.legalComments` (default `linked`). lunx is now
+  second, behind Bun.
+- P3, options: `assetPrefix` / `renderBuiltUrl`, `emptyOutDir`,
+  `copyPublicDir`, `chunkSizeWarningLimit`, file name templates, `external`
+  for apps, `drop`, `cssTarget` / `cssMinify`, `ssrManifest`, prefetch
+  hints, `html` (title, meta, favicon, tags, `cspNonce`), `middlewareMode`,
+  `allowedHosts` / CORS defaults as Vite's, `build()` / `createServer()`.
+- P4, ecosystem: Storybook and Vitest (`lunx exec`), React Compiler, React
+  Server Components on `@vitejs/plugin-rsc`, federation `registerRemotes`,
+  runtime plugins, `shareStrategy`, `import: false` and object remotes, Wasm
+  ESM imports, core-js polyfills (`build.polyfill`).
 
-Turbopack is not a competitor for a general-purpose tool yet. Vercel's own
-post says the standalone, general-purpose bundler is future work — *"our
-immediate focus is on Next.js to start"* and *"In time, we will reach a stable
-state for the general-purpose bundler to be used outside of Next.js"* — and
-production builds are still being brought to parity. It is Next-only, and
-dev-first.
+**Still missing**
 
-## 3. Capability matrix — where "all in one" is actually open
+1. Output: CommonJS tree shaking inside dependencies (Bun's 3–4% lead).
+   Needs Rolldown.
+2. Bundler: chunk import maps (stable hashes, Vite 8.1); a legacy
+   `nomodule` build for browsers without ES modules; bundled dev mode for
+   10k+ module apps.
+3. Federation: the Module Federation Chrome DevTools extension.
+4. Toolchain (Vite+ and Bun): `lunx test` without DOM environment, coverage,
+   snapshots or browser mode (Vitest runs through `lunx exec vitest`); lint
+   (Oxlint) and format (Oxfmt); monorepo task runner with cache;
+   single-file executables.
 
-Measured first-hand where marked ✅/❌ from running the tool; otherwise from
-each project's own documentation.
+**Where lunx leads**
 
-| | lunx | vite 8 | rspack | webpack | parcel | esbuild | bun | turbopack |
-|---|---|---|---|---|---|---|---|---|
-| Framework-agnostic | ✅ | ✅ | ✅ | ✅ | ✅ | partial² | partial² | ❌ Next only |
-| Dev server + HMR | ✅ | ✅ | ✅ (extra pkg) | ✅ (extra pkg) | ✅ | ❌ no HMR | ✅ | ✅ |
-| Production build | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | not stable |
-| CSS bundling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Zero config | ✅ | ✅ | ❌ config required | ❌ config + 6 pkgs | ✅ | n/a | ✅ | ✅ |
-| Test runner | ✅ `lunx test` | ❌ vitest | ❌ rstest | ❌ | ❌ | ❌ | ✅ `bun test` | ❌ |
-| Type checking | ✅ `lunx check` | ❌ tsc | ❌ | ❌ | ❌ | ❌ | ❌ strip only | ❌ |
-| Bundle analysis | ✅ `lunx analyze` | ❌ plugin | ✅ | ✅ plugin | ❌ | ❌ | ❌ | ❌ |
-| Module federation | ✅ | ❌ plugin | ✅ built-in | ✅ built-in | ❌ | ❌ | ❌ | ❌ |
-| SSR / meta-framework | ✅ 20 adapters | ✅ SSR API | ✅ | ✅ | partial | ❌ | partial | ✅ Next |
-| Supply-chain security | ✅ CVE/SBOM/SRI/CSP | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ audit only | ❌ |
-| Package manager / runtime | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+Fastest dev boot, HMR and cold build of every tool with a dev server, at
+both sizes · smallest output after Bun, and smaller per framework than Vite
+and the meta-frameworks' own CLIs · the widest framework list built by one
+tool (10 app frameworks, 12 meta-frameworks built, 5 delegated, plus
+Storybook and Vitest on its engine) · module federation interoperable with
+webpack and Rspack, with the `@module-federation` runtime API · supply-chain
+security, PWA, Electron, `.gz`/`.br`, SRI and license files built in.
 
-² esbuild and bun compile TS/JSX natively but have no built-in compiler for
-Vue or Svelte single-file components; both need a plugin, and neither ships
-one. Rolldown 1.2.12 goes further and **removed CSS bundling entirely** —
-`Bundling CSS is no longer supported (experimental support has been removed)` —
-so it is a bundler library for tools like Vite, not an application build tool.
-
-## 4. What the matrix says about strategy
-
-Two camps exist, and neither covers the whole board:
-
-- **Framework-agnostic but multi-package.** Vite needs Vitest, tsc and plugins;
-  the Rstack family is Rspack + Rsbuild + Rslib + Rstest + Rspress. You get
-  breadth of frameworks, assembled from several installs.
-- **All-in-one but framework-limited.** Bun is the real single-binary
-  story — runtime, package manager, test runner, bundler — but has no built-in
-  Vue or Svelte compiler, no federation, no type checking.
-
-**Nobody ships framework-agnostic *and* all-in-one.** That intersection is
-lunx's entire reason to exist, and the capability column above is the only one
-where it is already ahead: a single `npm i lunx-dev` that has dev, build, test,
-check, analyze, federation, SSR adapters and supply-chain security, for any
-framework.
-
-The risk is that the breadth is claimed rather than verified. In this session,
-benchmarking the *packaged* CLI found `lunx build`, `lunx test` and
-`require('lunx-dev')` fatally broken on publish, and an adapter registry that
-had never been built — so every one of the 20 framework adapters was silently
-inert. Breadth that crashes is worth less than narrowness that works.
-
-Sources for the non-measured claims:
-[Vite 8 beta announcement](https://vite.dev/blog/announcing-vite8-beta),
-[Turbopack: Moving homes](https://vercel.com/blog/turbopack-moving-homes),
-[Rolldown 1.0](https://voidzero.dev/posts/announcing-rolldown-1-0),
-[Rstest](https://rstest.rs/guide/start/).
+---
+Sources for documentation-based cells:
+[Vite+ alpha](https://voidzero.dev/posts/announcing-vite-plus-alpha),
+[Vite 8.1](https://vite.dev/blog/announcing-vite8-1),
+[Rsbuild 2.0](https://rsbuild.rs/blog/v2-0),
+[Rspack 2.0](https://rspack.rs/blog/announcing-2-0),
+[Parcel RSC](https://parceljs.org/recipes/rsc),
+[Bun full-stack](https://bun.com/docs/bundler/fullstack),
+[Bun executables](https://bun.com/docs/bundler/executables),
+[Turbopack](https://vercel.com/blog/turbopack-moving-homes).

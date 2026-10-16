@@ -29,7 +29,7 @@ for (const fw of workerData.warm ?? []) {
 parentPort!.on('message', async (job: Job) => {
     try {
         const out = await transformer.transform({ filePath: job.file, code: job.code, framework: job.framework as any, root: workerData.root, isDev: false });
-        parentPort!.postMessage({ id: job.id, code: out.code });
+        parentPort!.postMessage({ id: job.id, code: out.code, css: out.css });
     } catch (err: any) {
         parentPort!.postMessage({ id: job.id, error: { message: err?.message ?? String(err), stack: err?.stack } });
     }

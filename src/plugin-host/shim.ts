@@ -4,8 +4,11 @@
  * here (see ./loader.ts), so Vite itself is never loaded.
  */
 
+import fs from 'node:fs';
+import { builtinModules } from 'node:module';
 import path from 'node:path';
-import { oxcTransform } from '../engines/toolkit.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createResolver, oxcTransform } from '../engines/toolkit.js';
 import { parse as parseCode } from '../engines/index.js';
 import { compileCss, isCssModule } from '../build/css.js';
 import { resolveConfig } from './config.js';
@@ -128,6 +131,58 @@ export function send(req: any, res: any, content: string | Buffer, type: string,
     for (const [k, v] of Object.entries(options.headers ?? {})) res.setHeader(k, v);
     res.statusCode = 200;
     res.end(content);
+}
+
+/**
+ * Vite's `fetchModule(environment, url, importer, options)`: what a module runner
+ * (Vitest's, a framework's) gets for a module. Builtins, URLs and bare imports run
+ * natively in Node (externalized, by Node's resolution); everything else comes back
+ * transformed for the runner, with its source map inlined.
+ */
+export async function fetchModule(environment: any, url: string, importer?: string, options: { cached?: boolean; inlineSourceMap?: boolean; startOffset?: number } = {}): Promise<any> {
+    if (url.startsWith('data:') || url.startsWith('node:') || builtinModules.includes(url)) return { externalize: url, type: 'builtin' };
+    const isFileUrl = url.startsWith('file://');
+    if (/^(https?:)?\/\//.test(url) && !isFileUrl) return { externalize: url, type: 'network' };
+    if (!isFileUrl && importer && url[0] !== '.' && url[0] !== '/' && !url.startsWith('\0') && !url.startsWith('virtual:')) {
+        const conditions: string[] = (environment.config?.resolve?.externalConditions ?? []).concat(['node', 'import', 'module', 'default']);
+        const resolver = createResolver({ conditionNames: [...new Set<string>(conditions)], mainFields: ['module', 'main'], extensions: ['.mjs', '.js', '.cjs', '.json', '.node'] });
+        const from = path.dirname(cleanUrl(importer.startsWith('file://') ? fileURLToPath(importer) : importer));
+        const resolved = resolver.resolve(from, url);
+        if (!resolved) throw new Error(`Cannot find module '${url}' imported from '${importer}'`);
+        return { externalize: pathToFileURL(resolved).href, type: isModuleFile(resolved) ? 'module' : 'commonjs' };
+    }
+    if (isFileUrl) url = fileURLToPath(url);
+    url = url.replace(/^\/@id\/__x00__/, '\0').replace(/^\/@id\//, '');
+    const mod = await environment.moduleGraph.ensureEntryFromUrl(url);
+    const cached = !!mod.transformResult;
+    if (options.cached && cached) return { cache: true };
+    const result = await environment.transformRequest(url);
+    if (!result) throw new Error(`[vite] transform failed for module '${url}'`);
+    let code: string = result.code;
+    if (options.inlineSourceMap !== false && result.map) {
+        const map = typeof result.map === 'string' ? JSON.parse(result.map) : { ...result.map };
+        if (options.startOffset) map.mappings = ';'.repeat(options.startOffset) + map.mappings;
+        code = `${code.replace(/\n\/\/# sourceMappingURL=.*$/m, '')}\n//# sourceMappingSource=vite-generated\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${Buffer.from(JSON.stringify(map)).toString('base64')}`;
+    }
+    if (code[0] === '#') code = code.replace(/^#!.*/, (line) => ' '.repeat(line.length));
+    return { code, file: mod.file, id: mod.id, url: mod.url, invalidate: !cached };
+}
+
+/** Whether Node loads `file` as an ES module (.mjs, or "type": "module" in its package). */
+function isModuleFile(file: string): boolean {
+    if (file.endsWith('.mjs')) return true;
+    if (file.endsWith('.cjs') || !file.endsWith('.js')) return false;
+    for (let dir = path.dirname(file); ; dir = path.dirname(dir)) {
+        const manifest = path.join(dir, 'package.json');
+        if (fs.existsSync(manifest)) {
+            try {
+                return JSON.parse(fs.readFileSync(manifest, 'utf8')).type === 'module';
+            } catch {
+                return false;
+            }
+        }
+        if (path.dirname(dir) === dir) return false;
+    }
 }
 
 export function isRunnableDevEnvironment(env: any): boolean {

@@ -37,7 +37,8 @@ type HmrMessage =
     | { type: 'full-reload' }
     | { type: 'reload' }
     | { type: 'error'; error?: ServerError; message?: string; stack?: string }
-    | { type: 'error-fixed' };
+    | { type: 'error-fixed' }
+    | { type: 'typecheck'; errors: ServerError[] };
 
 const hotModules = new Map<string, HotModule>();
 const listeners = new Map<string, Array<(payload: unknown) => void>>();
@@ -55,9 +56,18 @@ function stamp(key: string): void {
 // ─── Error overlay ────────────────────────────────────────────────────────────
 
 let overlay: any = null;
+let buildError: ServerError | null = null;
+let typeErrors: ServerError[] = [];
 
-async function showError(err: ServerError): Promise<void> {
-    console.error(`[lunx] ${err.file ? err.file + ': ' : ''}${err.message}`);
+/** The overlay shows the build error, if any, and the type errors (`server.typecheck`). */
+async function renderOverlay(): Promise<void> {
+    const errors = [...(buildError ? [{ type: 'build', ...buildError }] : []), ...typeErrors.map((e) => ({ type: 'typecheck', ...e }))];
+    if (!errors.length) {
+        overlay?.dismiss?.();
+        overlay?.remove?.();
+        overlay = null;
+        return;
+    }
     try {
         const overlayUrl = '/@lunx/error-overlay.js';
         await import(/* @vite-ignore */ overlayUrl);
@@ -65,16 +75,28 @@ async function showError(err: ServerError): Promise<void> {
             overlay = document.createElement('lunx-error-overlay');
             document.body.appendChild(overlay);
         }
-        overlay.errors = [{ type: 'build', ...err }];
+        overlay.style.display = '';
+        overlay.errors = errors;
     } catch {
-        /* the console message above is the fallback */
+        /* the console messages are the fallback */
     }
 }
 
+function showError(err: ServerError): Promise<void> {
+    console.error(`[lunx] ${err.file ? err.file + ': ' : ''}${err.message}`);
+    buildError = err;
+    return renderOverlay();
+}
+
 function clearError(): void {
-    overlay?.dismiss?.();
-    overlay?.remove?.();
-    overlay = null;
+    buildError = null;
+    void renderOverlay();
+}
+
+function showTypeErrors(errors: ServerError[]): void {
+    for (const e of errors) console.warn(`[lunx] ${e.file}:${e.line}:${e.column} ${e.message}`);
+    typeErrors = errors;
+    void renderOverlay();
 }
 
 // ─── Updates ──────────────────────────────────────────────────────────────────
@@ -170,6 +192,9 @@ function onMessage(raw: string): void {
             break;
         case 'error-fixed':
             clearError();
+            break;
+        case 'typecheck':
+            showTypeErrors(msg.errors);
             break;
         case 'custom':
             // A plugin's server.hot.send(event, data): import.meta.hot.on(event) listeners.
