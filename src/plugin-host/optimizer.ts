@@ -63,9 +63,26 @@ function cjsExportNames(file: string, source: string, resolveRequire?: (spec: st
         const mod = resolveRequire ? evaluateCjs(file, resolveRequire) : require(file);
         if (mod && (typeof mod === 'object' || typeof mod === 'function')) keys = Object.keys(mod);
     } catch {
-        for (const m of source.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|Object\.defineProperty\(\s*(?:module\.)?exports\s*,\s*['"]([A-Za-z_$][\w$]*)['"]/g)) keys.push((m[1] ?? m[2])!);
+        keys = staticCjsExports(file, source);
     }
     return [...new Set(keys)].filter((k) => /^[A-Za-z_$][\w$]*$/.test(k) && !RESERVED.has(k));
+}
+
+/**
+ * Export names read from the source, when evaluating the module failed (it touches browser
+ * globals as it loads): `exports.x =` assignments, following React's
+ * `module.exports = require('./cjs/x.production.js')` re-exports.
+ */
+function staticCjsExports(file: string, source: string, depth = 0): string[] {
+    const keys: string[] = [];
+    for (const m of source.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|Object\.defineProperty\(\s*(?:module\.)?exports\s*,\s*['"]([A-Za-z_$][\w$]*)['"]/g)) keys.push((m[1] ?? m[2])!);
+    const reexport = /module\.exports\s*=\s*require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/.exec(source);
+    if (!keys.length && reexport && depth < 5) {
+        const target = path.resolve(path.dirname(file), reexport[1]!);
+        const resolved = [target, `${target}.js`, `${target}.cjs`].find((f) => fs.existsSync(f) && fs.statSync(f).isFile());
+        if (resolved) return staticCjsExports(resolved, fs.readFileSync(resolved, 'utf-8'), depth + 1);
+    }
+    return keys;
 }
 
 /** The package directory containing a resolved file. */
@@ -149,13 +166,18 @@ export class DepsOptimizer {
     /** Should this bare import be served pre-bundled? */
     shouldOptimize(spec: string, resolved: string): boolean {
         if (this.options.noDiscovery && !this.deps.has(spec)) return false;
-        return this.optimizable(spec, resolved);
+        return this.optimizable(spec, resolved, this.included(spec));
     }
 
-    private optimizable(spec: string, resolved: string): boolean {
+    /** Listed in `optimizeDeps.include` itself: pre-bundled even inside an excluded package (as Vite). */
+    private included(spec: string): boolean {
+        return arraify(this.options.include ?? []).some((e: string) => e.split('>').pop()!.trim() === spec);
+    }
+
+    private optimizable(spec: string, resolved: string, included = false): boolean {
         // JSX/TSX sources (Solid, Qwik libraries) need the framework's compiler: served raw, never bundled here.
         if (!/[\\/]node_modules[\\/]/.test(resolved) || !/\.(m|c)?js$/.test(resolved)) return false;
-        return !this.exclude(spec);
+        return included || !this.exclude(spec);
     }
 
     private _requireResolver?: (spec: string, dir: string) => string | null;
@@ -211,7 +233,7 @@ export class DepsOptimizer {
         }
         if (this.deps.has(spec) || builtinModules.includes(spec) || spec.startsWith('node:')) return false;
         const resolved = this.resolve(spec, fromDir);
-        if (!resolved || !this.optimizable(spec, resolved)) return false;
+        if (!resolved || !this.optimizable(spec, resolved, this.included(entry.trim()) || this.included(spec))) return false;
         this.deps.set(spec, resolved);
         return true;
     }

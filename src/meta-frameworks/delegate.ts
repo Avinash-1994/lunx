@@ -53,6 +53,8 @@ export const META_FRAMEWORKS: MetaFramework[] = [
     // Qwik City renders server-side in dev only in `--mode ssr` (its starter's dev script).
     { ...viteLike('Qwik City', ['@builder.io/qwik-city', '@qwik.dev/router']), args: { dev: ['--mode', 'ssr'], build: ['build'], preview: ['preview'] } },
     viteLike('Analog', ['@analogjs/platform']),
+    // A React Server Components app on Vite's own plugin (no framework): its rsc / ssr / client environments.
+    viteLike('React Server Components', ['@vitejs/plugin-rsc']),
 ];
 
 export function detectMetaFramework(root: string): MetaFramework | null {
@@ -131,6 +133,7 @@ const NATIVE: Record<string, Partial<Record<Command, 'vite' | `vite:${string}` |
     'Marko Run': { dev: ['dev'], build: ['build'] },
     Remix: { dev: ['vite:dev'], build: ['vite:build'] },
     Analog: { dev: 'vite', build: 'vite' },
+    'React Server Components': { dev: 'vite', build: 'vite' },
 };
 
 /**
