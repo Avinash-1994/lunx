@@ -23,7 +23,8 @@ import { BuildConfig } from '../config/index.js';
 import { metaEnvFrom, replaceHtmlEnv } from '../build/html-env.js';
 import { addNonce, applyHtmlOptions } from '../build/html-options.js';
 import { corsOrigin, hostAllowed } from './access.js';
-import { wasmInitModule } from '../build/wasm-init.js';
+import { declaresReactCompiler } from '../core/react-compiler.js';
+import { wasmEsmModule, wasmInitModule } from '../build/wasm-init.js';
 import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from '../build/svg-component.js';
 import { log } from '../utils/logger.js';
 import { PluginManager } from '../plugins/index.js';
@@ -107,6 +108,10 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
 
         if (federation?.isRemote(specifier)) {
           replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.remoteUrl(specifier)) });
+          return;
+        }
+        if (federation?.isRuntime(specifier)) {
+          replacements.push({ start: node.start, end: node.end, replacement: JSON.stringify(federation.runtimeUrl) });
           return;
         }
         if (federation?.isShared(specifier)) {
@@ -369,7 +374,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
   // 3. Initialize Universal Transformer
   const { UniversalTransformer } = await import('../core/universal-transformer.js');
-  const universalTransformer = new UniversalTransformer(cfg.root);
+  const universalTransformer = new UniversalTransformer(cfg.root, { react: (cfg as any).react });
   const workerThreads = Math.max(2, require('os').cpus().length - 2); // Leave 2 for OS + watcher
   const nativeWorker = new NativeWorker(workerThreads);
   const pluginManager = new PluginManager();
@@ -503,7 +508,9 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       mithril: ['mithril']
     };
 
-    const defaultDeps = frameworkDeps[primaryFramework] || [];
+    const defaultDeps = [...(frameworkDeps[primaryFramework] || [])];
+    // The React Compiler's output imports react/compiler-runtime, which no source file names.
+    if ((cfg as any).react?.compiler !== false && ((cfg as any).react?.compiler || declaresReactCompiler(cfg.root))) defaultDeps.push('react/compiler-runtime');
 
     // Scanning the sources for imports and pre-bundling run in the background, as in
     // Vite: the server answers at once, and module requests wait for prebundleReady.
@@ -1923,6 +1930,13 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       if (ext === '.wasm' && /[?&]init\b/.test(url)) {
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
         res.end(wasmInitModule(JSON.stringify(url.split('?')[0])));
+        return;
+      }
+      // `import { add } from './add.wasm'`: the WebAssembly ESM integration, as in the build.
+      if (ext === '.wasm' && /[?&]import\b/.test(url) && !appDev?.app.plugins.some((p: any) => p.name === 'vite-plugin-wasm')) {
+        const code = wasmEsmModule(await fs.readFile(filePath), JSON.stringify(url.split('?')[0]));
+        res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+        res.end(await rewriteImports(code, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath));
         return;
       }
       if (url.includes('?url') || /[?&]import\b/.test(url)) {

@@ -19,6 +19,7 @@ import type { BuildConfig } from '../config/index.js';
 import { getBundler, parse, type OutputItem } from '../engines/index.js';
 import { dynamicImportVarsPlugin } from '../engines/rolldown.js';
 import { resolveTargets } from './targets.js';
+import { compileReact, declaresReactCompiler, mayHaveComponents, reactCompiler, type ReactCompilerConfig } from '../core/react-compiler.js';
 import { addNonce, applyHtmlOptions } from './html-options.js';
 import { CompilePool, MIN_POOL_FILES, type Compiled } from './compile-pool.js';
 import { transformGlobImports } from './glob-import.js';
@@ -29,7 +30,7 @@ import { consumeRemoteTypes, dtsSides, generateRemoteTypes } from '../federation
 import { looksLikeJsx } from '../core/jsx-detect.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile, type CompiledCss } from './css.js';
 import { metaEnvFrom, replaceHtmlEnv } from './html-env.js';
-import { wasmInitModule } from './wasm-init.js';
+import { wasmEsmModule, wasmInitModule } from './wasm-init.js';
 import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from './svg-component.js';
 import { pwaFiles, pwaHeadTags, pwaOptions, writeServiceWorker } from './pwa.js';
 import type { AppPlugins } from '../plugin-host/app-plugins.js';
@@ -462,6 +463,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             : []),
         dynamicImportVars,
         ...(legalComments === 'linked' ? [legalCommentsPlugin()] : []),
+        ...(await reactCompilerPlugin(root, framework, (config as any).react, app)),
         {
             name: 'lunx:glob-import',
             transform: {
@@ -516,6 +518,11 @@ export async function productionBuild(config: BuildConfig, framework: string, op
                 if (svgRuntime) return { code: svgComponent(await fsp.readFile(file, 'utf8'), svgRuntime), moduleType: 'js' };
                 if (/\.wasm$/i.test(file) && /[?&]init\b/.test(query)) {
                     return { code: wasmInitModule(JSON.stringify(emitAsset(this, file, await fsp.readFile(file)))), moduleType: 'js' };
+                }
+                // `import { add } from './add.wasm'` (WebAssembly ESM integration, Vite 8.1); vite-plugin-wasm, when installed, keeps it.
+                if (/\.wasm$/i.test(file) && !query && !app?.plugins.some((p: any) => p.name === 'vite-plugin-wasm')) {
+                    const bytes = await fsp.readFile(file);
+                    return { code: wasmEsmModule(bytes, JSON.stringify(emitAsset(this, file, bytes))), moduleType: 'js' };
                 }
                 const wantsUrl = /[?&]url\b/.test(query);
                 const wantsRaw = /[?&]raw\b/.test(query);
@@ -1227,4 +1234,28 @@ function legalCommentsPlugin(): any {
             }
         },
     };
+}
+
+/**
+ * The React Compiler on the app's components and hooks (src/core/react-compiler.ts),
+ * before Oxc compiles JSX and TypeScript. Left to @vitejs/plugin-react when a
+ * vite.config uses it (its Babel options carry the compiler there).
+ */
+async function reactCompilerPlugin(root: string, framework: string, react: ReactCompilerConfig | undefined, app: AppPlugins | null): Promise<any[]> {
+    if (framework !== 'react' && !react?.compiler) return [];
+    if (react?.compiler === false || (!react?.compiler && !declaresReactCompiler(root))) return [];
+    if (app?.plugins.some((p: any) => typeof p.name === 'string' && p.name.startsWith('vite:react'))) return [];
+    const compiler = reactCompiler(root, react);
+    if (!compiler) return [];
+    return [{
+        name: 'lunx:react-compiler',
+        transform: {
+            filter: { id: { include: /\.[mc]?[jt]sx?(\?.*)?$/, exclude: /node_modules/ } },
+            async handler(code: string, id: string) {
+                const file = cleanId(id);
+                if (!mayHaveComponents(file, code)) return null;
+                return compileReact(compiler, file, code);
+            },
+        },
+    }];
 }

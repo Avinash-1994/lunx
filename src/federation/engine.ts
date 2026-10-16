@@ -15,7 +15,7 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { runtimeSource, type RuntimeShared } from './runtime-source.js';
+import { runtimeSource, type RuntimeExtras, type RuntimeShared } from './runtime-source.js';
 
 export interface SharedOptions {
     singleton?: boolean;
@@ -29,13 +29,20 @@ export interface FederationOptions {
     name: string;
     filename?: string;
     exposes?: Record<string, string>;
-    remotes?: Record<string, string>;
+    /** 'name@url' (a script container), a URL (an ES module container), or { entry, name?, type? }. */
+    remotes?: Record<string, string | RemoteOptions>;
     shared?: string[] | Record<string, SharedOptions | boolean | string>;
+    /** How shared versions are picked: 'loaded-first' (default) or 'version-first' (all remotes join first). */
+    shareStrategy?: 'loaded-first' | 'version-first';
+    /** Runtime plugins: files default-exporting a plugin (beforeRequest, onLoad, errorLoadRemote) or a function returning one. */
+    runtimePlugins?: string[];
     /** Type hints (src/federation/types.ts): `false`, or `{ generateTypes, consumeTypes }`. */
     dts?: boolean | { generateTypes?: boolean; consumeTypes?: boolean };
 }
 
 const RUNTIME = 'lunx-mf:runtime';
+/** Specifiers app code may import the runtime API from. */
+export const RUNTIME_ALIASES = new Set(['lunx-mf:runtime', '@module-federation/runtime', '@module-federation/enhanced/runtime']);
 const INIT = 'lunx-mf:init';
 const P = '\0lunx-mf:';
 
@@ -74,9 +81,33 @@ export function normalizeShared(root: string, shared: FederationOptions['shared'
             singleton: !!opts.singleton,
             strictVersion: !!opts.strictVersion,
             eager: !!opts.eager,
+            ...((opts as any).import === false ? { import: false } : {}),
         };
     }
     return out;
+}
+
+export interface RemoteOptions {
+    entry: string;
+    /** The global a script container sets (webpack's `name@url`). */
+    name?: string;
+    /** 'module' (an ES module, lunx's) or 'script' (webpack / Rspack). Default: module, or script when `name` is set. */
+    type?: 'module' | 'script' | 'var';
+}
+
+/** Remotes as `name@url` / URL strings, from strings or { entry, name, type }. */
+export function normalizeRemotes(remotes: FederationOptions['remotes']): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, spec] of Object.entries(remotes ?? {})) {
+        if (typeof spec === 'string') out[key] = spec;
+        else if (spec && typeof spec === 'object' && spec.entry) out[key] = spec.type === 'script' || spec.type === 'var' || spec.name ? `${spec.name ?? key}@${spec.entry}` : spec.entry;
+    }
+    return out;
+}
+
+/** What the runtime is built with besides shared and remotes. */
+export function runtimeExtras(options: FederationOptions, pluginSpec: (file: string) => string): RuntimeExtras {
+    return { shareStrategy: options.shareStrategy, plugins: (options.runtimePlugins ?? []).map(pluginSpec) };
 }
 
 /** `name@url` (webpack) or a plain URL → the URL. */
@@ -100,7 +131,7 @@ export function exposeEntryName(key: string): string {
 export function federationEnginePlugin(options: FederationOptions, root: string, entries: Set<string>): any {
     const shared = normalizeShared(root, options.shared);
     const sharedNames = Object.keys(shared);
-    const remotes = options.remotes ?? {};
+    const remotes = normalizeRemotes(options.remotes);
     const remoteNames = Object.keys(remotes);
     const remoteRe = remoteNames.length ? `(?:${remoteNames.map(escapeRe).join('|')})(?:/[^'"\`]*)?` : null;
     const dynamicRe = remoteRe ? new RegExp(`\\bimport\\(\\s*(['"\`])(${remoteRe})\\1\\s*\\)`, 'g') : null;
@@ -111,6 +142,8 @@ export function federationEnginePlugin(options: FederationOptions, root: string,
         name: 'lunx:federation',
         async resolveId(id: string, importer: string | undefined, extra: any) {
             if (id === RUNTIME || id === INIT) return P + id.slice('lunx-mf:'.length);
+            // Code written for @module-federation/runtime (loadRemote, registerRemotes…) runs on lunx's.
+            if (RUNTIME_ALIASES.has(id)) return P + 'runtime';
             if (id.startsWith('lunx-mf-real:')) return P + 'real:' + id.slice('lunx-mf-real:'.length);
             if (id.startsWith('lunx-mf-preload:')) return P + 'preload:' + id.slice('lunx-mf-preload:'.length);
             if (importer?.startsWith(P + 'real:')) {
@@ -124,7 +157,7 @@ export function federationEnginePlugin(options: FederationOptions, root: string,
         load(id: string) {
             if (!id.startsWith(P)) return null;
             const rest = id.slice(P.length);
-            if (rest === 'runtime') return { code: runtimeSource(options.name, shared, remotes), moduleType: 'js' };
+            if (rest === 'runtime') return { code: runtimeSource(options.name, shared, remotes, undefined, runtimeExtras(options, (f) => path.resolve(root, f))), moduleType: 'js' };
             if (rest === 'init') return { code: `import { ensureShared } from ${JSON.stringify(RUNTIME)};\nawait ensureShared();\n`, moduleType: 'js' };
             const [kind, spec] = [rest.slice(0, rest.indexOf(':')), rest.slice(rest.indexOf(':') + 1)];
             // A factory, so loading the chunk does not evaluate the package yet.
@@ -251,7 +284,7 @@ export default { name, init, get };
         name: options.name,
         remoteEntry: fileName,
         exposes,
-        remotes: Object.fromEntries(Object.entries(options.remotes ?? {}).map(([k, v]) => [k, remoteUrl(v)])),
+        remotes: Object.fromEntries(Object.entries(normalizeRemotes(options.remotes)).map(([k, v]) => [k, remoteUrl(v)])),
         shared: normalizeShared(root, options.shared),
         css: cssFiles,
     };

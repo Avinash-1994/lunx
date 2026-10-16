@@ -4,6 +4,7 @@
  * Automatically adapts to the installed version
  */
 
+import { compileReact, declaresReactCompiler, reactCompiler, type ReactCompilerConfig } from './react-compiler.js';
 import path from 'path';
 import { createHash } from 'crypto';
 import { looksLikeJsx } from './jsx-detect.js';
@@ -85,9 +86,13 @@ export class UniversalTransformer {
     private transformCache: Map<string, TransformResult> = new Map();
     private cacheEnabled: boolean = true;
 
-    constructor(root: string, options?: { cache?: boolean }) {
+    /** `react` in lunx.config (the React Compiler setting). */
+    private readonly react?: ReactCompilerConfig;
+
+    constructor(root: string, options?: { cache?: boolean; react?: ReactCompilerConfig }) {
         this.root = root;
         this.cacheEnabled = options?.cache !== false;
+        this.react = options?.react;
     }
 
     /**
@@ -254,6 +259,13 @@ export class UniversalTransformer {
             const reactVersion = await this.getPackageVersion('react');
             const majorReact = reactVersion ? parseInt(reactVersion, 10) : NaN;
             const useAutomatic = !!jsxOptions?.importSource || !Number.isFinite(majorReact) || majorReact >= 17;
+
+            // The React Compiler (automatic memoization), when the project has it.
+            if (!jsxOptions?.importSource && !filePath.includes('node_modules') && (this.react?.compiler || (this.react?.compiler !== false && declaresReactCompiler(this.root)))) {
+                const compiler = reactCompiler(this.root, this.react);
+                const memoized = compiler ? await compileReact(compiler, filePath, code) : null;
+                if (memoized) code = memoized.code;
+            }
 
             const output = compile(filePath, code, {
                 lang: ext === '.tsx' ? 'tsx' : 'jsx',

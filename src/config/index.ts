@@ -52,7 +52,11 @@ export const BuildConfigSchema = z.object({
     filename: z.string().optional(),
     singletonHost: z.string().optional(),
     exposes: z.record(z.string(), z.string()).optional(),
-    remotes: z.record(z.string(), z.string()).optional(),
+    remotes: z.record(z.string(), z.union([z.string(), z.object({ entry: z.string(), name: z.string().optional(), type: z.enum(['module', 'script', 'var']).optional() })])).optional(),
+    /** How shared versions are picked: 'loaded-first' (default) or 'version-first' (every remote joins the scope first). */
+    shareStrategy: z.enum(['loaded-first', 'version-first']).optional(),
+    /** Runtime plugin files (beforeRequest, onLoad, errorLoadRemote), as @module-federation/runtime's. */
+    runtimePlugins: z.array(z.string()).optional(),
     shared: z.union([
       z.array(z.string()),
       z.record(z.string(), z.union([z.boolean(), z.string(), z.object({
@@ -61,6 +65,8 @@ export const BuildConfigSchema = z.object({
         strictVersion: z.boolean().optional(),
         eager: z.boolean().optional(),
         version: z.string().optional(),
+        /** false: no copy of its own, it must come from another app's share scope. */
+        import: z.literal(false).optional(),
       })])),
     ]).optional(),
     /** Type hints across apps (`@mf-types`, as `@module-federation`'s dts plugin): on by default in TypeScript projects. */
@@ -149,6 +155,8 @@ export const BuildConfigSchema = z.object({
     })).optional(),
     cspNonce: z.string().optional(),
   }).optional(),
+  /** React: `compiler` runs the React Compiler (babel-plugin-react-compiler) on components; on when it is installed. */
+  react: z.object({ compiler: z.union([z.boolean(), z.record(z.string(), z.any())]).optional() }).optional(),
   /** Public base path the app is served from, e.g. '/my-app/'. */
   base: z.string().optional(),
   /** Global constant replacements, e.g. { __APP_VERSION__: '"1.2.3"' }. */
@@ -297,7 +305,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
   'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib',
-  'electron', 'pwa', 'html', 'experimental',
+  'electron', 'pwa', 'html', 'experimental', 'react',
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {

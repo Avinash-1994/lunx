@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import type { FederationOptions } from './engine.js';
+import { normalizeRemotes, type FederationOptions } from './engine.js';
 
 export const TYPES_FOLDER = '@mf-types';
 const COMPILED = 'compiled-types';
@@ -69,7 +69,7 @@ export async function generateRemoteTypes(root: string, outDir: string, options:
 
 /** A host: each remote's types into `@mf-types/<remote>/`. Returns the remotes whose types arrived. */
 export async function consumeRemoteTypes(root: string, options: FederationOptions, timeoutMs = 5000): Promise<string[]> {
-    const remotes = Object.entries(options.remotes ?? {});
+    const remotes = Object.entries(normalizeRemotes(options.remotes));
     if (!remotes.length || !['tsconfig.json', 'jsconfig.json'].some((f) => fs.existsSync(path.join(root, f)))) return [];
     const typesRoot = path.join(root, TYPES_FOLDER);
     const got: string[] = [];

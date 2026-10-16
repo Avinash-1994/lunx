@@ -14,7 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import type http from 'http';
 import { parse } from '../engines/index.js';
-import { normalizeShared, type FederationOptions } from './engine.js';
+import { normalizeRemotes, normalizeShared, runtimeExtras, RUNTIME_ALIASES, type FederationOptions } from './engine.js';
 import { runtimeSource, type RuntimeShared } from './runtime-source.js';
 
 const RUNTIME_URL = '/@lunx-mf/runtime.js';
@@ -59,12 +59,14 @@ export function exportNames(file: string, code: string): string[] {
 export class DevFederation {
     readonly shared: Record<string, RuntimeShared>;
     private readonly remoteNames: string[];
+    private readonly remotes: Record<string, string>;
     private readonly fileName: string;
     private nextId = 0;
 
     constructor(private options: FederationOptions, private ctx: DevFederationContext) {
         this.shared = normalizeShared(ctx.root, options.shared);
-        this.remoteNames = Object.keys(options.remotes ?? {});
+        this.remotes = normalizeRemotes(options.remotes);
+        this.remoteNames = Object.keys(this.remotes);
         this.fileName = '/' + (options.filename ?? 'remoteEntry.js').replace(/\.json$/, '.js').replace(/^\/+/, '');
         // A host: the remotes' type hints into @mf-types/, in the background.
         import('./types.js').then(({ consumeRemoteTypes, dtsSides }) => (dtsSides(options).consume ? consumeRemoteTypes(ctx.root, options) : null)).catch(() => {});
@@ -72,6 +74,15 @@ export class DevFederation {
 
     isRemote(spec: string): boolean {
         return this.remoteNames.some((n) => spec === n || spec.startsWith(n + '/'));
+    }
+
+    /** `lunx-mf:runtime` / `@module-federation/runtime`: the runtime API, served at its URL. */
+    isRuntime(spec: string): boolean {
+        return RUNTIME_ALIASES.has(spec);
+    }
+
+    get runtimeUrl(): string {
+        return RUNTIME_URL;
     }
 
     isShared(spec: string): boolean {
@@ -142,10 +153,10 @@ export class DevFederation {
 
     private async runtime(): Promise<string> {
         const deps = await this.ctx.deps();
-        return runtimeSource(this.options.name, this.shared, this.options.remotes ?? {}, (pkg) => {
+        return runtimeSource(this.options.name, this.shared, this.remotes, (pkg) => {
             const url = deps.get(pkg) ?? `/@lunx-deps/${safeName(pkg)}.js`;
             return `() => import(${JSON.stringify(url)}).then((m) => () => m)`;
-        });
+        }, runtimeExtras(this.options, (f) => '/' + path.relative(this.ctx.root, path.resolve(this.ctx.root, f)).split(path.sep).join('/')));
     }
 
     private async sharedModule(safe: string): Promise<string | null> {
