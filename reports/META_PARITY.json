@@ -4,16 +4,16 @@
     {
       "name": "sveltekit",
       "lunx": {
-        "ms": 1558,
+        "ms": 1889,
         "jsFiles": 9,
-        "jsGzip": 28327,
+        "jsGzip": 28329,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 2786,
+        "ms": 4629,
         "jsFiles": 11,
-        "jsGzip": 30950,
+        "jsGzip": 30945,
         "cssFiles": 0,
         "cssGzip": 0
       },
@@ -22,14 +22,14 @@
     {
       "name": "nuxt",
       "lunx": {
-        "ms": 5648,
+        "ms": 5864,
         "jsFiles": 5,
         "jsGzip": 55103,
         "cssFiles": 2,
         "cssGzip": 1571
       },
       "native": {
-        "ms": 7659,
+        "ms": 10233,
         "jsFiles": 4,
         "jsGzip": 54830,
         "cssFiles": 2,
@@ -40,14 +40,14 @@
     {
       "name": "astro",
       "lunx": {
-        "ms": 1240,
+        "ms": 1293,
         "jsFiles": 0,
         "jsGzip": 0,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 1660,
+        "ms": 1837,
         "jsFiles": 0,
         "jsGzip": 0,
         "cssFiles": 0,
@@ -58,14 +58,14 @@
     {
       "name": "react-router",
       "lunx": {
-        "ms": 1125,
+        "ms": 1314,
         "jsFiles": 5,
         "jsGzip": 96124,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 2552,
+        "ms": 3622,
         "jsFiles": 5,
         "jsGzip": 98999,
         "cssFiles": 0,
@@ -76,14 +76,14 @@
     {
       "name": "remix",
       "lunx": {
-        "ms": 1260,
+        "ms": 1403,
         "jsFiles": 6,
         "jsGzip": 82870,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 11579,
+        "ms": 13448,
         "jsFiles": 6,
         "jsGzip": 85451,
         "cssFiles": 0,
@@ -94,14 +94,14 @@
     {
       "name": "vitepress",
       "lunx": {
-        "ms": 2198,
+        "ms": 2594,
         "jsFiles": 4,
         "jsGzip": 53958,
         "cssFiles": 2,
         "cssGzip": 18966
       },
       "native": {
-        "ms": 3659,
+        "ms": 5364,
         "jsFiles": 5,
         "jsGzip": 56950,
         "cssFiles": 2,
@@ -112,14 +112,14 @@
     {
       "name": "solidstart",
       "lunx": {
-        "ms": 8183,
+        "ms": 8342,
         "jsFiles": 3,
         "jsGzip": 17200,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 10485,
+        "ms": 12356,
         "jsFiles": 3,
         "jsGzip": 18047,
         "cssFiles": 0,
@@ -130,16 +130,16 @@
     {
       "name": "waku",
       "lunx": {
-        "ms": 1806,
+        "ms": 2027,
         "jsFiles": 3,
         "jsGzip": 86162,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 1697,
+        "ms": 1936,
         "jsFiles": 2,
-        "jsGzip": 85476,
+        "jsGzip": 85474,
         "cssFiles": 0,
         "cssGzip": 0
       },
@@ -148,14 +148,14 @@
     {
       "name": "tanstack-start",
       "lunx": {
-        "ms": 1559,
+        "ms": 1603,
         "jsFiles": 2,
         "jsGzip": 99117,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 2886,
+        "ms": 4494,
         "jsFiles": 2,
         "jsGzip": 103428,
         "cssFiles": 0,
@@ -166,14 +166,14 @@
     {
       "name": "qwik-city",
       "lunx": {
-        "ms": 937,
+        "ms": 899,
         "jsFiles": 34,
         "jsGzip": 36357,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 1396,
+        "ms": 2043,
         "jsFiles": 21,
         "jsGzip": 36874,
         "cssFiles": 0,
@@ -184,14 +184,14 @@
     {
       "name": "marko-run",
       "lunx": {
-        "ms": 787,
+        "ms": 804,
         "jsFiles": 1,
         "jsGzip": 20,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 1011,
+        "ms": 1529,
         "jsFiles": 0,
         "jsGzip": 0,
         "cssFiles": 0,
@@ -202,14 +202,14 @@
     {
       "name": "analog",
       "lunx": {
-        "ms": 11717,
+        "ms": 13249,
         "jsFiles": 2,
         "jsGzip": 68947,
         "cssFiles": 0,
         "cssGzip": 0
       },
       "native": {
-        "ms": 20540,
+        "ms": 22258,
         "jsFiles": 2,
         "jsGzip": 72092,
         "cssFiles": 0,
