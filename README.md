@@ -277,6 +277,14 @@ export default defineConfig({
 });
 ```
 
+### Large apps: bundled dev
+
+```bash
+lunx dev --bundle        # or server: { bundle: true } in lunx.config
+```
+
+The page loads a few bundles from Rolldown's dev engine (node_modules included) instead of one request per module, and each save arrives as a patch of the changed modules, with React Fast Refresh keeping component state. At 2,000 components the first visit renders in 1.4 s, against 1.7 s for Rspack and 6–12 s for Vite. A vite.config's `experimental.bundledDev` turns it on too. Projects with Vite plugins, module federation or SSR serve modules one by one.
+
 ### Vite-based tools: `lunx exec`
 
 ```bash
@@ -597,7 +605,12 @@ keep working.
 | Command | Action |
 |---|---|
 | `lunx dev` | Start development server with HMR |
+| `lunx dev --bundle` | Serve the app as bundles (large apps: one request per page, not per module) |
 | `lunx build` | Create minified production build with security scan |
+| `lunx test` | Run tests (Vitest's API, jsdom / happy-dom, snapshots, `--coverage`, `--watch`); Vitest itself when installed |
+| `lunx lint` / `lunx fmt` | Lint with Oxlint, format with Oxfmt |
+| `lunx run <script>` | Run a package.json script across workspaces, dependencies first, cached (`--filter`, `--no-cache`) |
+| `lunx compile <entry>` | Build a single-file executable of a Node program |
 | `lunx build --lib [entry]` | Build a library: ES/CJS (`--formats es,cjs,umd,iife`, `--name`), `.d.ts`, `--watch` |
 | `lunx build --force` | Rebuild even when nothing changed (builds are cached in `.lunx/`) |
 | `lunx preview` | Serve production build locally for verification |

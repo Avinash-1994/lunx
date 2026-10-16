@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bundled dev mode**: `server: { bundle: true }` (or `lunx dev --bundle`, or a vite.config's `experimental.bundledDev`) serves the page as bundles from Rolldown's dev engine, node_modules included, instead of one request per module, as Rspack and Vite 8.1's full-bundle mode do. Saves arrive as patches of the changed modules over the HMR socket, applied by a runtime with `import.meta.hot` (accept, dispose, invalidate, dependency accepts) and React Fast Refresh that keeps component state. React, Preact and plain TS/JSX compile in Rolldown; Vue, Svelte, Solid, Angular (templates in their own files included) and the rest go through lunx's compilers. At 2,000 components the first visit renders in 1.4 s (Rspack 1.7 s, Rsbuild 1.9 s, Vite and unbundled lunx 6–12 s), with the fastest HMR of all (144 ms). The browser matrix passes 133/133 with it (`npm run test:browser-matrix -- --bundle`). Projects with Vite plugins, module federation or SSR keep serving modules one by one.
+- **Module Federation DevTools** (the Chrome extension): lunx's federation runtime keeps `globalThis.__FEDERATION__` (alias `__VMOK__`) as `@module-federation/runtime` does: the module graph in `moduleInfo`, the share scope in `__SHARE__`, and the plugins in `__GLOBAL_PLUGIN__` run as its own (`beforeRegisterRemote`, `beforeLoadRemoteSnapshot`, `loadRemoteSnapshot`, `beforeRequest`, `onLoad`, `errorLoadRemote`), so the extension shows the app's remotes and shared packages and its remote overrides point a remote at a local build.
+- **Tree shaking inside CommonJS dependencies** (`build.commonjsTreeShaking`, on by default): static CommonJS modules (React, ReactDOM, scheduler…) become ES modules before bundling, so Rolldown drops the parts the app never reaches. lunx's output is now the smallest of every tool measured, Bun included.
+- `build.chunkImportMap`: chunks import each other through an inline import map (Rolldown's `chunkImportMap`, Vite 8.1's), so a change to one chunk keeps every other chunk's file name and cache.
+- `build.legacy` (`true` or `{ targets, babel }`): a `nomodule` script beside each module entry for browsers without ES modules, ES2015 by Oxc or ES5 by the project's Babel preset-env, with core-js polyfills and the Safari 10.1 fix, as `@vitejs/plugin-legacy`.
+- `lunx compile <entry>`: a single-file executable of a Node program (Node's single executable applications), as `bun build --compile`.
+- `lunx lint` and `lunx fmt`: Oxlint and Oxfmt, as `vp lint` / `vp fmt`.
+- `lunx run <script>`: a package.json script across a monorepo's workspaces (package.json `workspaces` or pnpm-workspace.yaml), dependencies first, independent packages in parallel, with a local cache that restores outputs and replays logs (`--filter`, `--concurrency`, `--no-cache`), as Turborepo and `vp run`.
+- **`lunx test`, rewritten**: test files run in worker threads with Vitest's API (`describe`/`it`/`test` with `skip`/`only`/`todo`/`each`, hooks, `expect` with Jest's matchers, asymmetric matchers, `resolves`/`rejects`, `vi.fn`/`spyOn`, fake timers, `vi.stubGlobal`, `waitFor`), DOM environments (jsdom, happy-dom: `// @vitest-environment`), snapshots in Vitest's format (`toMatchSnapshot`, `toMatchInlineSnapshot`, `-u`, `--ci`), V8 coverage mapped through source maps (`--coverage`: text, lcov), `-t` filters and `--watch`. A project with Vitest installed keeps running Vitest (`--builtin` uses lunx's).
+
+### Performance
+- An unchanged `lunx build` answers in ~40 ms (Bun 46 ms, esbuild 65 ms): a CommonJS entry checks the inputs' stamps without loading the CLI, and a removed output directory is restored from the last build's snapshot.
+- `lunx dev` serves a module it has served before, unchanged since, from memory with an ETag (304 on revisits): a second visit to a 2,000-component app loads in 3.0 s instead of 4.9 s.
+
 ## [1.2.0] - 2026-10-15
 
 ### Added
