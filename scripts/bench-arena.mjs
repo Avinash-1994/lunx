@@ -532,7 +532,7 @@ const results = {};
 const samples = {};
 for (const [name, tool] of selected) {
     results[name] = { kind: tool.kind, version: versionOf(name) };
-    samples[name] = { boots: [], codes: [], hmrs: [], pages: [], colds: [], warms: [] };
+    samples[name] = { boots: [], codes: [], hmrs: [], pages: [], restarts: [], colds: [], warms: [] };
     if (!tool.dev) results[name].devBootMs = null;
 }
 for (let i = 0; i < RUNS; i++) {
@@ -551,7 +551,14 @@ for (let i = 0; i < RUNS; i++) {
         if (d.appCodeMs !== null) m.codes.push(d.appCodeMs);
         if (d.hmrMs !== null && d.hmrMs !== undefined) m.hmrs.push(d.hmrMs);
         if (d.pageMs !== null && d.pageMs !== undefined) m.pages.push(d.pageMs);
-        console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms${HMR ? `, page ${d.pageMs ?? 'failed'}ms, hmr ${d.hmrMs ?? 'failed'}ms` : ''}`);
+        // Restart: the same server started again with the caches the first start left
+        // (pre-bundled dependencies, persistent caches), as on a developer's next `dev`.
+        let restartMs = null;
+        if (HMR) {
+            const again = await devRun(tool);
+            if (!again.error && again.pageMs != null) m.restarts.push((restartMs = again.pageMs));
+        }
+        console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms${HMR ? `, page ${d.pageMs ?? 'failed'}ms, restart page ${restartMs ?? 'failed'}ms, hmr ${d.hmrMs ?? 'failed'}ms` : ''}`);
     }
 }
 // Cold builds swing 2x on a shared machine (page cache, CPU steal), so one
@@ -585,6 +592,7 @@ for (const [name, tool] of selected) {
     if (m.codes.length) r.devAppCodeMs = median(m.codes);
     if (m.hmrs.length) r.hmrMs = median(m.hmrs);
     if (m.pages.length) r.devPageMs = median(m.pages);
+    if (m.restarts.length) r.devRestartPageMs = median(m.restarts);
     if (tool.build && !r.buildError && m.colds.length) {
         r.buildColdMs = median(m.colds);
         r.buildWarmMs = median(m.warms);
@@ -599,7 +607,7 @@ const cols = [
     ['kind', (k) => results[k].kind, 20],
     ['dev boot', (k) => fmt(results[k].devBootMs, 'ms'), 10],
     ['app code', (k) => fmt(results[k].devAppCodeMs, 'ms'), 10],
-    ...(HMR ? [['page ready', (k) => fmt(results[k].devPageMs, 'ms'), 11], ['hmr', (k) => fmt(results[k].hmrMs, 'ms'), 9]] : []),
+    ...(HMR ? [['page ready', (k) => fmt(results[k].devPageMs, 'ms'), 11], ['restart', (k) => fmt(results[k].devRestartPageMs, 'ms'), 9], ['hmr', (k) => fmt(results[k].hmrMs, 'ms'), 9]] : []),
     ['build cold', (k) => fmt(results[k].buildColdMs, 'ms'), 11],
     ['build warm', (k) => fmt(results[k].buildWarmMs, 'ms'), 11],
     ['JS', (k) => fmt(results[k].jsBytes, 'B'), 10],
