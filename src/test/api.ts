@@ -1,195 +1,141 @@
 /**
- * Lunx Test API
- * Lightweight implementation of Vitest/Jest API
+ * The test API of `lunx test`, as Vitest's and Jest's: `describe`, `it` /
+ * `test` (with `.skip`, `.only`, `.todo`, `.each`), hooks, `expect`, `vi`.
+ * Test files may import it from 'lunx-dev/test' or use the globals.
  */
 
-export type TestFn = () => void | Promise<void>;
+import { expect } from './expect.js';
+import { vi } from './mock.js';
 
-export interface TestContext {
+export type TestFn = (done?: (err?: unknown) => void) => void | Promise<void>;
+type Mode = 'run' | 'skip' | 'only' | 'todo';
+
+export interface TestCase {
     name: string;
-    fn: TestFn;
-    status: 'pending' | 'passed' | 'failed' | 'skipped';
-    error?: Error;
-    duration?: number;
+    fn: TestFn | null;
+    mode: Mode;
+    timeout: number;
+    suite: Suite;
 }
 
-export interface SuiteContext {
+export interface Suite {
     name: string;
-    tests: TestContext[];
-    suites: SuiteContext[];
-    suiteHooks?: {
-        beforeAll: TestFn[];
-        afterAll: TestFn[];
-        beforeEach: TestFn[];
-        afterEach: TestFn[];
+    parent: Suite | null;
+    mode: Mode;
+    children: Array<Suite | TestCase>;
+    beforeAll: TestFn[];
+    afterAll: TestFn[];
+    beforeEach: TestFn[];
+    afterEach: TestFn[];
+}
+
+export const DEFAULT_TIMEOUT = 5000;
+
+const newSuite = (name: string, parent: Suite | null, mode: Mode): Suite => ({ name, parent, mode, children: [], beforeAll: [], afterAll: [], beforeEach: [], afterEach: [] });
+
+let root = newSuite('', null, 'run');
+let currentSuite = root;
+
+/** A fresh tree for the next test file; returns the previous one. */
+export function takeRoot(): Suite {
+    const done = root;
+    root = newSuite('', null, 'run');
+    currentSuite = root;
+    return done;
+}
+
+function format(name: string, row: unknown[], index: number): string {
+    let i = 0;
+    let out = name.replace(/%[sdifjo%]/g, (m) => {
+        if (m === '%%') return '%';
+        const v = row[i++];
+        if (m === '%d' || m === '%i') return String(Math.trunc(Number(v)));
+        if (m === '%f') return String(Number(v));
+        if (m === '%j' || m === '%o') return JSON.stringify(v);
+        return String(v);
+    });
+    const obj = row.length === 1 && row[0] && typeof row[0] === 'object' ? (row[0] as Record<string, unknown>) : null;
+    if (obj) out = out.replace(/\$([\w.]+)/g, (m, key: string) => (key.split('.').reduce<any>((o, k) => o?.[k], obj) ?? m) as string);
+    return out.replace(/\$#/g, String(index));
+}
+
+function each(register: (name: string, fn: any, timeout?: number) => void) {
+    return (table: unknown[] | TemplateStringsArray, ...values: unknown[]) => {
+        let rows: unknown[][];
+        if (Array.isArray(table) && 'raw' in (table as any)) {
+            // Tagged template: a header row of names, then values.
+            const header = (table as unknown as TemplateStringsArray).join('').split('|').map((s) => s.trim()).filter(Boolean);
+            rows = [];
+            for (let i = 0; i < values.length; i += header.length) rows.push([Object.fromEntries(header.map((h, j) => [h, values[i + j]]))]);
+        } else rows = (table as unknown[]).map((r) => (Array.isArray(r) ? r : [r]));
+        return (name: string, fn: (...args: any[]) => any, timeout?: number) =>
+            rows.forEach((row, i) => register(format(name, row, i), () => fn(...row), timeout));
     };
 }
 
-let currentSuite: SuiteContext = {
-    name: 'root',
-    tests: [],
-    suites: [],
-    suiteHooks: { beforeAll: [], afterAll: [], beforeEach: [], afterEach: [] }
-};
-let rootSuites: SuiteContext[] = [];
+function addTest(name: string, fn: TestFn | null, mode: Mode, timeout?: number) {
+    currentSuite.children.push({ name, fn, mode: fn ? mode : 'todo', timeout: timeout ?? DEFAULT_TIMEOUT, suite: currentSuite });
+}
 
-export function describe(name: string, fn: () => void) {
+function addSuite(name: string, fn: () => void, mode: Mode) {
+    const suite = newSuite(name, currentSuite, mode);
+    currentSuite.children.push(suite);
     const parent = currentSuite;
-    const newSuite: SuiteContext = {
-        name,
-        tests: [],
-        suites: [],
-        suiteHooks: { beforeAll: [], afterAll: [], beforeEach: [], afterEach: [] }
-    };
-
-    // If we are at root (and not inside another suite), push to rootSuites
-    if (parent.name === 'root') {
-        rootSuites.push(newSuite);
-    } else {
-        parent.suites.push(newSuite);
-    }
-
-    currentSuite = newSuite;
+    currentSuite = suite;
     try {
-        fn();
+        const r = fn() as unknown;
+        if (r && typeof (r as Promise<void>).then === 'function') throw new Error(`describe("${name}") callback returned a promise: describe callbacks must be synchronous`);
     } finally {
         currentSuite = parent;
     }
 }
 
-export function it(name: string, fn: TestFn) {
-    currentSuite.tests.push({
-        name,
-        fn,
-        status: 'pending'
-    });
-}
-
-export function beforeAll(fn: TestFn) {
-    currentSuite.suiteHooks?.beforeAll.push(fn);
-}
-
-export function afterAll(fn: TestFn) {
-    currentSuite.suiteHooks?.afterAll.push(fn);
-}
-
-export function beforeEach(fn: TestFn) {
-    currentSuite.suiteHooks?.beforeEach.push(fn);
-}
-
-export function afterEach(fn: TestFn) {
-    currentSuite.suiteHooks?.afterEach.push(fn);
-}
-
-export const test = it;
-
-// --- Expectation Matchers ---
-
-class Expectation<T> {
-    constructor(private actual: T, private isNot: boolean = false) { }
-
-    get not() {
-        return new Expectation(this.actual, !this.isNot);
-    }
-
-    toBe(expected: T) {
-        const pass = this.actual === expected;
-        this.assert(pass, `Expected ${this.actual} to be ${expected}`);
-    }
-
-    toEqual(expected: T) {
-        const pass = JSON.stringify(this.actual) === JSON.stringify(expected);
-        this.assert(pass, `Expected ${JSON.stringify(this.actual)} to equal ${JSON.stringify(expected)}`);
-    }
-
-    toBeTruthy() {
-        const pass = !!this.actual;
-        this.assert(pass, `Expected ${this.actual} to be truthy`);
-    }
-
-    toBeFalsy() {
-        const pass = !this.actual;
-        this.assert(pass, `Expected ${this.actual} to be falsy`);
-    }
-
-    toContain(item: any) {
-        let pass = false;
-        if (Array.isArray(this.actual)) {
-            pass = this.actual.includes(item);
-        } else if (typeof this.actual === 'string') {
-            pass = this.actual.includes(item);
-        }
-        this.assert(pass, `Expected ${this.actual} to contain ${item}`);
-    }
-
-    toBeDefined() {
-        const pass = this.actual !== undefined;
-        this.assert(pass, `Expected ${this.actual} to be defined`);
-    }
-
-    toBeNull() {
-        const pass = this.actual === null;
-        this.assert(pass, `Expected ${this.actual} to be null`);
-    }
-
-    toBeGreaterThan(expected: number) {
-        const pass = (this.actual as number) > expected;
-        this.assert(pass, `Expected ${this.actual} to be greater than ${expected}`);
-    }
-
-    toBeLessThan(expected: number) {
-        const pass = (this.actual as number) < expected;
-        this.assert(pass, `Expected ${this.actual} to be less than ${expected}`);
-    }
-
-    async toThrow() {
-        let pass = false;
-        try {
-            if (typeof this.actual === 'function') {
-                await (this.actual as Function)();
-            } else if (this.actual instanceof Promise) {
-                await this.actual;
-            }
-        } catch (e) {
-            pass = true;
-        }
-        this.assert(pass, `Expected function to throw`);
-    }
-
-    private assert(pass: boolean, message: string) {
-        if (this.isNot) pass = !pass;
-        if (!pass) {
-            throw new Error(this.isNot ? message.replace('to', 'not to') : message);
-        }
-    }
-}
-
-export function expect<T>(actual: T) {
-    return new Expectation(actual);
-}
-
-// --- Mocking (Simple) ---
-
-export const vi = {
-    fn: (impl?: (...args: any[]) => any) => {
-        const mockFn = (...args: any[]) => {
-            mockFn.calls.push(args);
-            return impl ? impl(...args) : undefined;
-        };
-        mockFn.calls = [] as any[][];
-        mockFn.mockImplementation = (newImpl: any) => { impl = newImpl; };
-        return mockFn;
-    },
-    mock: (moduleName: string, factory: any) => {
-        // This relies on the runner to intercept imports
-        (globalThis as any).__LUNX_MOCKS__ = (globalThis as any).__LUNX_MOCKS__ || {};
-        (globalThis as any).__LUNX_MOCKS__[moduleName] = factory;
-    }
+type ItFn = ((name: string, fn?: TestFn, timeout?: number) => void) & {
+    skip: (name: string, fn?: TestFn, timeout?: number) => void;
+    only: (name: string, fn?: TestFn, timeout?: number) => void;
+    todo: (name: string) => void;
+    skipIf: (cond: unknown) => (name: string, fn?: TestFn, timeout?: number) => void;
+    runIf: (cond: unknown) => (name: string, fn?: TestFn, timeout?: number) => void;
+    each: ReturnType<typeof each>;
+    concurrent: (name: string, fn?: TestFn, timeout?: number) => void;
 };
 
-// Internal API to retrieve collected suites
-export function __getCollectedSuites() {
-    const suites = rootSuites;
-    rootSuites = []; // partial cleanup
-    return suites;
-}
+export const it = ((name: string, fn?: TestFn, timeout?: number) => addTest(name, fn ?? null, 'run', timeout)) as ItFn;
+it.skip = (name, fn, timeout) => addTest(name, fn ?? null, 'skip', timeout);
+it.only = (name, fn, timeout) => addTest(name, fn ?? null, 'only', timeout);
+it.todo = (name) => addTest(name, null, 'todo');
+it.skipIf = (cond) => (cond ? it.skip : it);
+it.runIf = (cond) => (cond ? it : it.skip);
+it.each = each((name, fn, timeout) => addTest(name, fn, 'run', timeout));
+it.concurrent = it;
+export const test = it;
+
+type DescribeFn = ((name: string, fn: () => void) => void) & {
+    skip: (name: string, fn: () => void) => void;
+    only: (name: string, fn: () => void) => void;
+    todo: (name: string) => void;
+    skipIf: (cond: unknown) => (name: string, fn: () => void) => void;
+    runIf: (cond: unknown) => (name: string, fn: () => void) => void;
+    each: ReturnType<typeof each>;
+    concurrent: (name: string, fn: () => void) => void;
+};
+
+export const describe = ((name: string, fn: () => void) => addSuite(name, fn, 'run')) as DescribeFn;
+describe.skip = (name, fn) => addSuite(name, fn, 'skip');
+describe.only = (name, fn) => addSuite(name, fn, 'only');
+describe.todo = (name) => addSuite(name, () => {}, 'todo');
+describe.skipIf = (cond) => (cond ? describe.skip : describe);
+describe.runIf = (cond) => (cond ? describe : describe.skip);
+describe.each = each((name, fn) => addSuite(name, fn, 'run'));
+describe.concurrent = describe;
+export const suite = describe;
+
+export const beforeAll = (fn: TestFn) => void currentSuite.beforeAll.push(fn);
+export const afterAll = (fn: TestFn) => void currentSuite.afterAll.push(fn);
+export const beforeEach = (fn: TestFn) => void currentSuite.beforeEach.push(fn);
+export const afterEach = (fn: TestFn) => void currentSuite.afterEach.push(fn);
+
+export { expect, vi };
+
+/** The globals test files see (Vitest's `globals: true`, Jest's defaults). */
+export const globals = { describe, suite, it, test, beforeAll, afterAll, beforeEach, afterEach, expect, vi, jest: vi };

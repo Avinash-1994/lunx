@@ -67,67 +67,75 @@ function splitQuery(url: string): [string, string] {
     return i === -1 ? [url, ''] : [url.slice(0, i), url.slice(i)];
 }
 
+const TEST_API = new Set(['vitest', '@jest/globals', 'lunx-dev/test']);
+
+function resolveWith<T>(
+    specifier: string,
+    context: ResolveContext,
+    next: () => T,
+    then: (value: T, fallback: (err: unknown) => ResolveResult) => T | ResolveResult,
+): T | ResolveResult {
+    // Tests written against Vitest's or Jest's API run on lunx's: under lunx test, these are lunx's.
+    if (TEST_API.has(specifier)) return { url: new URL('./api.js', import.meta.url).href, shortCircuit: true };
+    // A relative TypeScript specifier resolves on its own; it is the ".js that
+    // is really .ts" case node refuses.
+    if (specifier.startsWith('.') && context.parentURL) {
+        const rewritten = rewriteJsToTs(new URL(specifier, context.parentURL).href);
+        if (rewritten) return { url: rewritten, shortCircuit: true };
+    }
+    const fallback = (err: unknown): ResolveResult => {
+        // Extensionless relative imports, also legal in TypeScript.
+        if (specifier.startsWith('.') && context.parentURL) {
+            const [withoutQuery, query] = splitQuery(new URL(specifier, context.parentURL).href);
+            for (const ext of TS_EXTENSIONS) {
+                const filePath = fileURLToPath(withoutQuery) + ext;
+                if (existsSync(filePath)) return { url: pathToFileURL(filePath).href + query, shortCircuit: true };
+            }
+        }
+        throw err;
+    };
+    try {
+        return then(next(), fallback);
+    } catch (err) {
+        return fallback(err);
+    }
+}
+
 export async function resolve(
     specifier: string,
     context: ResolveContext,
     nextResolve: (s: string, c: ResolveContext) => Promise<ResolveResult>,
 ): Promise<ResolveResult> {
-    // A relative TypeScript specifier resolves on its own; it is the ".js that
-    // is really .ts" case node refuses.
-    if (specifier.startsWith('.') && context.parentURL) {
-        const candidate = new URL(specifier, context.parentURL).href;
-        const rewritten = rewriteJsToTs(candidate);
-        if (rewritten) return { url: rewritten, shortCircuit: true };
-    }
-
-    try {
-        return await nextResolve(specifier, context);
-    } catch (err) {
-        // Extensionless relative imports, also legal in TypeScript.
-        if (specifier.startsWith('.') && context.parentURL) {
-            const base = new URL(specifier, context.parentURL).href;
-            const [withoutQuery, query] = splitQuery(base);
-            for (const ext of TS_EXTENSIONS) {
-                const filePath = fileURLToPath(withoutQuery) + ext;
-                if (existsSync(filePath)) {
-                    return { url: pathToFileURL(filePath).href + query, shortCircuit: true };
-                }
-            }
-        }
-        throw err;
-    }
+    return resolveWith(specifier, context, () => nextResolve(specifier, context), (p, fallback) => p.catch(fallback)) as Promise<ResolveResult> | ResolveResult;
 }
 
-export async function load(
-    url: string,
-    context: LoadContext,
-    nextLoad: (u: string, c: LoadContext) => Promise<LoadResult>,
-): Promise<LoadResult> {
+/** Synchronous hooks (`module.registerHooks`, Node ≥ 22.15): in the thread itself, so `require()` of ES modules works. */
+export function resolveSync(specifier: string, context: ResolveContext, nextResolve: (s: string, c: ResolveContext) => ResolveResult): ResolveResult {
+    return resolveWith(specifier, context, () => nextResolve(specifier, context), (r) => r) as ResolveResult;
+}
+
+function compileTs(url: string, rawSource: LoadResult['source']): LoadResult {
     const [base] = splitQuery(url);
-    if (!TS_EXTENSIONS.some((ext) => base.endsWith(ext))) {
-        return nextLoad(url, context);
-    }
-
-    const result = await nextLoad(url, { ...context, format: 'module' });
-    const rawSource = result.source;
-    let source: string;
-    if (typeof rawSource === 'string') {
-        source = rawSource;
-    } else if (rawSource instanceof Uint8Array) {
-        source = Buffer.from(rawSource).toString('utf8');
-    } else {
-        source = Buffer.from(new Uint8Array(rawSource as ArrayBuffer)).toString('utf8');
-    }
-
-    const filename = fileURLToPath(base);
+    const source = typeof rawSource === 'string' ? rawSource : Buffer.from(rawSource instanceof Uint8Array ? rawSource : new Uint8Array(rawSource as ArrayBuffer)).toString('utf8');
     const isTsx = base.endsWith('.tsx');
     // Automatic JSX, so a test file rendering JSX needs no React import.
-    const { code } = compile(filename, source, {
+    const { code } = compile(fileURLToPath(base), source, {
         lang: isTsx ? 'tsx' : 'ts',
         jsx: isTsx ? { runtime: 'automatic' } : undefined,
         legacyDecorators: true,
         sourcemap: 'inline',
     });
+    return { format: url.includes('.cts') ? 'commonjs' : 'module', source: code, shortCircuit: true };
+}
 
-    return { format: 'module', source: code, shortCircuit: true };
+const isTs = (url: string) => TS_EXTENSIONS.some((ext) => splitQuery(url)[0].endsWith(ext));
+
+export async function load(url: string, context: LoadContext, nextLoad: (u: string, c: LoadContext) => Promise<LoadResult>): Promise<LoadResult> {
+    if (!isTs(url)) return nextLoad(url, context);
+    return compileTs(url, (await nextLoad(url, { ...context, format: 'module' })).source);
+}
+
+export function loadSync(url: string, context: LoadContext, nextLoad: (u: string, c: LoadContext) => LoadResult): LoadResult {
+    if (!isTs(url)) return nextLoad(url, context);
+    return compileTs(url, nextLoad(url, { ...context, format: 'module' }).source);
 }

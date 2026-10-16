@@ -72,7 +72,7 @@ function levenshtein(a: string, b: string): number {
 const ALL_COMMANDS = [
   'dev', 'build', 'preview', 'analyze', 'why', 'check', 'ssr',
   'init', 'bootstrap', 'css', 'inspect', 'report', 'audit',
-  'verify', 'test', 'doctor', 'security', 'migrate'
+  'verify', 'test', 'doctor', 'security', 'migrate', 'lint', 'fmt', 'run', 'compile', 'exec'
 ];
 
 /** Scaffolding errors (bad name, unknown template, non-empty directory) are messages, not stack traces. */
@@ -90,6 +90,54 @@ async function main() {
   if (process.argv[2] === 'exec') {
     const { runExec } = await import('./commands/exec.js');
     process.exitCode = await runExec(process.argv.slice(3));
+    return;
+  }
+  // `lunx test`: Vitest-style flags (-t, -u, --environment…) are the runner's to parse.
+  if (process.argv[2] === 'test') {
+    const { run } = await import('./test/runner.js');
+    await run(process.argv.slice(3));
+    return;
+  }
+  // `lunx lint` / `lunx fmt`: Oxlint and Oxfmt, their flags passed through.
+  if (process.argv[2] === 'lint' || process.argv[2] === 'fmt') {
+    const { runOxc } = await import('./commands/lint.js');
+    process.exitCode = await runOxc(process.argv[2], process.argv.slice(3));
+    return;
+  }
+  // `lunx run <script>`: a package.json script across the workspaces, cached.
+  if (process.argv[2] === 'run' && process.argv[3] && !process.argv[3].startsWith('-')) {
+    const rest = process.argv.slice(4);
+    const flag = (name: string) => {
+      const i = rest.findIndex((a) => a === name || a.startsWith(name + '='));
+      if (i === -1) return undefined;
+      return rest[i]!.includes('=') ? rest[i]!.slice(rest[i]!.indexOf('=') + 1) : rest[i + 1];
+    };
+    const filters = rest.flatMap((a, i) => (a === '--filter' || a === '-F' ? [rest[i + 1]!] : a.startsWith('--filter=') ? [a.slice(9)] : [])).filter(Boolean);
+    const { runTask } = await import('./commands/run.js');
+    process.exitCode = await runTask(process.cwd(), process.argv[3], {
+      filter: filters,
+      concurrency: flag('--concurrency') ? Number(flag('--concurrency')) : undefined,
+      cache: !rest.includes('--no-cache') && !rest.includes('--force'),
+    });
+    return;
+  }
+  // `lunx compile <entry> [--outfile <file>]`: a single executable.
+  if (process.argv[2] === 'compile') {
+    const rest = process.argv.slice(3);
+    const entry = rest.find((a, i) => !a.startsWith('-') && rest[i - 1] !== '--outfile' && rest[i - 1] !== '-o');
+    if (!entry) {
+      console.error('Usage: lunx compile <entry> [--outfile <file>]');
+      process.exitCode = 1;
+      return;
+    }
+    const i = rest.findIndex((a) => a === '--outfile' || a === '-o');
+    const { compile } = await import('./commands/compile.js');
+    try {
+      await compile(entry, process.cwd(), { outfile: i === -1 ? undefined : rest[i + 1] });
+    } catch (err) {
+      console.error(`[lunx] ${(err as Error).message}`);
+      process.exitCode = 1;
+    }
     return;
   }
   // BUG-CLI-01: short-circuit block REMOVED — yargs is the single handler for all commands
@@ -413,7 +461,7 @@ async function main() {
     )
     .command(
       'test',
-      'Run tests using Lunx Custom Runner',
+      'Run tests (Vitest when installed, else lunx\'s runner): -t, -u, --watch, --coverage, --environment jsdom',
       (yargs: any) => yargs.option('watch', { type: 'boolean', description: 'Watch mode', default: false }),
       async () => {
         const { run } = await import('./test/runner.js');
@@ -445,6 +493,10 @@ async function main() {
         await runOrExit(() => createLunxProject(args.name, { template: args.template, ts: args.ts, tailwind: args.tailwind }));
       }
     )
+    .command('lint [paths..]', 'Lint with Oxlint (its flags pass through): lunx lint --fix', () => {}, () => {})
+    .command('fmt [paths..]', 'Format with Oxfmt (its flags pass through): lunx fmt --check', () => {}, () => {})
+    .command('run <script>', 'Run a package.json script across the workspaces, dependencies first, cached: lunx run build --filter @acme/web', () => {}, () => {})
+    .command('compile <entry>', 'Bundle a program into one executable (Node single executable): lunx compile src/server.ts --outfile app', () => {}, () => {})
     .command(
       'exec <tool..>',
       'Run a Vite-based tool (Storybook, Vitest…) on lunx\'s engine: lunx exec storybook dev',

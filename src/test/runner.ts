@@ -1,209 +1,249 @@
-import fs from 'fs';
-import path from 'path';
-import { pathToFileURL } from 'url';
-import { describe, it, expect, vi, __getCollectedSuites, type SuiteContext, type TestContext } from './api.js';
-
 /**
- * Lunx Test Runner
- * Powered by Bun Transpiler & Custom Sandbox
+ * `lunx test`: runs a project's tests, each file in a worker thread.
+ *
+ *   lunx test                      every *.test / *.spec file
+ *   lunx test src/math             files whose path contains "src/math"
+ *   lunx test -t "adds"            tests whose full name matches
+ *   lunx test --environment jsdom  DOM globals (jsdom or happy-dom from the project)
+ *   lunx test --coverage           V8 line coverage: table, coverage/lcov.info
+ *   lunx test -u                   update snapshots
+ *   lunx test --watch              re-run on changes
+ *
+ * A project with Vitest installed runs Vitest instead (on lunx's engine,
+ * through `lunx exec vitest`); `--builtin` keeps lunx's runner.
+ *
+ * Options may also come from `test` in lunx.config: `environment`,
+ * `include`, `exclude`, `setupFiles`, `coverage: true`.
  */
 
-/**
- * Conventional test-file names. Discovery used to match only `_test.ts`, so a
- * project following the near-universal `foo.test.ts` convention got
- * "No test files found" from a runner that was working perfectly.
- */
-const TEST_FILE_PATTERN = /\.(test|spec)\.(ts|tsx|mts|js|jsx|mjs)$|_test\.(ts|js)$/;
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Worker } from 'node:worker_threads';
+import type { FileResult, WorkerInput } from './worker.js';
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.lunx', 'coverage']);
+const DEFAULT_INCLUDE = /\.(test|spec)\.[mc]?[jt]sx?$|_test\.[mc]?[jt]s$/;
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.lunx', 'coverage', '.next', '.nuxt', '.svelte-kit', '.output']);
 
-function findFiles(dir: string): string[] {
-    let results: string[] = [];
-    if (!fs.existsSync(dir)) return results;
+const color = (code: number) => (s: string) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[${code}m${s}\x1b[0m` : s);
+const green = color(32);
+const red = color(31);
+const yellow = color(33);
+const dim = color(2);
+const bold = color(1);
 
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const filePath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            if (SKIP_DIRS.has(entry.name)) continue;
-            results = results.concat(findFiles(filePath));
-        } else if (TEST_FILE_PATTERN.test(entry.name)) {
-            results.push(filePath);
+interface Options {
+    filters: string[];
+    watch: boolean;
+    update: boolean;
+    ci: boolean;
+    coverage: boolean;
+    environment: WorkerInput['environment'];
+    testNamePattern?: string;
+    builtin: boolean;
+    passWithNoTests: boolean;
+    bail: boolean;
+}
+
+function parseArgs(args: string[]): Options {
+    const opts: Options = {
+        filters: [],
+        watch: false,
+        update: false,
+        ci: !!process.env.CI,
+        coverage: false,
+        environment: 'node',
+        builtin: false,
+        passWithNoTests: false,
+        bail: false,
+    };
+    for (let i = 0; i < args.length; i++) {
+        const a = args[i]!;
+        const value = () => (a.includes('=') ? a.slice(a.indexOf('=') + 1) : args[++i]);
+        if (a === '--watch' || a === '-w') opts.watch = true;
+        else if (a === '--run') opts.watch = false;
+        else if (a === '-u' || a === '--update') opts.update = true;
+        else if (a === '--ci') opts.ci = true;
+        else if (a === '--coverage') opts.coverage = true;
+        else if (a === '--builtin') opts.builtin = true;
+        else if (a === '--passWithNoTests' || a === '--pass-with-no-tests') opts.passWithNoTests = true;
+        else if (a === '--bail') opts.bail = true;
+        else if (a.startsWith('--environment')) opts.environment = value() as Options['environment'];
+        else if (a === '-t' || a.startsWith('--testNamePattern') || a.startsWith('--test-name-pattern')) opts.testNamePattern = value();
+        else if (!a.startsWith('-')) opts.filters.push(a);
+    }
+    return opts;
+}
+
+function findTests(root: string, include: (rel: string) => boolean, exclude: (rel: string) => boolean): string[] {
+    const out: string[] = [];
+    const stack = [root];
+    while (stack.length) {
+        const dir = stack.pop()!;
+        let entries: fs.Dirent[];
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+            continue;
+        }
+        for (const e of entries) {
+            const full = path.join(dir, e.name);
+            const rel = path.relative(root, full).split(path.sep).join('/');
+            if (e.isDirectory()) {
+                if (!SKIP_DIRS.has(e.name) && !e.name.startsWith('.')) stack.push(full);
+            } else if (include(rel) && !exclude(rel)) out.push(full);
         }
     }
-    return results;
+    return out.sort();
 }
 
-let hooksRegistered = false;
+const globRe = (glob: string) => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\//g, '(?:.*/)?').replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*').replace(/\?/g, '.').replace(/\\\{([^}]*)\\\}/g, (_, alts: string) => `(?:${alts.split(',').join('|')})`)}$`);
 
-/**
- * Teaches node's ESM loader to compile TypeScript, so test files can be
- * TypeScript. Without this the runner could only import plain-JS ESM.
- */
-async function registerTypeScriptHooks(): Promise<void> {
-    if (hooksRegistered) return;
-    hooksRegistered = true;
+async function testConfig(root: string): Promise<any> {
     try {
-        const { register } = await import('node:module');
-        register(new URL('./ts-hooks.js', import.meta.url));
-    } catch (err: any) {
-        console.warn(
-            `⚠️  Could not install the TypeScript loader (${err?.message ?? err}). ` +
-            'TypeScript test files will fail to import.'
-        );
+        const { loadConfig } = await import('../config/index.js');
+        return ((await loadConfig(root)) as any).test ?? {};
+    } catch {
+        return {};
     }
 }
 
-export async function run(args: string[]) {
-    console.log('⚡ Lunx Test Runner v1.0.0');
-    await registerTypeScriptHooks();
-
-    const TARGET_FILES = args.filter(a => !a.startsWith('-'));
-    const IS_WATCH = args.includes('--watch');
-
-    // 1. Find Files
-    // Default to the whole project: most projects colocate `foo.test.ts` with
-    // the source rather than keeping a top-level `tests/` directory.
-    const pattern = TARGET_FILES.length > 0 ? TARGET_FILES[0] : process.cwd();
-
-    // Initial run
-    await runTests(pattern, IS_WATCH);
-
-    if (IS_WATCH) {
-        console.log('👀 Watching for changes...');
-        let debounceTimer: NodeJS.Timeout;
-
-        fs.watch(process.cwd(), { recursive: true }, (event, filename) => {
-            if (!filename || filename.includes('node_modules') || filename.includes('.git')) return;
-            if (!filename.endsWith('.ts')) return;
-
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                console.log(`\n\n🔄 Change detected in ${filename}. Re-running tests...`);
-                runTests(pattern, IS_WATCH).catch(console.error);
-            }, 100);
-        });
-    }
+function runFile(input: WorkerInput): Promise<FileResult> {
+    return new Promise((resolve) => {
+        const worker = new Worker(new URL('./worker.js', import.meta.url), { workerData: input, stdout: false, stderr: false });
+        let result: FileResult | null = null;
+        worker.once('message', (r: FileResult) => (result = r));
+        const fail = (message: string): FileResult => ({ file: input.file, tests: [], error: { message }, snapshots: { added: 0, updated: 0, matched: 0, failed: 0 }, coverage: [], duration: 0 });
+        worker.once('error', (err) => resolve(result ?? fail(err.stack ?? err.message)));
+        worker.once('exit', (code) => resolve(result ?? fail(`worker exited with code ${code}`)));
+    });
 }
 
-async function runTests(pattern: string, isWatch: boolean) {
-    // If pattern is a directory, look for _test.ts files inside
-    const files = fs.existsSync(pattern) && fs.statSync(pattern).isDirectory()
-        ? findFiles(pattern)
-        : [pattern];
+function printFile(root: string, r: FileResult) {
+    const rel = path.relative(root, r.file).split(path.sep).join('/');
+    const failed = r.tests.filter((t) => t.status === 'fail');
+    const skipped = r.tests.filter((t) => t.status === 'skip' || t.status === 'todo').length;
+    const ok = !failed.length && !r.error;
+    const counts = `${r.tests.length} test${r.tests.length === 1 ? '' : 's'}${failed.length ? ` | ${failed.length} failed` : ''}${skipped ? ` | ${skipped} skipped` : ''}`;
+    console.log(` ${ok ? green('✓') : red('✗')} ${rel} ${dim(`(${counts}) ${Math.round(r.duration)}ms`)}`);
+    if (r.error) console.log(`\n   ${red(bold('Error'))} ${r.error.message}\n${dim(indent(r.error.stack ?? '', 5))}\n`);
+    for (const t of failed) {
+        console.log(`\n   ${red(bold('FAIL'))} ${t.name}`);
+        console.log(indent(red(t.error!.message), 5));
+        if (t.error!.expected !== undefined) {
+            console.log(`\n     ${green('- Expected')}  ${red('+ Received')}\n`);
+            for (const [mark, line] of lineDiff(t.error!.expected!, t.error!.actual ?? '')) {
+                console.log(mark === '-' ? green(`     - ${line}`) : mark === '+' ? red(`     + ${line}`) : dim(`       ${line}`));
+            }
+            console.log('');
+        }
+        if (t.error!.stack) console.log(dim(indent(t.error!.stack.trim(), 5)));
+    }
+    if (failed.length) console.log('');
+}
 
-    if (files.length === 0) {
-        console.error('❌ No test files found.');
-        if (!isWatch) process.exit(1);
+/** Line diff (longest common subsequence) of two formatted values. */
+function lineDiff(expected: string, actual: string): Array<['-' | '+' | ' ', string]> {
+    const a = expected.split('\n');
+    const b = actual.split('\n');
+    if (a.length * b.length > 250_000) return [...a.map((l) => ['-', l] as ['-', string]), ...b.map((l) => ['+', l] as ['+', string])];
+    const dp = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1));
+    for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) dp[i]![j] = a[i] === b[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+    const out: Array<['-' | '+' | ' ', string]> = [];
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+        if (i < a.length && j < b.length && a[i] === b[j]) {
+            out.push([' ', a[i]!]);
+            i++;
+            j++;
+        }
+        else if (i < a.length && (j === b.length || dp[i + 1]![j]! >= dp[i]![j + 1]!)) out.push(['-', a[i++]!]);
+        else out.push(['+', b[j++]!]);
+    }
+    return out;
+}
+
+const indent = (text: string, n: number) => text.split('\n').map((l) => ' '.repeat(n) + l.trimStart()).join('\n');
+
+async function once(root: string, opts: Options, config: any): Promise<boolean> {
+    const include = Array.isArray(config.include) ? config.include.map(globRe) : null;
+    const exclude = Array.isArray(config.exclude) ? config.exclude.map(globRe) : [];
+    let files = findTests(root, (rel) => (include ? include.some((re: RegExp) => re.test(rel)) : DEFAULT_INCLUDE.test(rel)), (rel) => exclude.some((re: RegExp) => re.test(rel)));
+    if (opts.filters.length) files = files.filter((f) => opts.filters.some((q) => f.includes(path.resolve(root, q)) || path.relative(root, f).split(path.sep).join('/').includes(q)));
+    if (!files.length) {
+        console.log(opts.passWithNoTests ? 'No test files found.' : red('No test files found.'));
+        return opts.passWithNoTests;
+    }
+    const started = performance.now();
+    const { environmentOf } = await import('./environment.js');
+    const setupFiles = (Array.isArray(config.setupFiles) ? config.setupFiles : config.setupFiles ? [config.setupFiles] : []).map((f: string) => path.resolve(root, f));
+    const coverage = opts.coverage || config.coverage === true || config.coverage?.enabled === true;
+    const queue = [...files];
+    const results: FileResult[] = [];
+    let stop = false;
+    const pool = Math.max(1, Math.min(files.length, (os.availableParallelism?.() ?? os.cpus().length) - 1 || 1));
+    await Promise.all(Array.from({ length: pool }, async () => {
+        for (let file = queue.shift(); file && !stop; file = queue.shift()) {
+            const r = await runFile({
+                file,
+                root,
+                environment: environmentOf(file, (config.environment as Options['environment']) ?? opts.environment),
+                update: opts.update,
+                ci: opts.ci,
+                coverage,
+                testNamePattern: opts.testNamePattern,
+                setupFiles,
+            });
+            results.push(r);
+            printFile(root, r);
+            if (opts.bail && (r.error || r.tests.some((t) => t.status === 'fail'))) stop = true;
+        }
+    }));
+    const tests = results.flatMap((r) => r.tests);
+    const count = (s: string) => tests.filter((t) => t.status === s).length;
+    const failedFiles = results.filter((r) => r.error || r.tests.some((t) => t.status === 'fail')).length;
+    const snaps = results.reduce((a, r) => ({ added: a.added + r.snapshots.added, updated: a.updated + r.snapshots.updated, failed: a.failed + r.snapshots.failed }), { added: 0, updated: 0, failed: 0 });
+    const part = (n: number, label: string, paint: (s: string) => string) => (n ? paint(`${n} ${label}`) : '');
+    const join = (...xs: string[]) => xs.filter(Boolean).join(dim(' | '));
+    console.log(`\n ${dim('Test Files')}  ${join(part(failedFiles, 'failed', red), part(results.length - failedFiles, 'passed', green))} ${dim(`(${results.length})`)}`);
+    console.log(` ${dim('     Tests')}  ${join(part(count('fail'), 'failed', red), part(count('pass'), 'passed', green), part(count('skip'), 'skipped', yellow), part(count('todo'), 'todo', dim))} ${dim(`(${tests.length})`)}`);
+    if (snaps.added || snaps.updated || snaps.failed) console.log(` ${dim(' Snapshots')}  ${join(part(snaps.failed, 'failed', red), part(snaps.added, 'written', green), part(snaps.updated, 'updated', green))}`);
+    console.log(` ${dim('  Duration')}  ${Math.round(performance.now() - started)}ms\n`);
+    if (coverage) {
+        const { mergeHits, writeReports } = await import('./coverage.js');
+        writeReports(root, mergeHits(results.map((r) => r.coverage)), config.coverage?.reportsDirectory ?? 'coverage');
+    }
+    return failedFiles === 0;
+}
+
+export async function run(args: string[]): Promise<void> {
+    const opts = parseArgs(args);
+    const root = process.cwd();
+    if (!opts.builtin) {
+        const vitest = ['node_modules/.bin/vitest', 'node_modules/.bin/vitest.cmd'].some((f) => fs.existsSync(path.join(root, f)));
+        if (vitest) {
+            console.log(dim('[lunx] Vitest is installed: running it on lunx\'s engine (lunx test --builtin for lunx\'s runner)'));
+            const { runExec } = await import('../commands/exec.js');
+            const passthrough = args.filter((a) => a !== '--watch' && a !== '-w' && a !== '--run');
+            process.exitCode = await runExec(['vitest', ...(opts.watch ? [] : ['run']), ...passthrough], root);
+            return;
+        }
+    }
+    const config = await testConfig(root);
+    const ok = await once(root, opts, config);
+    if (!opts.watch) {
+        process.exitCode = ok ? 0 : 1;
         return;
     }
-
-    console.log(`running ${files.length} test files...`);
-    const start = performance.now();
-
-    let passed = 0;
-    let failed = 0;
-
-    // 2. Execute Each File
-    for (const file of files) {
-        const relativeName = path.relative(process.cwd(), file);
-        process.stdout.write(`  running ${relativeName}... `);
-
-        // Inject Globals
-        (globalThis as any).describe = describe;
-        (globalThis as any).it = it;
-        (globalThis as any).test = it;
-        (globalThis as any).expect = expect;
-        (globalThis as any).vi = vi;
-        (globalThis as any).beforeAll = (await import('./api.js')).beforeAll;
-        (globalThis as any).afterAll = (await import('./api.js')).afterAll;
-        (globalThis as any).beforeEach = (await import('./api.js')).beforeEach;
-        (globalThis as any).afterEach = (await import('./api.js')).afterEach;
-
-        try {
-            // "Sandboxed" Execution via dynamic import
-            // We append a timestamp to bust cache for watch mode (simple heuristic)
-            const cacheBust = `?t=${Date.now()}`;
-            // A Windows absolute path starts "C:\", and `import('C:\...')`
-            // throws ERR_UNSUPPORTED_ESM_URL_SCHEME because the drive letter
-            // parses as a URL scheme — so `lunx test` failed on every Windows
-            // machine before running a single test.
-            await import(pathToFileURL(path.resolve(file)).href + cacheBust);
-
-            const suites = __getCollectedSuites();
-            const result = await executeSuites(suites);
-
-            if (result.failed === 0) {
-                console.log('✅ PASS');
-                passed++;
-            } else {
-                console.log('❌ FAIL');
-                failed++;
-            }
-        } catch (e) {
-            console.log('❌ ERROR');
-            console.error(e);
-            failed++;
-        }
-    }
-
-    const end = performance.now();
-    console.log('\n--- Summary ---');
-    console.log(`Passed: ${passed}`);
-    console.log(`Failed: ${failed}`);
-    console.log(`Time: ${(end - start).toFixed(2)}ms`); // Proves <10ms for small suites
-
-    if (!isWatch && failed > 0) process.exit(1);
-}
-
-async function executeSuites(suites: SuiteContext[]): Promise<{ passed: number, failed: number }> {
-    let passed = 0;
-    let failed = 0;
-
-    for (const suite of suites) {
-        // Run beforeAll
-        if (suite.suiteHooks) {
-            for (const hook of suite.suiteHooks.beforeAll) await hook();
-        }
-
-        for (const test of suite.tests) {
-            try {
-                // Run beforeEach
-                if (suite.suiteHooks) {
-                    for (const hook of suite.suiteHooks.beforeEach) await hook();
-                }
-
-                await test.fn();
-                test.status = 'passed';
-                passed++;
-
-                // Run afterEach
-                if (suite.suiteHooks) {
-                    for (const hook of suite.suiteHooks.afterEach) await hook();
-                }
-            } catch (e) {
-                test.status = 'failed';
-                test.error = e as Error;
-                failed++;
-                console.error(`\n    ❌ ${test.name} FAILED:`);
-                console.error(`       ${(e as Error).message}`);
-            }
-        }
-
-        // Recursive
-        const subResult = await executeSuites(suite.suites);
-        passed += subResult.passed;
-        failed += subResult.failed;
-
-        // Run afterAll
-        if (suite.suiteHooks) {
-            for (const hook of suite.suiteHooks.afterAll) await hook();
-        }
-    }
-
-    return { passed, failed };
-}
-
-// @ts-ignore
-if (import.meta.url === `file://${process.argv[1]}`) {
-    run(process.argv.slice(2)).catch(console.error);
+    console.log(dim('Watching for changes…'));
+    let timer: NodeJS.Timeout | undefined;
+    fs.watch(root, { recursive: true }, (_event, filename) => {
+        if (!filename || /(^|[\\/])(node_modules|\.git|\.lunx|coverage|dist)([\\/]|$)/.test(filename) || /__snapshots__/.test(filename)) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            console.log(dim(`\n${filename} changed, running tests…\n`));
+            once(root, { ...opts, update: false }, config).catch(console.error);
+        }, 100);
+    });
 }
