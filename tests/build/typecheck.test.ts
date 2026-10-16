@@ -7,10 +7,10 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { spawn, type ChildProcess } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import { fileURLToPath } from 'url';
 import { WebSocket } from 'ws';
-import { stopProcess, removeDir } from './dev-process.js';
+import { startDev, stopProcess, removeDir } from './dev-process.js';
 import { TscOutput, type TypeError } from '../../src/dev/typecheck.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -38,7 +38,7 @@ describe('tsc output', () => {
 describe('server.typecheck', () => {
     let root: string;
     let dev: ChildProcess;
-    const port = 5500 + Math.floor(Math.random() * 400);
+    let port: number;
     const messages: any[] = [];
     let socket: WebSocket;
 
@@ -69,11 +69,7 @@ describe('server.typecheck', () => {
             fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
             fs.writeFileSync(path.join(root, rel), content);
         }
-        dev = spawn(process.execPath, [cli, 'dev', '--port', String(port)], { cwd: root, env: { ...process.env, NODE_OPTIONS: '' }, stdio: 'ignore' });
-        for (let i = 0; i < 200; i++) {
-            if (await fetch(`http://localhost:${port}/`).then((r) => r.ok, () => false)) break;
-            await new Promise((r) => setTimeout(r, 100));
-        }
+        ({ child: dev, port } = await startDev(cli, root));
         socket = new WebSocket(`ws://localhost:${port}/__lunx_hmr`);
         socket.addEventListener('message', (e) => messages.push(JSON.parse(String(e.data))));
         await new Promise((resolve, reject) => {

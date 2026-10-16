@@ -9,9 +9,9 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import { spawnSync, type ChildProcess } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { stopProcess, removeDir } from './dev-process.js';
+import { startDev, stopProcess, removeDir } from './dev-process.js';
 import { replaceHtmlEnv } from '../../src/build/html-env.js';
 import { svgComponent, svgRuntimeFor } from '../../src/build/svg-component.js';
 import { wasmInitModule } from '../../src/build/wasm-init.js';
@@ -134,17 +134,12 @@ describe('built-ins: lunx build', () => {
 describe('built-ins: lunx dev', () => {
     let root: string;
     let dev: ChildProcess;
-    const port = 4900 + Math.floor(Math.random() * 500);
+    let port: number;
     const get = (url: string) => fetch(`http://localhost:${port}${url}`, { headers: { accept: url === '/' ? 'text/html' : '*/*' } }).then(async (r) => ({ status: r.status, type: r.headers.get('content-type') ?? '', body: await r.text() }));
 
     beforeAll(async () => {
         root = project();
-        dev = spawn(process.execPath, [cli, 'dev', '--port', String(port)], { cwd: root, env: { ...process.env, NODE_OPTIONS: '' }, stdio: 'ignore' });
-        for (let i = 0; i < 200; i++) {
-            if (await get('/').then((r) => r.status === 200, () => false)) return;
-            await new Promise((r) => setTimeout(r, 100));
-        }
-        throw new Error('dev server did not start');
+        ({ child: dev, port } = await startDev(cli, root));
     }, 60_000);
     afterAll(async () => {
         await stopProcess(dev);
