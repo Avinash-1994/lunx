@@ -84,7 +84,7 @@ export interface BundleInput {
     /** Suppress all bundler warnings (internal bundles: pre-bundling, config loading). */
     quiet?: boolean;
     /** Called for warnings; return false to drop one. */
-    onWarning?: (warning: { code?: string; message: string }) => boolean | void;
+    onWarning?: (warning: { code?: string; message: string; id?: string }) => boolean | void;
 }
 
 export interface BundleOutputOptions {

@@ -39,7 +39,7 @@ export const rolldownBundler: Bundler = {
                 ...(input.target ? { target: input.target } : {}),
             },
             onLog(level: string, log: any, handler: (level: any, log: any) => void) {
-                if (level === 'warn' && input.onWarning?.({ code: log.code, message: log.message }) === false) return;
+                if (level === 'warn' && input.onWarning?.({ code: log.code, message: log.message, id: log.id }) === false) return;
                 handler(level, log);
             },
         } as any);

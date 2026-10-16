@@ -122,6 +122,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     const outDir = path.resolve(root, config.outDir || 'dist');
     let base = ensureSlashes((config as any).base ?? '/');
     const build = config.build ?? {};
+    const cjsMode = config.mode === 'production' ? 'production' : String(config.mode);
     const minify = build.minify !== false;
     const cssCodeSplit = (build as any).cssCodeSplit !== false;
     const inlineLimit = build.assetsInlineLimit ?? DEFAULT_INLINE_LIMIT;
@@ -402,10 +403,11 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         return undefined;
     });
 
+    const cjsPlugin = cjsTreeShakingPlugin(cjsMode);
     const plugins: any[] = [
         // Vite's order: `enforce: 'pre'`, the built-ins, the rest, `enforce: 'post'`.
         ...(vp ? vp.forRolldown(app!, app!.pre, pluginCss) : []),
-        ...(b.commonjsTreeShaking === false ? [] : [cjsTreeShakingPlugin(config.mode === 'production' ? 'production' : String(config.mode))]),
+        ...(b.commonjsTreeShaking === false ? [] : [cjsPlugin]),
         {
             name: 'lunx:framework',
             // Hook filters keep Rolldown from calling into JS for modules a
@@ -866,8 +868,10 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         // `build.chunkImportMap`: a changed chunk no longer changes the hashes of the chunks importing it.
         ...(chunkImportMap ? { chunkImportMap: { baseUrl: chunkImportMapBase } } : {}),
         jsx: jsxImportSource ? { runtime: 'automatic', importSource: jsxImportSource } : undefined,
-        // Normal in app code; not worth a warning on every build.
-        onWarning: (w) => !['EVAL', 'CIRCULAR_DEPENDENCY', 'MIXED_EXPORT'].includes(w.code ?? ''),
+        // Normal in app code; not worth a warning on every build. A missing export read through a
+        // namespace lunx made from a CommonJS require is `undefined` there too (React reads
+        // `Scheduler.log`, which only the scheduler's development build has).
+        onWarning: (w) => !['EVAL', 'CIRCULAR_DEPENDENCY', 'MIXED_EXPORT'].includes(w.code ?? '') && !(w.code === 'IMPORT_IS_UNDEFINED' && w.id && cjsPlugin.converted.has(w.id)),
     }, {
         dir: outDir,
         format: 'es',
@@ -1281,15 +1285,25 @@ function legalCommentsPlugin(): any {
  * leaves them to Rolldown's CommonJS interop.
  */
 function cjsTreeShakingPlugin(mode: string): any {
+    const converted = new Set<string>();
+    let ms = 0;
     return {
         name: 'lunx:cjs-esm',
+        converted,
+        buildEnd() {
+            if (process.env.LUNX_TIMINGS) console.log(`  [lunx:timings] ${'commonjs → esm'.padEnd(33)} ${ms.toFixed(1)} ms (${converted.size} modules)`);
+        },
         transform: {
             filter: { id: /[\\/]node_modules[\\/].*\.c?js(\?.*)?$/, code: { include: ['exports'] } },
             async handler(code: string, id: string) {
                 const { cjsToEsm, mayConvert } = await import('./cjs-to-esm.js');
                 if (!mayConvert(code)) return null;
+                const t0 = performance.now();
                 const out = cjsToEsm(code, cleanId(id), mode);
-                return out === null ? null : { code: out };
+                ms += performance.now() - t0;
+                if (out === null) return null;
+                converted.add(id);
+                return { code: out };
             },
         },
     };

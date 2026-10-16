@@ -17,7 +17,15 @@
  *    and calls to them (React's `checkDCE`). It re-exports the branch for
  *    the build's mode.
  */
-import { parseAst } from 'rolldown/parseAst';
+import { lexExportsModule } from './cjs-lexer.js';
+import { requireEsm } from '../engines/require-esm.js';
+
+// Loaded on first use: the lexer handles large modules without it, and the prefetch worker
+// (cjs-prefetch.ts) starts faster without Rolldown's binding.
+let parseAst: ((code: string, options: object, file: string) => unknown) | null = null;
+
+/** Above this size an exports module is read by the lexer first (cjs-lexer.ts): no JS syntax tree. */
+const LEX_ABOVE = 32 * 1024;
 
 type Node = { type: string; start: number; end: number; [key: string]: any };
 
@@ -27,7 +35,18 @@ interface Edit {
     text: string;
 }
 
-const FUNCTION = /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/;
+// Functions that bind `this` (an arrow's `this` is its scope's: at the top level, the module's).
+const FUNCTION = /^(FunctionDeclaration|FunctionExpression)$/;
+
+/**
+ * The file `module.exports` comes from in an entry like React's, for `mode`:
+ * `if (process.env.NODE_ENV === 'production') { …; module.exports = require(prod) } else { module.exports = require(dev) }`.
+ */
+export function nodeEnvSwitch(code: string, mode: string): string | null {
+    const m = /if\s*\(process\.env\.NODE_ENV\s*===\s*['"]production['"]\)\s*\{[^{}]*?module\.exports\s*=\s*require\(['"]([^'"]+)['"]\);?\s*\}\s*else\s*\{\s*module\.exports\s*=\s*require\(['"]([^'"]+)['"]\);?\s*\}\s*$/.exec(code);
+    if (!m || (code.match(/\bmodule\.exports\b/g) ?? []).length !== 2) return null;
+    return mode === 'production' ? m[1]! : m[2]!;
+}
 
 /** Quick test before parsing: CommonJS markers, and no ES module syntax. */
 export function mayConvert(code: string): boolean {
@@ -36,32 +55,79 @@ export function mayConvert(code: string): boolean {
 
 /** The ES module for `code`, or null when it is not one of the static shapes. */
 export function cjsToEsm(code: string, file: string, mode: string): string | null {
+    if (code.length > LEX_ABOVE) {
+        const lexed = exportsModuleByLexer(code);
+        if (lexed !== undefined) return lexed;
+    }
+    return cjsToEsmByTree(code, file, mode);
+}
+
+/** The exports-module conversion from tokens: undefined when the lexer is unsure (cjs-lexer.ts). */
+export function exportsModuleByLexer(code: string): string | null | undefined {
+    const lexed = lexExportsModule(code);
+    if (!lexed) return lexed;
+    const edits: Edit[] = lexed.requires.map((r) => ({ start: r.start, end: r.end, text: code.slice(r.start, r.end).replace(/[^\n]/g, '') }));
+    for (const r of lexed.requires) for (const b of r.bindings) if (namespaceAssigned(code, b.name, edits)) return null;
+    for (const ref of lexed.exportRefs) edits.push({ start: ref.start, end: ref.end, text: `__exp_${ref.name}` });
+    const imports = lexed.requires.flatMap((r) => r.bindings.map((b) => `import * as ${b.name} from ${JSON.stringify(b.spec)};`));
+    return assemble(code, imports, edits, new Set(lexed.exportRefs.map((r) => r.name)));
+}
+
+/** Both shapes, from the syntax tree. */
+export function cjsToEsmByTree(code: string, file: string, mode: string): string | null {
     let ast: Node;
     try {
-        ast = parseAst(code, { sourceType: 'script' }, file) as unknown as Node;
+        parseAst ??= requireEsm('rolldown/parseAst').parseAst as typeof parseAst;
+        ast = parseAst!(code, { sourceType: 'script' }, file) as unknown as Node;
     } catch {
         return null;
     }
     return entryModule(ast, code, mode) ?? exportsModule(ast, code);
 }
 
-/** Depth-first; the visitor returns 'skip' to leave a node's children, false to stop. */
-function walk(node: any, visit: (n: Node, parent: Node | null, fnDepth: number) => boolean | 'skip' | void, parent: Node | null = null, fnDepth = 0): boolean {
-    if (!node || typeof node.type !== 'string') return true;
+type Visit = (n: Node, parent: Node | null, fnDepth: number) => boolean | 'skip' | void;
+
+/**
+ * Depth-first; the visitor returns 'skip' to leave a node's children, false to stop.
+ * `relevant(start, end, fnDepth)` false: nothing in that node's range can matter, so its
+ * subtree is not visited (react-dom's 500 kB walk in ~5 ms instead of ~80).
+ */
+function walk(node: any, visit: Visit, relevant: (start: number, end: number, fnDepth: number) => boolean, parent: Node | null = null, fnDepth = 0): boolean {
+    if (!node || typeof node.type !== 'string' || !relevant(node.start, node.end, fnDepth)) return true;
     const verdict = visit(node, parent, fnDepth);
     if (verdict === false) return false;
     if (verdict === 'skip') return true;
     const depth = FUNCTION.test(node.type) ? fnDepth + 1 : fnDepth;
-    for (const key of Object.keys(node)) {
+    for (const key in node) {
         if (key === 'type' || key === 'start' || key === 'end') continue;
         const value = node[key];
+        if (value === null || typeof value !== 'object') continue;
         if (Array.isArray(value)) {
-            for (const child of value) if (child && typeof child.type === 'string' && !walk(child, visit, node, depth)) return false;
-        } else if (value && typeof value.type === 'string') {
-            if (!walk(value, visit, node, depth)) return false;
+            for (const child of value) if (child && typeof child.type === 'string' && !walk(child, visit, relevant, node, depth)) return false;
+        } else if (typeof value.type === 'string') {
+            if (!walk(value, visit, relevant, node, depth)) return false;
         }
     }
     return true;
+}
+
+/** Sorted offsets where `re` matches `code`. */
+function offsets(code: string, re: RegExp): number[] {
+    const out: number[] = [];
+    for (const m of code.matchAll(re)) out.push(m.index!);
+    return out;
+}
+
+/** Whether a sorted list has an offset in [start, end). */
+function within(list: number[], start: number, end: number): boolean {
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (list[mid]! < start) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < list.length && list[lo]! < end;
 }
 
 const isRequire = (n: any): n is Node =>
@@ -149,6 +215,14 @@ function exportsModule(ast: Node, code: string): string | null {
         pastRequires = true;
     }
     for (const name of namespaces) if (topLevel.get(name) !== 1) return null;
+    for (const name of namespaces) if (namespaceAssigned(code, name, edits)) return null;
+    // Only nodes whose source holds one of the names below (or, outside functions, `this`)
+    // can fail the checks or need an edit. Escaped identifiers (\u0065xports) defeat the
+    // text search: those modules are walked whole.
+    const idAt = offsets(code, /(?<![\w$])(?:module|require|exports|__esModule)(?![\w$])/g);
+    const thisAt = offsets(code, /(?<![\w$.])this(?![\w$])/g);
+    const escaped = /\\u[0-9a-fA-F{]/.test(code);
+    const relevant = (start: number, end: number, fnDepth: number) => escaped || within(idAt, start, end) || (fnDepth === 0 && within(thisAt, start, end));
     walk(ast, (n, parent, fnDepth) => {
         if (n.type === 'Identifier') {
             const isProp = parent?.type === 'MemberExpression' && parent.property === n && !parent.computed;
@@ -161,10 +235,6 @@ function exportsModule(ast: Node, code: string): string | null {
                 ok = false;
                 return false;
             }
-        }
-        if ((n.type === 'AssignmentExpression' && n.left.type === 'Identifier' && namespaces.has(n.left.name)) || (n.type === 'UpdateExpression' && n.argument.type === 'Identifier' && namespaces.has(n.argument.name))) {
-            ok = false;
-            return false;
         }
         if (n.type === 'ThisExpression' && fnDepth === 0) {
             ok = false;
@@ -181,11 +251,34 @@ function exportsModule(ast: Node, code: string): string | null {
             return 'skip';
         }
         if (n.type === 'VariableDeclaration' && n.declarations.some((d: any) => allowedRequires.has(d.init))) return 'skip';
-    });
-    if (!ok || !names.size) return null;
-    edits.sort((a, b) => b.start - a.start);
-    let body = code;
-    for (const e of edits) body = body.slice(0, e.start) + e.text + body.slice(e.end);
+    }, relevant);
+    if (!ok) return null;
+    return assemble(code, imports, edits, names);
+}
+
+/**
+ * Whether a namespace is assigned (`React = …`, `React++`), which leaves it a variable: not
+ * static. Searched in the text without the require declarations in `skip`; a match in a
+ * string only gives up early.
+ */
+function namespaceAssigned(code: string, name: string, skip: Edit[]): boolean {
+    let rest = code;
+    for (const e of skip) rest = rest.slice(0, e.start) + ' '.repeat(e.end - e.start) + rest.slice(e.end);
+    return new RegExp(`(^|[^.\\w$])${name}\\s*(=(?![=>])|[-+*/%&|^]=|\\*\\*=|<<=|>>>?=|&&=|\\|\\|=|\\?\\?=|\\+\\+|--)|(\\+\\+|--)\\s*${name}(?![\\w$])`).test(rest);
+}
+
+/** The ES module: the imports and export variables on the first line (line numbers stay), the body with `edits`, the exports. */
+function assemble(code: string, imports: string[], edits: Edit[], names: Set<string>): string | null {
+    if (!names.size) return null;
+    edits.sort((a, b) => a.start - b.start);
+    const parts: string[] = [];
+    let at = 0;
+    for (const e of edits) {
+        parts.push(code.slice(at, e.start), e.text);
+        at = e.end;
+    }
+    parts.push(code.slice(at));
+    const body = parts.join('');
     const list = [...names];
     // Imports and the export variables share the first line, so line numbers stay as they were.
     return (

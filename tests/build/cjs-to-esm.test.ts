@@ -4,7 +4,12 @@
  * the two static shapes is left to Rolldown's CommonJS interop.
  */
 import { describe, it, expect } from '@jest/globals';
-import { cjsToEsm, mayConvert } from '../../src/build/cjs-to-esm.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { cjsToEsm, cjsToEsmByTree, exportsModuleByLexer, mayConvert } from '../../src/build/cjs-to-esm.js';
+
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 describe('CommonJS to ES modules', () => {
     it('turns exports.name assignments into exported variables, and top-level requires into namespace imports', () => {
@@ -37,5 +42,47 @@ describe('CommonJS to ES modules', () => {
         ];
         for (const code of dynamic) expect(cjsToEsm(code, 'm.js', 'production')).toBeNull();
         expect(mayConvert('import x from "y"; exports.a = 1;')).toBe(false);
+    });
+
+    it('the lexer (large modules) converts as the syntax tree does, or defers to it', () => {
+        // React's builds: converted by the lexer, the same output.
+        for (const rel of ['react-dom/cjs/react-dom-client.production.js', 'react/cjs/react.production.js', 'scheduler/cjs/scheduler.production.js']) {
+            const code = fs.readFileSync(path.join(repo, 'node_modules', rel), 'utf8');
+            const lexed = exportsModuleByLexer(code);
+            expect(lexed).toBeTruthy();
+            expect(lexed).toBe(cjsToEsmByTree(code, rel, 'production'));
+        }
+        const pad = '\n' + '// padding\n'.repeat(4000); // above the lexer's size threshold
+        const cases: Array<[string, 'same' | 'unsure']> = [
+            // Regular expressions, division, templates, comments: no false `exports`.
+            ['var d = require("d");\nexports.a = /exports\\.x/.test(s) ? 1 / 2 : `exports.${"y"}`; // exports.z\n', 'same'],
+            ['exports.f = function (a) { return a ? { exports: 1 } : (b) / 2; };\nexports.g = (x) => x++ / 2;\n', 'same'],
+            // A label's block and a case's block before a regular expression.
+            ['exports.h = function () { a: { if (x) break a; } /re/.test(y); switch (k) { case 1: { break; } } };\n', 'same'],
+            // `this` in a function is fine; at the top level, in an arrow or a method, the tree decides.
+            ['exports.i = function () { return this; };\n', 'same'],
+            ['exports.j = () => this;\n', 'unsure'],
+            ['exports.k = { m() { return this; } };\n', 'unsure'],
+            // A namespace declared again: the tree tells nested from top-level.
+            ['var React = require("react");\nfunction f() { var a, React; return React; }\nexports.f = f;\n', 'unsure'],
+            // Dynamic shapes: null either way.
+            ['exports[name] = 1;\n', 'same'],
+            ['var dep = require("dep");\ndep = null;\nexports.a = 1;\n', 'same'],
+            ['module.exports = { a: 1 };\n', 'same'],
+        ];
+        for (const [code, expected] of cases) {
+            const big = code + pad;
+            const lexed = exportsModuleByLexer(big);
+            const tree = cjsToEsmByTree(big, 'm.js', 'production');
+            if (expected === 'unsure') expect(lexed).toBeUndefined();
+            else expect(lexed).toBe(tree);
+            // Whichever path runs, cjsToEsm gives the tree's answer.
+            expect(cjsToEsm(big, 'm.js', 'production')).toBe(tree);
+        }
+    });
+
+    it('treats an arrow function at the top level as the module scope for `this`', () => {
+        expect(cjsToEsm('exports.a = () => this;', 'm.js', 'production')).toBeNull();
+        expect(cjsToEsm('exports.a = function () { return this; };', 'm.js', 'production')).not.toBeNull();
     });
 });
