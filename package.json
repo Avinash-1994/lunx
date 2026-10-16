@@ -20,9 +20,9 @@
   },
   "sideEffects": false,
   "bin": {
-    "lunx": "./dist/cli.js",
-    "lunx-dev": "./dist/cli.js",
-    "lunxjs": "./dist/cli.js",
+    "lunx": "./dist/cli-fast.cjs",
+    "lunx-dev": "./dist/cli-fast.cjs",
+    "lunxjs": "./dist/cli-fast.cjs",
     "create-lunx": "./dist/create-lunx.js"
   },
   "files": [

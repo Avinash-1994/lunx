@@ -81,7 +81,7 @@ async function copyAll(patternDir, filterExt, outDir) {
         const d = join(destDir, e.name);
         if (e.isDirectory()) {
           await mirrorDir(s, d);
-        } else if (e.name.endsWith('.js') || e.name.endsWith('.d.ts') || e.name.endsWith('.js.map')) {
+        } else if (/\.(c?js|d\.c?ts|js\.map)$/.test(e.name)) {
           await copyIfExists(s, d);
         }
       }
@@ -90,7 +90,7 @@ async function copyAll(patternDir, filterExt, outDir) {
   await mirrorDir(join(distDir, 'src'), distDir);
 
   // Ensure CLI entry points are executable when installed as a local package
-  const executables = ['cli.js', 'create-lunx.js'];
+  const executables = ['cli.js', 'cli-fast.cjs', 'create-lunx.js'];
   for (const file of executables) {
     const target = join(distDir, file);
     await fs.chmod(target, 0o755).catch(() => { });

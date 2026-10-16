@@ -19,60 +19,16 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { remoteCache } from './remote-cache.js';
+import type { Stamp, Entry } from './stamps.cjs';
+// A default import: CommonJS named exports are not detected in every loader (tsx's output among them).
+import stamps from './stamps.cjs';
 
-const SKIP_DIRS = new Set(['node_modules', '.git', '.lunx', '.lunx_cache', '.cache', '.turbo', '.next', '.nuxt', '.svelte-kit', '.output', 'coverage']);
-/** Above this many files the fingerprint costs more than it saves. */
+const { SKIP_DIRS, walk, inputsOf, addInstallMarkers, same, buildEnv, snapshotOutput, outputCurrent, invocation, lastBuildFile } = stamps;
+
 const MAX_FILES = 25_000;
-const INSTALL_MARKERS = ['node_modules/.package-lock.json', 'node_modules/.pnpm/lock.yaml', 'node_modules/.yarn-state.yml', 'node_modules/.modules.yaml'];
-
-type Stamp = [number, number]; // mtimeMs, size
-
-interface Entry {
-    key: string;
-    inputs: Record<string, Stamp>;
-    outputs: Record<string, Stamp>;
-    outDir: string;
-    builtAt: number;
-}
 
 export function cacheEnabled(): boolean {
     return process.env.LUNX_BUILD_CACHE !== '0';
-}
-
-function stamp(file: string): Stamp | null {
-    try {
-        const s = fs.statSync(file);
-        return [Math.round(s.mtimeMs), s.size];
-    } catch {
-        return null;
-    }
-}
-
-/** Every file under `dir` (relative paths), skipping dependency, VCS, cache and output dirs. */
-function walk(root: string, skip: Set<string>): Record<string, Stamp> | null {
-    const out: Record<string, Stamp> = {};
-    let count = 0;
-    const visit = (dir: string): boolean => {
-        let entries: fs.Dirent[];
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-            return true;
-        }
-        for (const e of entries) {
-            const full = path.join(dir, e.name);
-            if (e.isDirectory()) {
-                if (SKIP_DIRS.has(e.name) || skip.has(full)) continue;
-                if (!visit(full)) return false;
-            } else if (e.isFile()) {
-                if (++count > MAX_FILES) return false;
-                const s = stamp(full);
-                if (s) out[path.relative(root, full)] = s;
-            }
-        }
-        return true;
-    };
-    return visit(root) ? out : null;
 }
 
 function serialize(value: unknown): string {
@@ -94,17 +50,6 @@ function lunxVersion(): string {
     } catch {
         return 'unknown';
     }
-}
-
-function same(a: Record<string, Stamp>, b: Record<string, Stamp>): boolean {
-    const keys = Object.keys(a);
-    if (keys.length !== Object.keys(b).length) return false;
-    for (const k of keys) {
-        const x = a[k]!;
-        const y = b[k];
-        if (!y || x[0] !== y[0] || x[1] !== y[1]) return false;
-    }
-    return true;
 }
 
 interface Pending {
@@ -134,11 +79,8 @@ export function startInputScans(): void {
  * current? Config files are inputs like any other, so this needs no config,
  * and a hit skips loading it. Returns what `recordBuild` needs on a miss.
  */
-export function checkBuild(root: string, options: Record<string, unknown>): { hit: boolean; outDir?: string; pending: Pending } {
-    const env = Object.entries(process.env)
-        .filter(([k]) => /^(NODE_ENV|LUNX_|VITE_|PUBLIC_|REACT_APP_)/.test(k) && k !== 'LUNX_TIMINGS')
-        // Code-unit order: localeCompare would load ICU's collator, ~13ms on the first call.
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+export function checkBuild(root: string, options: Record<string, unknown>): { hit: boolean; restored?: boolean; outDir?: string; pending: Pending } {
+    const env = buildEnv();
     const key = crypto.createHash('sha256').update(lunxVersion()).update(serialize(options)).update(JSON.stringify(env)).digest('hex');
     const file = path.join(root, '.lunx', 'build-cache', `${crypto.createHash('sha256').update(serialize(options)).digest('hex').slice(0, 12)}.json`);
     let entry: Entry | null = null;
@@ -150,7 +92,9 @@ export function checkBuild(root: string, options: Record<string, unknown>): { hi
     // Settled without the inputs (other options, or the output was removed or changed): it
     // rebuilds whatever they are, so read them while Rolldown renders (in Rust threads, the main
     // thread mostly waiting) instead of before the build starts.
-    if (!entry || entry.key !== key || !Object.keys(entry.outputs).length || !same(entry.outputs, walk(entry.outDir, new Set()) ?? {})) {
+    // Other options or a first build: it rebuilds whatever the inputs are, so read them while
+    // Rolldown renders (in Rust threads, the main thread mostly waiting) instead of before.
+    if (!entry || entry.key !== key) {
         let started: Promise<Record<string, Stamp> | null> | null = null;
         const scan = () => (started ??= inputsOfAsync(root).catch(() => null));
         waitingScans.add(scan);
@@ -158,27 +102,15 @@ export function checkBuild(root: string, options: Record<string, unknown>): { hi
     }
     const outDir = entry.outDir;
     const inputs = inputsOf(root, outDir);
-    const hit = !!inputs && same(entry.inputs, inputs);
-    return { hit, outDir, pending: { file, key, outDir, inputs } };
-}
-
-function inputsOf(root: string, outDir: string): Record<string, Stamp> | null {
-    const inputs = walk(root, new Set([outDir]));
-    if (!inputs) return null;
-    for (const marker of INSTALL_MARKERS) {
-        const s = stamp(path.join(root, marker));
-        if (s) inputs[marker] = s;
-    }
-    return inputs;
+    // Unchanged inputs: the output stands, restored from its snapshot if it was removed or changed.
+    const state = inputs && same(entry.inputs, inputs) ? outputCurrent(file, entry) : false;
+    return { hit: !!state, restored: state === 'restored', outDir, pending: { file, key, outDir, inputs } };
 }
 
 async function inputsOfAsync(root: string): Promise<Record<string, Stamp> | null> {
     const inputs = await walkAsync(root);
     if (!inputs) return null;
-    for (const marker of INSTALL_MARKERS) {
-        const s = stamp(path.join(root, marker));
-        if (s) inputs[marker] = s;
-    }
+    addInstallMarkers(root, inputs);
     return inputs;
 }
 
@@ -215,7 +147,7 @@ async function walkAsync(root: string): Promise<Record<string, Stamp> | null> {
 }
 
 /** After a successful build: remember its inputs (as they were before it ran) and its output. */
-export async function recordBuild(root: string, pending: Pending, outDir: string, enabled = true): Promise<void> {
+export async function recordBuild(root: string, pending: Pending, outDir: string, enabled = true, cliArgs?: string[]): Promise<void> {
     if (!enabled) {
         fs.rmSync(pending.file, { force: true });
         return;
@@ -238,6 +170,9 @@ export async function recordBuild(root: string, pending: Pending, outDir: string
     fs.mkdirSync(path.dirname(pending.file), { recursive: true });
     const entry: Entry = { key: pending.key, inputs, outputs, outDir, builtAt: Date.now() };
     fs.writeFileSync(pending.file, JSON.stringify(entry));
+    snapshotOutput(pending.file, entry);
+    // The CLI's fast path (cli-fast.cts) checks this invocation before loading lunx.
+    if (cliArgs) fs.writeFileSync(lastBuildFile(root), JSON.stringify({ invocation: invocation(lunxVersion(), cliArgs), entry: pending.file }));
 }
 
 // ── Transform cache ──────────────────────────────────────────────────────────

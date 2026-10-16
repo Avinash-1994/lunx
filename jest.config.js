@@ -2,6 +2,7 @@ export default {
     preset: 'ts-jest/presets/default-esm', // Use ESM preset
     testEnvironment: 'node',
     extensionsToTreatAsEsm: ['.ts', '.mts'],
+    moduleFileExtensions: ['js', 'mjs', 'cjs', 'jsx', 'ts', 'mts', 'cts', 'tsx', 'json', 'node'],
     testMatch: [
         '<rootDir>/tests/**/*.test.ts',
         '<rootDir>/src/**/*.test.ts'
@@ -15,7 +16,7 @@ export default {
     ],
     roots: ['<rootDir>/tests', '<rootDir>/src'], // Run tests in both directories
     transform: {
-        '^.+\\.m?[tj]sx?$': ['ts-jest', {
+        '^.+\\.[mc]?[tj]sx?$': ['ts-jest', {
             useESM: true,
             tsconfig: {
                 module: 'esnext',
@@ -28,6 +29,9 @@ export default {
     moduleNameMapper: {
         // Map native binding imports to our CJS shim (must be before the .js stripper)
         '^.*[/\\\\]native[/\\\\]index(\\.js)?$': '<rootDir>/native/index.cjs',
+        // CommonJS modules written in TypeScript (src/build/stamps.cts) are imported as .cjs.
+        '^(\\.\\.?/.*)/stamps\\.cjs$': '$1/stamps.cts',
+        '^\\./stamps\\.cjs$': '<rootDir>/src/build/stamps.cts',
         '^(\\.\\.?/.*)\\.js$': '$1',  // Fixed: matches ./ and ../ imports
     },
     // Don't transform native CJS files or binary .node files

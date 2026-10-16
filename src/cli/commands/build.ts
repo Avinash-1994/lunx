@@ -163,9 +163,15 @@ export default {
     const cacheOptions = { lib: args.lib ?? null, formats: args.formats ?? null, dts: args.dts ?? null, name: args.name ?? null, outDir: args.outDir ?? null, prod: args.prod, compatRollup: !!args['compat-rollup'] };
     // --force rebuilds but still records the result for the next build.
     const cached = buildCache.cacheEnabled() && !args.watch ? buildCache.checkBuild(root, cacheOptions) : null;
+    // What the CLI's fast path (cli-fast.cts) matches next time: the arguments after `build`.
+    const cliArgs = process.argv[2] === 'build' ? process.argv.slice(3).filter((a) => !/^--force(=true)?$/.test(a)) : undefined;
     mark('build cache check');
     if (cached?.hit && !args.force) {
-      console.log(`\n  ✓ Up to date: nothing changed since the last build (${path.relative(process.cwd(), cached.outDir!) || '.'}, ${Math.round(process.uptime() * 1000)} ms). Use --force to rebuild.\n`);
+      const where = path.relative(process.cwd(), cached.outDir!) || '.';
+      const ms = Math.round(process.uptime() * 1000);
+      console.log(cached.restored
+        ? `\n  ✓ Up to date: nothing changed since the last build; ${where} restored from the build cache (${ms} ms). Use --force to rebuild.\n`
+        : `\n  ✓ Up to date: nothing changed since the last build (${where}, ${ms} ms). Use --force to rebuild.\n`);
       return;
     }
 
@@ -195,7 +201,7 @@ export default {
         if (args.name) libOption.name = args.name;
         libOption.outDir ??= (config as any).outDir || 'dist';
         await runLibraryBuild(root, libOption, config);
-        if (cached) await buildCache.recordBuild(root, cached.pending, path.resolve(root, libOption.outDir), (config as any).build?.cache !== false);
+        if (cached) await buildCache.recordBuild(root, cached.pending, path.resolve(root, libOption.outDir), (config as any).build?.cache !== false, cliArgs);
         await telemetry.stop(true);
         if (args.watch) {
           const { watch } = await import('../../lib/watcher.js');
@@ -250,7 +256,7 @@ export default {
       const elapsed = Math.round(performance.now() - t0);
 
       const outDir = path.resolve(root, (config as any).outDir || 'dist');
-      if (cached) await buildCache.recordBuild(root, cached.pending, outDir, (config as any).build?.cache !== false);
+      if (cached) await buildCache.recordBuild(root, cached.pending, outDir, (config as any).build?.cache !== false, cliArgs);
       const tSummary = performance.now();
       await printBuildSummary(outDir, elapsed);
       if (process.env.LUNX_TIMINGS) console.log(`  [lunx:timings] ${'size summary'.padEnd(32)} ${(performance.now() - tSummary).toFixed(1).padStart(7)} ms`);
