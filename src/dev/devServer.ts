@@ -375,6 +375,11 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // 3. Initialize Universal Transformer
   const { UniversalTransformer } = await import('../core/universal-transformer.js');
   const universalTransformer = new UniversalTransformer(cfg.root, { react: (cfg as any).react });
+  // Finished module responses (compiled, imports rewritten), per URL. One stays valid while its
+  // file's stamp, the pre-bundled deps and the rest of the project are unchanged: any file event
+  // clears them all, since an import may now resolve elsewhere. Large apps load thousands of
+  // modules per visit; this makes each a stat and a memory read after the first.
+  const moduleResponses = new Map<string, { file: string; stamp: string; deps: Map<string, string>; code: string; etag: string }>();
   const workerThreads = Math.max(2, require('os').cpus().length - 2); // Leave 2 for OS + watcher
   const nativeWorker = new NativeWorker(workerThreads);
   const pluginManager = new PluginManager();
@@ -951,6 +956,24 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    // A module served before, unchanged since: straight from memory (see moduleResponses).
+    const served = req.method === 'GET' ? moduleResponses.get(req.url || '/') : undefined;
+    if (served) {
+      const st = await fs.stat(served.file).catch(() => null);
+      if (st && `${st.mtimeMs}:${st.size}` === served.stamp && served.deps === preBundledDeps) {
+        if (cfg.server?.headers) for (const [k, v] of Object.entries(cfg.server.headers)) res.setHeader(k, v as any);
+        if (req.headers['if-none-match'] === served.etag) {
+          res.writeHead(304, { ETag: served.etag, 'Cache-Control': 'no-cache' });
+          res.end();
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache', ETag: served.etag });
+          res.end(served.code);
+        }
+        return;
+      }
+      moduleResponses.delete(req.url || '/');
     }
 
     if (process.env.DEBUG) {
@@ -1771,6 +1794,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
         }
 
         if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs' || ext === '.vue' || ext === '.svelte' || ext === '.astro') {
+        const moduleStamp = `${stats.mtimeMs}:${stats.size}`;
         let raw = await fs.readFile(filePath, 'utf-8');
 
         // Native transform fast path for plain JS/TS only.
@@ -1803,10 +1827,10 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           const globbed = transformGlobImports(compiled, filePath, cfg.root);
           let code = await rewriteImports(globbed ?? compiled, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath);
 
-          res.writeHead(200, {
-            'Content-Type': 'application/javascript',
-            'Cache-Control': 'no-cache, no-store, must-revalidate'
-          });
+          const etag = `"${crypto.createHash('sha1').update(code).digest('base64url')}"`;
+          // Vite plugins' transforms may read anything: their output is not kept.
+          if (!appDev && req.method === 'GET') moduleResponses.set(url, { file: filePath, stamp: moduleStamp, deps: preBundledDeps, code, etag });
+          res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache', ETag: etag });
           res.end(code);
           return;
         } catch (error: any) {
@@ -2134,6 +2158,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   // A short batch: editors write a save as one or two events, and each ms is HMR latency.
   const watcher = new DevWatcher(cfg.root);
   watcher.on('change', async (files: string[]) => {
+    moduleResponses.clear();
     // Modules a Vite plugin built from these files (a Tailwind stylesheet from the sources it scanned) update with them.
     const pluginDependents = new Set(appDev ? files.flatMap((f) => appDev!.fileChanged(f)) : []);
     for (const file of files) pluginDependents.delete(file);

@@ -10,6 +10,7 @@
  * Metrics, per tool:
  *   dev boot    spawn → GET / returns 200
  *   app code    spawn → the first <script src> in that HTML returns 200.
+ *   page ready  (--hmr) spawn → Chromium shows the rendered app on its first visit.
  *               For module servers (lunx, vite) this is one transformed
  *               module; for bundler dev servers (webpack, rspack, parcel) it
  *               is the whole bundle, because that is what they must produce
@@ -290,6 +291,20 @@ async function browser() {
     return browserPromise;
 }
 
+/** Spawn → the app rendered in Chromium on its first visit. */
+async function pageRun(port, t0) {
+    const page = await (await browser()).newPage();
+    try {
+        await page.goto(`http://127.0.0.1:${port}/`, { timeout: 120_000 });
+        await page.waitForFunction(() => document.querySelector('#t')?.textContent === 'arena', null, { timeout: 120_000, polling: 'raf' });
+        return Date.now() - t0;
+    } catch {
+        return null;
+    } finally {
+        await page.close();
+    }
+}
+
 /** Save a change to App.tsx and time until the page shows it. */
 async function hmrRun(port) {
     const file = path.join(app, 'src', 'App.tsx');
@@ -457,10 +472,12 @@ async function devRun(tool) {
         if (body !== null) appCodeMs = Date.now() - t0;
     }
 
+    // The first visit, as a developer opening the app: every module fetched, the app rendered.
+    const pageMs = HMR ? await pageRun(port, t0) : null;
     const hmrMs = HMR ? await hmrRun(port) : null;
     child.kill('SIGKILL');
     await sleep(300);
-    return { bootMs, appCodeMs, hmrMs };
+    return { bootMs, appCodeMs, pageMs, hmrMs };
 }
 
 function buildRun(tool) {
@@ -509,6 +526,7 @@ for (const [name, tool] of Object.entries(TOOLS)) {
         const boots = [];
         const codes = [];
         const hmrs = [];
+        const pages = [];
         for (let i = 0; i < RUNS; i++) {
             clearCaches(tool);
             const d = await devRun(tool);
@@ -520,11 +538,13 @@ for (const [name, tool] of Object.entries(TOOLS)) {
             boots.push(d.bootMs);
             if (d.appCodeMs !== null) codes.push(d.appCodeMs);
             if (d.hmrMs !== null && d.hmrMs !== undefined) hmrs.push(d.hmrMs);
-            console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms${HMR ? `, hmr ${d.hmrMs ?? 'failed'}ms` : ''}`);
+            if (d.pageMs !== null && d.pageMs !== undefined) pages.push(d.pageMs);
+            console.log(`${name} dev ${i + 1}/${RUNS}: boot ${d.bootMs}ms, app code ${d.appCodeMs}ms${HMR ? `, page ${d.pageMs ?? 'failed'}ms, hmr ${d.hmrMs ?? 'failed'}ms` : ''}`);
         }
         if (boots.length) r.devBootMs = median(boots);
         if (codes.length) r.devAppCodeMs = median(codes);
         if (hmrs.length) r.hmrMs = median(hmrs);
+        if (pages.length) r.devPageMs = median(pages);
     } else {
         r.devBootMs = null;
     }
@@ -559,7 +579,7 @@ const cols = [
     ['kind', (k) => results[k].kind, 20],
     ['dev boot', (k) => fmt(results[k].devBootMs, 'ms'), 10],
     ['app code', (k) => fmt(results[k].devAppCodeMs, 'ms'), 10],
-    ...(HMR ? [['hmr', (k) => fmt(results[k].hmrMs, 'ms'), 9]] : []),
+    ...(HMR ? [['page ready', (k) => fmt(results[k].devPageMs, 'ms'), 11], ['hmr', (k) => fmt(results[k].hmrMs, 'ms'), 9]] : []),
     ['build cold', (k) => fmt(results[k].buildColdMs, 'ms'), 11],
     ['build warm', (k) => fmt(results[k].buildWarmMs, 'ms'), 11],
     ['JS', (k) => fmt(results[k].jsBytes, 'B'), 10],
