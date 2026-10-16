@@ -4,6 +4,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
+import { BUNDLE_PREFIX, type BundledDev } from './bundled.js';
 import { applyAlias, collectAliases, type AliasEntry } from '../config/aliases.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css.js';
 import { transformGlobImports } from '../build/glob-import.js';
@@ -439,6 +440,18 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // HMR client are served at once, and only module requests (whose imports
   // must point at the bundled deps) wait for it.
   let prebundleReady: Promise<void> = Promise.resolve();
+  // `server.bundle`: the page loads bundles from Rolldown's dev engine (see bundled.ts), which
+  // bundles node_modules too, so nothing is pre-bundled. Plain SPAs only: Vite plugins, module
+  // federation and SSR keep serving modules one by one.
+  let bundled: BundledDev | null = null;
+  const bundleRequested = !!(cfg.server as any)?.bundle;
+  const bundleBlocker = !bundleRequested ? null
+    : cfg.preset !== 'spa' ? `preset "${cfg.preset}"`
+    : cfg.federation?.name ? 'module federation'
+    : ((cfg as any).__vitePlugins?.length || (cfg.plugins ?? []).some((p: any) => p && typeof p === 'object')) ? 'Vite plugins'
+    : !existsSync(path.join(cfg.root, 'index.html')) ? 'no index.html'
+    : null;
+  if (bundleRequested && bundleBlocker) log.warn(`server.bundle is not available with ${bundleBlocker}: serving modules unbundled`, { category: 'server' });
   if (cfg.federation?.name) {
     const { DevFederation } = await import('../federation/dev.js');
     devFederation = new DevFederation(cfg.federation as any, {
@@ -520,7 +533,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     // Scanning the sources for imports and pre-bundling run in the background, as in
     // Vite: the server answers at once, and module requests wait for prebundleReady.
     // (Awaiting the scan made boot grow with the app: ~0.5s at 2,000 modules.)
-    prebundleReady = (async () => {
+    const runPrebundle = async () => {
       // Auto-discover from package.json
       let pkgDepsList: string[] = [];
       try {
@@ -626,7 +639,37 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           );
         }
       }
-    })().catch((e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`));
+    };
+    if (bundleRequested && !bundleBlocker) {
+      const { startBundledDev } = await import('./bundled.js');
+      bundled = await startBundledDev({
+        root: cfg.root,
+        html: path.join(cfg.root, 'index.html'),
+        defines: devDefines,
+        aliases,
+        sourcemap: true,
+        // Rolldown compiles React / Preact / plain JSX natively; lunx's compilers take the rest.
+        jsx: (cfg as any).react?.compiler || ((cfg as any).react?.compiler !== false && declaresReactCompiler(cfg.root)) ? null
+          : ['react', 'react-typescript', 'react-adapter'].includes(primaryFramework) ? { refresh: true }
+          : primaryFramework === 'preact' ? { importSource: 'preact', refresh: false }
+          : ['vanilla', 'lit'].includes(primaryFramework) ? { refresh: false }
+          : null,
+        compile: async (file, code) => universalTransformer.transform({
+          filePath: file,
+          code: await pluginManager.transform(code, file),
+          framework: primaryFramework,
+          root: cfg.root,
+          isDev: true,
+          define: devDefines,
+          hmrContext: false,
+        }),
+        log: { info: (m) => log.info(m, { category: 'build' }), error: (m) => log.error(m) },
+      }).catch((e: any) => {
+        log.warn(`server.bundle failed to start (${e.message}): serving modules unbundled`, { category: 'server' });
+        return null;
+      });
+    }
+    if (!bundled) prebundleReady = runPrebundle().catch((e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`));
 
     if (process.env.LUNX_DEV_WARMUP === '1') await prebundleReady;
     // A full build before serving cost ~0.75s of every boot. Modules are
@@ -834,6 +877,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
       }
 
       log.info('HMR client connected', { category: 'hmr' });
+      bundled?.attach(ws as any);
       hmrThrottle.registerClient(ws as any);
       ws.on('close', () => hmrThrottle.unregisterClient(ws as any));
 
@@ -955,6 +999,18 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    if (bundled && reqPath.startsWith(BUNDLE_PREFIX)) {
+      const file = await bundled.serve(req.url || '/');
+      if (!file) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': 'no-cache' });
+      res.end(file.body);
       return;
     }
 
@@ -1247,10 +1303,11 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           }
         }
 
-        // Inject only client runtime
-        let clientScript = `
+        // Inject only client runtime (bundles carry their own: see bundled.ts)
+        let clientScript = bundled ? '' : `
     <script type="module" src="/@lunx/hmr-client"></script>
         `;
+        if (bundled) data = bundled.rewriteHtml(data);
 
         // Module federation needs nothing in the page: its runtime is imported by the modules that use it.
         const federationRuntime = '';
@@ -2139,6 +2196,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       // The ws server may be one that only closes with the HTTP server.
       if (typeof (wss as any)?.close === 'function') wss!.close();
       await configWatcher.close();
+      await bundled?.close();
       federationDev.stop();
       // Re-run startDevServer (recursive)
       // Note: This might stack overflow if done repeatedly without process exit, 
@@ -2159,6 +2217,12 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   const watcher = new DevWatcher(cfg.root);
   watcher.on('change', async (files: string[]) => {
     moduleResponses.clear();
+    // Bundled: Rolldown watches the bundles' sources (component templates too) and sends patches; a page reloads for its HTML.
+    if (bundled) {
+      if (files.some((f) => f.endsWith('.html') && !bundled!.owns(f))) broadcast(JSON.stringify({ type: 'full-reload' }));
+      files = files.filter((f) => !bundled!.owns(f) && !f.endsWith('.html'));
+      if (!files.length) return;
+    }
     // Modules a Vite plugin built from these files (a Tailwind stylesheet from the sources it scanned) update with them.
     const pluginDependents = new Set(appDev ? files.flatMap((f) => appDev!.fileChanged(f)) : []);
     for (const file of files) pluginDependents.delete(file);

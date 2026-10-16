@@ -469,6 +469,8 @@ async function clickCounter(page) {
 }
 
 const tsxLoader = process.env.LUNX_CLI ? [] : ['--import', 'tsx'];
+// --bundle: every dev server with server.bundle (frameworks it does not cover serve modules unbundled).
+const BUNDLE = process.argv.includes('--bundle');
 
 // ── The matrix ──────────────────────────────────────────────────────────────
 
@@ -510,7 +512,7 @@ for (const framework of selected) {
 
         // 1. dev server boots
         const bootStart = Date.now();
-        devProcess = await startProcess([...tsxLoader, CLI, 'dev', '--root', root, '--port', String(port)], REPO, 'ready in');
+        devProcess = await startProcess([...tsxLoader, CLI, 'dev', '--root', root, '--port', String(port), ...(BUNDLE ? ['--bundle'] : [])], REPO, 'ready in');
         result.bootMs = Date.now() - bootStart;
 
         // 2. the app mounts and renders
@@ -651,7 +653,7 @@ const failed = results.reduce((n, r) => n + checks.filter((c) => r[c] === 'fail'
 
 console.log(`\n${passed}/${total} checks passed (${failed} failed, ${total - passed - failed} skipped)`);
 
-const reportPath = path.join(REPO, 'reports', 'BROWSER_MATRIX.json');
+const reportPath = path.join(REPO, 'reports', BUNDLE ? 'BROWSER_MATRIX_BUNDLE.json' : 'BROWSER_MATRIX.json');
 await fsp.mkdir(path.dirname(reportPath), { recursive: true });
 // A partial run (--only) updates its frameworks' rows and keeps the others.
 let report = results;

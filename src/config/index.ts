@@ -191,6 +191,8 @@ export const BuildConfigSchema = z.object({
     headers: z.record(z.string(), z.string()).optional(),
     /** Type errors in the terminal and the browser overlay, from the project's tsc / vue-tsc in watch mode. */
     typecheck: z.boolean().optional(),
+    /** Serve the app as bundles from Rolldown's dev engine (one request per page, not per module). */
+    bundle: z.boolean().optional(),
   }).optional(),
   cacheDir: z.string().optional(),
   prebundle: z.object({
@@ -269,6 +271,8 @@ export type BuildConfig = {
     proxy?: Record<string, string | any>;
     https?: boolean | { key: string; cert: string };
     headers?: Record<string, string>;
+    /** Serve the app as bundles from Rolldown's dev engine instead of one module per request (large apps load faster). */
+    bundle?: boolean;
   };
   /** Phase 1.10 — cache root dir (relative to project root). Default: .lunx/cache */
   cacheDir?: string;

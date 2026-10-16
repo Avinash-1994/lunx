@@ -337,6 +337,14 @@ const TOOLS = {
         out: 'out-lunx',
         caches: ['.lunx'],
     },
+    // `lunx dev --bundle` (server.bundle): the page loads bundles instead of one module per request.
+    'lunx-bundle': {
+        kind: 'bundling dev server',
+        dev: (port) => [process.execPath, [LUNX_CLI, 'dev', '--root', app, '--port', String(port), '--bundle'], {}],
+        build: null,
+        out: null,
+        caches: ['.lunx'],
+    },
     vite: {
         kind: 'module server',
         dev: (port) => [bin('vite'), ['--port', String(port), '--strictPort', '--host', '127.0.0.1'], {}],
@@ -548,6 +556,10 @@ for (const [name, tool] of Object.entries(TOOLS)) {
     } else {
         r.devBootMs = null;
     }
+    if (!tool.build) {
+        results[name] = r;
+        continue;
+    }
 
     // Cold builds swing 2x on a shared machine (page cache, CPU steal), so one
     // sample says little: take the median of RUNS cache-cleared builds.
@@ -575,7 +587,7 @@ for (const [name, tool] of Object.entries(TOOLS)) {
 }
 
 const cols = [
-    ['tool', (k) => k, 10],
+    ['tool', (k) => k, 13],
     ['kind', (k) => results[k].kind, 20],
     ['dev boot', (k) => fmt(results[k].devBootMs, 'ms'), 10],
     ['app code', (k) => fmt(results[k].devAppCodeMs, 'ms'), 10],

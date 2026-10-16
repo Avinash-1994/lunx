@@ -28,6 +28,8 @@ export interface TransformOptions {
     define?: Record<string, string>;
     target?: 'browser' | 'node' | 'edge';
     format?: 'esm' | 'cjs' | 'iife';
+    /** `import.meta.hot` from lunx's module HMR client (default); off when a bundler provides it. */
+    hmrContext?: boolean;
 }
 
 export interface TransformResult {
@@ -135,7 +137,7 @@ export class UniversalTransformer {
         // its own text alone cannot key the cache.
         const pullsInFiles = /\b(templateUrl|styleUrls?)\s*:/.test(code);
         if (this.cacheEnabled && !pullsInFiles) {
-            const h = canonicalHash(code + frameworkToUse + (isDev ? 'dev' : 'prod')).substring(0, 16);
+            const h = canonicalHash(code + frameworkToUse + (isDev ? 'dev' : 'prod') + (options.hmrContext === false ? ':bundled' : '')).substring(0, 16);
             const cacheKey = `${filePath}:${h}`;
             const cached = this.transformCache.get(cacheKey);
             if (cached) {
@@ -221,14 +223,14 @@ export class UniversalTransformer {
 
         // Give modules that use HMR their `import.meta.hot`. Prepended on the
         // first line so source-map line numbers are unaffected.
-        if (isDev && result.code.includes('import.meta.hot') && !options.filePath.includes('node_modules')) {
+        if (isDev && options.hmrContext !== false && result.code.includes('import.meta.hot') && !options.filePath.includes('node_modules')) {
             const id = JSON.stringify(this.hmrId(options.filePath));
             result.code = `import { createHotContext as __lunx_createHot } from '/@lunx/hmr-client'; import.meta.hot = __lunx_createHot(${id}); ` + result.code;
         }
 
         // Cache the result (Advanced Determinism)
         if (this.cacheEnabled && !pullsInFiles) {
-            const h = canonicalHash(code + frameworkToUse + (isDev ? 'dev' : 'prod')).substring(0, 16);
+            const h = canonicalHash(code + frameworkToUse + (isDev ? 'dev' : 'prod') + (options.hmrContext === false ? ':bundled' : '')).substring(0, 16);
             const cacheKey = `${filePath}:${h}`;
             this.transformCache.set(cacheKey, result);
         }

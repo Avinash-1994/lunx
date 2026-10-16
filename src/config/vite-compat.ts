@@ -100,6 +100,8 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
         if (value === undefined) continue;
         server[key] = key === 'host' && value === true ? '0.0.0.0' : value;
     }
+    // Vite's full-bundle mode is lunx's `server.bundle`.
+    if ((vite as any).experimental?.bundledDev) server.bundle = true;
     if (Object.keys(server).length) config.server = server;
     if (vite.server?.port) config.port = vite.server.port;
 

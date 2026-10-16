@@ -36,6 +36,10 @@ export default {
         type: 'boolean',
         description: 'Open browser automatically on dev server start',
         default: false
+      })
+      .option('bundle', {
+        type: 'boolean',
+        description: 'Serve the app as bundles (server.bundle): fastest first load for large apps'
       });
   },
   handler: async (args: any) => {
@@ -71,7 +75,7 @@ export default {
         root,
         port: userPort,
         mode: 'development',
-        server: { host: '0.0.0.0', strictPort: args.strictPort, port: userPort }
+        server: { host: '0.0.0.0', strictPort: args.strictPort, port: userPort, ...(args.bundle !== undefined ? { bundle: args.bundle } : {}) }
       } as any;
 
       const minimalDevServer = await import('../../dev/devServer.minimal.js');
