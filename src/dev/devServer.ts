@@ -239,7 +239,10 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   let cfg: BuildConfig = cliCfg;
 
   try {
-    const loaded = await loadConfig(cliCfg.root);
+    // The CLI's dev command hands over the config it loaded for the port (first start only).
+    const handed = (cliCfg as any).__loadedConfig;
+    delete (cliCfg as any).__loadedConfig;
+    const loaded = handed ?? await loadConfig(cliCfg.root);
     // Merge CLI overrides (cliCfg) over Disk Config (loaded)
     // CLI args take precedence for port, mode, etc.
     cfg = {

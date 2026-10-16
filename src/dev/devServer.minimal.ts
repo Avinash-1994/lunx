@@ -23,6 +23,9 @@ export async function startDevServer(cfg: BuildConfig) {
     let initPromise: Promise<void> | null = null;
     const startTime = performance.now();
     const root = cfg.root || process.cwd();
+    // The full dev server's modules load while the port is found and bound.
+    const fullModule = import('./devServer.js');
+    fullModule.catch(() => {});
 
     // 1. Find available port FIRST (before creating server)
     let port = cfg.server?.port || cfg.port || 5173;
@@ -50,7 +53,7 @@ export async function startDevServer(cfg: BuildConfig) {
     const handlerReady = new Promise<void>((resolve) => (markHandlerReady = resolve));
     const startInit = () => {
         initPromise ??= (async () => {
-            const { startDevServer: initFull } = await import('./devServer.js');
+            const { startDevServer: initFull } = await fullModule;
             features = await initFull(cfg, server);
         })();
         return initPromise;

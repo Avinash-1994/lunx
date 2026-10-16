@@ -66,9 +66,10 @@ export default {
       // Load lunx.config.ts BEFORE starting the server so that
       // server.port from the user's config is respected when binding the port.
       let userPort = args.port || 5173;
+      let userCfg: any;
       try {
         const { loadConfig } = await import('../../config/index.js');
-        const userCfg = await loadConfig(root);
+        userCfg = await loadConfig(root);
         userPort = args.port || userCfg.server?.port || (userCfg as any).port || 5173;
       } catch {
         // Config may not exist yet — fall back to default
@@ -78,7 +79,9 @@ export default {
         root,
         port: userPort,
         mode: 'development',
-        server: { host: '0.0.0.0', strictPort: args.strictPort, port: userPort, ...(args.bundle !== undefined ? { bundle: args.bundle } : {}) }
+        server: { host: '0.0.0.0', strictPort: args.strictPort, port: userPort, ...(args.bundle !== undefined ? { bundle: args.bundle } : {}) },
+        // The dev server starts from this config instead of loading it again (~50 ms).
+        __loadedConfig: userCfg,
       } as any;
 
       mark('config (port)');
