@@ -43,6 +43,8 @@ export default {
       });
   },
   handler: async (args: any) => {
+    const mark = (name: string) => { if (process.env.LUNX_TIMINGS) process.stderr.write(`  [lunx:timings] @${name.padEnd(34)} ${performance.now().toFixed(1)} ms\n`); };
+    mark('dev handler');
     const { log } = await import('../../utils/logger.js');
     try {
       if (args.quiet) {
@@ -59,6 +61,7 @@ export default {
       // Meta-frameworks run their own toolchain (see meta-frameworks/delegate.ts).
       const { maybeDelegate } = await import('../../meta-frameworks/delegate.js');
       if (await maybeDelegate('dev', root, args.port)) return;
+      mark('meta-framework check');
 
       // Load lunx.config.ts BEFORE starting the server so that
       // server.port from the user's config is respected when binding the port.
@@ -78,7 +81,9 @@ export default {
         server: { host: '0.0.0.0', strictPort: args.strictPort, port: userPort, ...(args.bundle !== undefined ? { bundle: args.bundle } : {}) }
       } as any;
 
+      mark('config (port)');
       const minimalDevServer = await import('../../dev/devServer.minimal.js');
+      mark('dev server module');
       const t0 = performance.now();
       await minimalDevServer.startDevServer(cfg);
       const elapsed = Math.round(performance.now() - t0);

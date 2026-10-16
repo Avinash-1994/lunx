@@ -212,7 +212,11 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // Phase 5.1 — Startup diagnostics timing
   const _t0 = Date.now();
   const _phases: Array<{ name: string; ms: number }> = [];
-  function _mark(name: string) { _phases.push({ name, ms: Date.now() - _t0 }); }
+  function _mark(name: string) {
+    _phases.push({ name, ms: Date.now() - _t0 });
+    // LUNX_TIMINGS=1: each phase as it happens, from process start (as `lunx build`'s timings).
+    if (process.env.LUNX_TIMINGS) process.stderr.write(`  [lunx:timings] @${name.padEnd(34)} ${performance.now().toFixed(1)} ms\n`);
+  }
   function _printStartupDiagnostics(port: number) {
     const total = Date.now() - _t0;
     process.stderr.write('\n┌─ Lunx startup diagnostics ─────────────────\n');
@@ -314,156 +318,19 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   }
   
   // ─── Initialize Adapter Registry for Meta-frameworks ───
-  let activeAdapter: any = null;
-  try {
-    const { registry } = await import('@lunx/adapter-core');
-    // Pre-register all meta-framework adapters so registry.detect works
-    await import('../meta-frameworks/nextjs/index.js').catch(() => {});
-    await import('../meta-frameworks/sveltekit/index.js').catch(() => {});
-    await import('../meta-frameworks/solidstart/index.js').catch(() => {});
-    await import('../meta-frameworks/nuxt/index.js').catch(() => {});
-    await import('../meta-frameworks/astro/index.js').catch(() => {});
-    await import('../meta-frameworks/remix/index.js').catch(() => {});
-    await import('../meta-frameworks/analog/index.js').catch(() => {});
-    await import('../meta-frameworks/react-router/index.js').catch(() => {});
-    await import('../meta-frameworks/tanstack-start/index.js').catch(() => {});
-    await import('../meta-frameworks/waku/index.js').catch(() => {});
-    await import('../meta-frameworks/vitepress/index.js').catch(() => {});
-    await import('../meta-frameworks/tauri/index.js').catch(() => {});
-    await import('../meta-frameworks/electron/index.js').catch(() => {});
-    await import('../framework-adapters/spa/index.js').catch(() => {});
-    
-    const pkgPath = path.join(cfg.root || process.cwd(), 'package.json');
-    const fsNode = await import('fs');
-      if (fsNode.existsSync(pkgPath)) {
-        const pkg = JSON.parse(fsNode.readFileSync(pkgPath, 'utf-8'));
-        activeAdapter = registry.detect(cfg.root || process.cwd(), pkg);
-        if (activeAdapter) {
-          const metaProxies = new Set([
-            'nextjs-pages', 'next', 'nuxt', 'svelte-kit', 'solidstart', 'remix',
-            'tanstack-start', 'waku', 'analog', 'react-router', 'astro', 'vitepress',
-            'gatsby', 'redwoodjs', 'qwik-city',
-          ]);
-          const extra = metaProxies.has(activeAdapter.name)
-            ? ` (upstream ${activeAdapter.name}, not a Lunx SSR engine)`
-            : '';
-          console.log(`[lunx] adapter: ${activeAdapter.name}${extra}`);
-        } else {
-          console.log('[LUNX DEV] activeAdapter: null');
-        }
-      }
-  } catch (e) {
-    // Ignore if not present
-  }
-
-  // Determine a human-readable display name for the active framework.
-  // Alpine and Mithril intentionally use vanilla pipeline — we still want to log them correctly.
-  let displayFramework: string = primaryFramework;
-  if (cfg.adapter === 'alpine' || cfg.adapter === 'alpine-ts') displayFramework = 'alpine';
-  else if (cfg.adapter === 'mithril' || cfg.adapter === 'mithril-ts') displayFramework = 'mithril';
-
-  // @ts-ignore - Pipeline owns opinionated defaults
-  pipeline.applyDefaults();
-
-  log.info(`--> Dev Server: engine ${engineUsed === 'native' ? 'rust-native' : 'js-fallback'}`, { category: 'server' });
-  log.info(`--> Dev Server: Active ${displayFramework} workflow`, { category: 'server' });
-  // Only warn if truly no framework is known (not just vanilla-mode frameworks like alpine/mithril/vanilla)
-  const knownVanillaFrameworks = ['alpine', 'mithril', 'vanilla'];
-  if (primaryFramework === 'vanilla' && !knownVanillaFrameworks.includes(displayFramework)) {
-    log.warn('--> Dev Server: No framework detected, HMR might be limited', { category: 'server' });
-  }
-
-  // 3. Initialize Universal Transformer
-  const { UniversalTransformer } = await import('../core/universal-transformer.js');
-  const universalTransformer = new UniversalTransformer(cfg.root, { react: (cfg as any).react });
-  // Finished module responses (compiled, imports rewritten), per URL. One stays valid while its
-  // file's stamp, the pre-bundled deps and the rest of the project are unchanged: any file event
-  // clears them all, since an import may now resolve elsewhere. Large apps load thousands of
-  // modules per visit; this makes each a stat and a memory read after the first.
-  const moduleResponses = new Map<string, { file: string; stamp: string; deps: Map<string, string>; code: string; etag: string }>();
-  const workerThreads = Math.max(2, require('os').cpus().length - 2); // Leave 2 for OS + watcher
-  const nativeWorker = new NativeWorker(workerThreads);
-  const pluginManager = new PluginManager();
-  _mark('plugin manager ready');
-  // lunx.config plugins are Vite / Rollup plugins: they run on the Vite bridge below (plugin-host/app-dev).
-
-  // Initialize Sandbox
-  const { PermissionManager } = await import('../core/permissions.js');
-  const sandbox = new PluginSandbox(new PermissionManager());
-
-  // Auto-register Tailwind Plugin (Zero-Config or File-Based)
-  const tailwindConfigPath = path.join(cfg.root, 'tailwind.config.js');
-  const hasTailwindFile = await fs.access(tailwindConfigPath).then(() => true).catch(() => false);
-  // A PostCSS config already runs Tailwind through the shared CSS compiler.
-  const hasPostcssConfig = ['postcss.config.js', 'postcss.config.cjs', 'postcss.config.mjs', 'postcss.config.ts', '.postcssrc.json', '.postcssrc']
-    .some((f) => existsSync(path.join(cfg.root, f)));
-  const isTailwindRequested = !hasPostcssConfig && (cfg.css?.framework === 'tailwind' || hasTailwindFile);
-
-  if (isTailwindRequested) {
-    const { TailwindPlugin } = await import('../plugins/css/tailwind.js');
-    pluginManager.register(new TailwindPlugin(cfg.root, cfg));
-    log.info(`--> Dev Server: Tailwind CSS Plugin registered ${hasTailwindFile ? '(using file)' : '(zero-config)'}`, { category: 'server' });
-  }
-
-  // Sass / Less / Stylus / PostCSS are compiled by the shared CSS compiler
-  // (build/css.ts), the same one production uses.
-
-  // Module federation: the same runtime and container API as production builds.
-  let devFederation: DevFederation | null = null;
-  if (cfg.federation?.remotes && Object.keys(cfg.federation.remotes).length > 0) {
-    pluginManager.register({
-      name: 'lunx-federation-dev',
-      transform(code) {
-        return devFederation ? devFederation.rewriteDynamic(code) : code;
-      }
-    });
-  }
-
-  // Svelte Support removed - Handled by UniversalTransformer
-  // Vue Support removed - Handled by UniversalTransformer
-
   const { DependencyPreBundler } = await import('./preBundler.js');
   // Phase 1.10: resolve cache dir from config. Default: '<root>/.lunx/cache'.
   const resolvedCacheDir = cfg.cacheDir
     ? path.join(cfg.root, cfg.cacheDir)
     : path.join(cfg.root, '.lunx', 'cache');
   const preBundler = new DependencyPreBundler(cfg.root, resolvedCacheDir);
-
-  // Initialize Live Config Manager
-  const liveConfig = new LiveConfigManager(cfg, cfg.root);
-
-  // Scan and pre-bundle dependencies on server start
-  log.debug('Scanning dependencies for pre-bundling...');
-  const entryPoint = path.join(cfg.root, 'public', 'index.html');
+  preBundler.sourcemap = !!(cfg as any).prebundle?.sourcemap;
   let preBundledDeps = new Map<string, string>();
   // Pre-bundling runs in the background, like Vite's optimizer: the page and
   // HMR client are served at once, and only module requests (whose imports
   // must point at the bundled deps) wait for it.
   let prebundleReady: Promise<void> = Promise.resolve();
-  // `server.bundle`: the page loads bundles from Rolldown's dev engine (see bundled.ts), which
-  // bundles node_modules too, so nothing is pre-bundled. Plain SPAs only: Vite plugins, module
-  // federation and SSR keep serving modules one by one.
-  let bundled: BundledDev | null = null;
-  const bundleRequested = !!(cfg.server as any)?.bundle;
-  const bundleBlocker = !bundleRequested ? null
-    : cfg.preset !== 'spa' ? `preset "${cfg.preset}"`
-    : cfg.federation?.name ? 'module federation'
-    : ((cfg as any).__vitePlugins?.length || (cfg.plugins ?? []).some((p: any) => p && typeof p === 'object')) ? 'Vite plugins'
-    : !existsSync(path.join(cfg.root, 'index.html')) ? 'no index.html'
-    : null;
-  if (bundleRequested && bundleBlocker) log.warn(`server.bundle is not available with ${bundleBlocker}: serving modules unbundled`, { category: 'server' });
-  if (cfg.federation?.name) {
-    const { DevFederation } = await import('../federation/dev.js');
-    devFederation = new DevFederation(cfg.federation as any, {
-      root: cfg.root,
-      depsDir: resolvedCacheDir,
-      deps: async () => {
-        await prebundleReady.catch(() => {});
-        return preBundledDeps;
-      },
-    });
-  }
-
+  // Started as soon as the framework is known: on a first visit, module requests wait for it.
   try {
     // 1. Load package.json dependencies
     let pkgDeps: string[] = [];
@@ -629,6 +496,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
         if (validDeps.size > 0) {
           // 4. Pass to PreBundler
+          _mark(`prebundle bundling ${validDeps.size} deps`);
           await preBundler.preBundleDependencies(Array.from(validDeps)).then(
             (deps) => {
               preBundledDeps = deps;
@@ -640,6 +508,149 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         }
       }
     };
+    prebundleReady = runPrebundle().catch((e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`));
+  } catch (e: any) {
+    log.warn(`Dependency pre-bundling failed: ${e.message}`);
+  }
+
+  let activeAdapter: any = null;
+  try {
+    const { registry } = await import('@lunx/adapter-core');
+    // Pre-register all meta-framework adapters so registry.detect works
+    await import('../meta-frameworks/nextjs/index.js').catch(() => {});
+    await import('../meta-frameworks/sveltekit/index.js').catch(() => {});
+    await import('../meta-frameworks/solidstart/index.js').catch(() => {});
+    await import('../meta-frameworks/nuxt/index.js').catch(() => {});
+    await import('../meta-frameworks/astro/index.js').catch(() => {});
+    await import('../meta-frameworks/remix/index.js').catch(() => {});
+    await import('../meta-frameworks/analog/index.js').catch(() => {});
+    await import('../meta-frameworks/react-router/index.js').catch(() => {});
+    await import('../meta-frameworks/tanstack-start/index.js').catch(() => {});
+    await import('../meta-frameworks/waku/index.js').catch(() => {});
+    await import('../meta-frameworks/vitepress/index.js').catch(() => {});
+    await import('../meta-frameworks/tauri/index.js').catch(() => {});
+    await import('../meta-frameworks/electron/index.js').catch(() => {});
+    await import('../framework-adapters/spa/index.js').catch(() => {});
+    
+    const pkgPath = path.join(cfg.root || process.cwd(), 'package.json');
+    const fsNode = await import('fs');
+      if (fsNode.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fsNode.readFileSync(pkgPath, 'utf-8'));
+        activeAdapter = registry.detect(cfg.root || process.cwd(), pkg);
+        if (activeAdapter) {
+          const metaProxies = new Set([
+            'nextjs-pages', 'next', 'nuxt', 'svelte-kit', 'solidstart', 'remix',
+            'tanstack-start', 'waku', 'analog', 'react-router', 'astro', 'vitepress',
+            'gatsby', 'redwoodjs', 'qwik-city',
+          ]);
+          const extra = metaProxies.has(activeAdapter.name)
+            ? ` (upstream ${activeAdapter.name}, not a Lunx SSR engine)`
+            : '';
+          console.log(`[lunx] adapter: ${activeAdapter.name}${extra}`);
+        } else {
+          console.log('[LUNX DEV] activeAdapter: null');
+        }
+      }
+  } catch (e) {
+    // Ignore if not present
+  }
+
+  // Determine a human-readable display name for the active framework.
+  // Alpine and Mithril intentionally use vanilla pipeline — we still want to log them correctly.
+  let displayFramework: string = primaryFramework;
+  if (cfg.adapter === 'alpine' || cfg.adapter === 'alpine-ts') displayFramework = 'alpine';
+  else if (cfg.adapter === 'mithril' || cfg.adapter === 'mithril-ts') displayFramework = 'mithril';
+
+  // @ts-ignore - Pipeline owns opinionated defaults
+  pipeline.applyDefaults();
+
+  log.info(`--> Dev Server: engine ${engineUsed === 'native' ? 'rust-native' : 'js-fallback'}`, { category: 'server' });
+  log.info(`--> Dev Server: Active ${displayFramework} workflow`, { category: 'server' });
+  // Only warn if truly no framework is known (not just vanilla-mode frameworks like alpine/mithril/vanilla)
+  const knownVanillaFrameworks = ['alpine', 'mithril', 'vanilla'];
+  if (primaryFramework === 'vanilla' && !knownVanillaFrameworks.includes(displayFramework)) {
+    log.warn('--> Dev Server: No framework detected, HMR might be limited', { category: 'server' });
+  }
+
+  // 3. Initialize Universal Transformer
+  const { UniversalTransformer } = await import('../core/universal-transformer.js');
+  const universalTransformer = new UniversalTransformer(cfg.root, { react: (cfg as any).react });
+  // Finished module responses (compiled, imports rewritten), per URL. One stays valid while its
+  // file's stamp, the pre-bundled deps and the rest of the project are unchanged: any file event
+  // clears them all, since an import may now resolve elsewhere. Large apps load thousands of
+  // modules per visit; this makes each a stat and a memory read after the first.
+  const moduleResponses = new Map<string, { file: string; stamp: string; deps: Map<string, string>; code: string; etag: string }>();
+  const workerThreads = Math.max(2, require('os').cpus().length - 2); // Leave 2 for OS + watcher
+  const nativeWorker = new NativeWorker(workerThreads);
+  const pluginManager = new PluginManager();
+  _mark('plugin manager ready');
+  // lunx.config plugins are Vite / Rollup plugins: they run on the Vite bridge below (plugin-host/app-dev).
+
+  // Initialize Sandbox
+  const { PermissionManager } = await import('../core/permissions.js');
+  const sandbox = new PluginSandbox(new PermissionManager());
+
+  // Auto-register Tailwind Plugin (Zero-Config or File-Based)
+  const tailwindConfigPath = path.join(cfg.root, 'tailwind.config.js');
+  const hasTailwindFile = await fs.access(tailwindConfigPath).then(() => true).catch(() => false);
+  // A PostCSS config already runs Tailwind through the shared CSS compiler.
+  const hasPostcssConfig = ['postcss.config.js', 'postcss.config.cjs', 'postcss.config.mjs', 'postcss.config.ts', '.postcssrc.json', '.postcssrc']
+    .some((f) => existsSync(path.join(cfg.root, f)));
+  const isTailwindRequested = !hasPostcssConfig && (cfg.css?.framework === 'tailwind' || hasTailwindFile);
+
+  if (isTailwindRequested) {
+    const { TailwindPlugin } = await import('../plugins/css/tailwind.js');
+    pluginManager.register(new TailwindPlugin(cfg.root, cfg));
+    log.info(`--> Dev Server: Tailwind CSS Plugin registered ${hasTailwindFile ? '(using file)' : '(zero-config)'}`, { category: 'server' });
+  }
+
+  // Sass / Less / Stylus / PostCSS are compiled by the shared CSS compiler
+  // (build/css.ts), the same one production uses.
+
+  // Module federation: the same runtime and container API as production builds.
+  let devFederation: DevFederation | null = null;
+  if (cfg.federation?.remotes && Object.keys(cfg.federation.remotes).length > 0) {
+    pluginManager.register({
+      name: 'lunx-federation-dev',
+      transform(code) {
+        return devFederation ? devFederation.rewriteDynamic(code) : code;
+      }
+    });
+  }
+
+  // Svelte Support removed - Handled by UniversalTransformer
+  // Vue Support removed - Handled by UniversalTransformer
+
+
+  // Initialize Live Config Manager
+  const liveConfig = new LiveConfigManager(cfg, cfg.root);
+
+  const entryPoint = path.join(cfg.root, 'public', 'index.html');
+  // `server.bundle`: the page loads bundles from Rolldown's dev engine (see bundled.ts), with
+  // packages from the pre-bundle. Plain SPAs only: Vite plugins, module federation and SSR
+  // keep serving modules one by one.
+  let bundled: BundledDev | null = null;
+  const bundleRequested = !!(cfg.server as any)?.bundle;
+  const bundleBlocker = !bundleRequested ? null
+    : cfg.preset !== 'spa' ? `preset "${cfg.preset}"`
+    : cfg.federation?.name ? 'module federation'
+    : ((cfg as any).__vitePlugins?.length || (cfg.plugins ?? []).some((p: any) => p && typeof p === 'object')) ? 'Vite plugins'
+    : !existsSync(path.join(cfg.root, 'index.html')) ? 'no index.html'
+    : null;
+  if (bundleRequested && bundleBlocker) log.warn(`server.bundle is not available with ${bundleBlocker}: serving modules unbundled`, { category: 'server' });
+  if (cfg.federation?.name) {
+    const { DevFederation } = await import('../federation/dev.js');
+    devFederation = new DevFederation(cfg.federation as any, {
+      root: cfg.root,
+      depsDir: resolvedCacheDir,
+      deps: async () => {
+        await prebundleReady.catch(() => {});
+        return preBundledDeps;
+      },
+    });
+  }
+
+  try {
     if (bundleRequested && !bundleBlocker) {
       const { startBundledDev } = await import('./bundled.js');
       bundled = await startBundledDev({
@@ -664,12 +675,20 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           hmrContext: false,
         }),
         log: { info: (m) => log.info(m, { category: 'build' }), error: (m) => log.error(m) },
+        dependency: async (spec) => {
+          await prebundleReady.catch(() => {});
+          return preBundledDeps.get(spec) ?? null;
+        },
       }).catch((e: any) => {
         log.warn(`server.bundle failed to start (${e.message}): serving modules unbundled`, { category: 'server' });
         return null;
       });
     }
-    if (!bundled) prebundleReady = runPrebundle().catch((e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`));
+    if (bundled) {
+      _mark('bundle started');
+      void bundled.ready.then(() => _mark('bundle built'));
+    }
+
 
     if (process.env.LUNX_DEV_WARMUP === '1') await prebundleReady;
     // A full build before serving cost ~0.75s of every boot. Modules are

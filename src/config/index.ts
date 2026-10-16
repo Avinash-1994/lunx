@@ -197,6 +197,8 @@ export const BuildConfigSchema = z.object({
   cacheDir: z.string().optional(),
   prebundle: z.object({
     enabled: z.boolean().default(true),
+    /** Source maps for the pre-bundled packages (off: faster first page). */
+    sourcemap: z.boolean().optional(),
     include: z.array(z.string()).optional(),
     exclude: z.array(z.string()).optional(),
   }).optional(),
@@ -278,6 +280,8 @@ export type BuildConfig = {
   cacheDir?: string;
   prebundle?: {
     enabled?: boolean;
+    /** Source maps for the pre-bundled packages (off by default: faster first page). */
+    sourcemap?: boolean;
     include?: string[];
     exclude?: string[];
   };

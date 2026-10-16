@@ -31,6 +31,11 @@ export interface BundledDevOptions {
     jsx: { importSource?: string; refresh: boolean } | null;
     /** lunx's dev compile of one source file (framework compilers, React Refresh). */
     compile(file: string, code: string): Promise<{ code: string; map?: string | null }>;
+    /**
+     * The URL of a package's pre-bundled copy (`/@lunx-deps/…`), or null. Those load as
+     * modules beside the bundles: built once (cached across restarts), out of every rebuild.
+     */
+    dependency(specifier: string): Promise<string | null>;
     log: { info(msg: string): void; error(msg: string): void };
 }
 
@@ -96,8 +101,18 @@ export async function startBundledDev(options: BundledDevOptions): Promise<Bundl
         for (const c of clients.values()) c.send(data);
     };
 
+    const aliased = (spec: string) => options.aliases.some((a) => spec === a.find || spec.startsWith(a.find.endsWith('/') ? a.find : a.find + '/'));
     const lunxPlugin = {
         name: 'lunx:bundled-dev',
+        resolveId: {
+            // Bare imports: the pre-bundled package when there is one (React and co. stay out of the bundles).
+            filter: { id: /^(?![./\0]|[a-zA-Z]:|virtual:|https?:)/ },
+            async handler(id: string) {
+                if (id.includes('?') || aliased(id)) return null;
+                const url = await options.dependency(id);
+                return url ? { id: url, external: true } : null;
+            },
+        },
         load: {
           // Only what Rolldown cannot load itself: a JS hook call per module costs ~0.5 ms.
           filter: { id: new RegExp(`${CSS_LANGS.source.replace(/\$$/, '')}(\\?|$)|${ASSET.source.replace(/\$$/, '')}(\\?|$)|\\?`, 'i') },

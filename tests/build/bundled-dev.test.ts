@@ -56,7 +56,7 @@ describe('server.bundle', () => {
         removeDir(root);
     });
 
-    it('points the page at its bundle, which carries the app, its deps, styles and assets', async () => {
+    it('points the page at its bundle, which carries the app, its styles and assets', async () => {
         const html = await (await get('/')).text();
         expect(html).toContain('<script type="module" src="/@lunx/bundle/main.js"></script>');
         expect(html).not.toContain('/@lunx/hmr-client');
@@ -67,8 +67,10 @@ describe('server.bundle', () => {
         expect(code).toContain('createModuleHotContext');
         expect(code).toContain('el.textContent = "h1 {\\n  color: #639;');
         expect(code).toContain('"/src/logo.svg"');
-        // React itself is in the bundle: nothing is pre-bundled or fetched module by module.
-        expect(code).toMatch(/react-dom[\\/]cjs[\\/]react-dom-client\.development\.js/);
+        // Packages load pre-bundled beside the bundle (built once, out of every rebuild).
+        expect(code).toMatch(/^import \{[^}]*\bcreateRoot\b[^}]*\} from "\/@lunx-deps\/react-dom_client\.js";$/m);
+        expect(code).not.toContain('react-dom-client.development');
+        expect((await get('/@lunx-deps/react-dom_client.js')).status).toBe(200);
         expect((await get('/@lunx/bundle/main.js.map')).status).toBe(200);
     }, 30_000);
 

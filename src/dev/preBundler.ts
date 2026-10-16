@@ -48,6 +48,13 @@ export class DependencyPreBundler {
     /** Resolved absolute path to the pre-bundle output directory */
     public readonly cacheRoot: string;
 
+    /**
+     * Source maps for the pre-bundled packages (`prebundle.sourcemap`). Off by default: they
+     * map a package's code onto itself, and generating them for React's development build
+     * doubled the time to the first page (~150-500 ms on every dependency change).
+     */
+    sourcemap = false;
+
     constructor(private root: string, cacheDirOrLegacy: string = 'node_modules/.lunx') {
         // Accept both old-style 'node_modules/.lunx' and new config-driven paths.
         // New config key (`cacheDir`) maps to '<root>/.lunx/cache' by default.
@@ -64,6 +71,8 @@ export class DependencyPreBundler {
      * Shared code is split into common chunks
      */
     async preBundleDependencies(deps: string[]): Promise<Map<string, string>> {
+        const mark = (name: string) => { if (process.env.LUNX_TIMINGS) process.stderr.write(`  [lunx:timings] @prebundle: ${name.padEnd(24)} ${performance.now().toFixed(1)} ms\n`); };
+        mark('begin');
         const bundledDeps = new Map<string, string>();
         const cacheDir = this.cacheRoot;
 
@@ -107,6 +116,7 @@ export class DependencyPreBundler {
             }
         }
 
+        mark('native fingerprint');
         // Generate hash of package.json for cache invalidation (cross-platform crypto)
         const pkgJsonPath = path.join(this.root, 'package.json');
         const pkgJson = await fs.readFile(pkgJsonPath, 'utf-8');
@@ -117,7 +127,7 @@ export class DependencyPreBundler {
 
         // Check if cache is valid
         // Use both package.json hash AND a sorted dep list hash for strong cache invalidation
-        const depsHash = shortHash([...deps].sort().join(','));
+        const depsHash = shortHash([...deps].sort().join(',') + (this.sourcemap ? ':sourcemap' : ''));
         let cachedMeta: any = {};
         try {
             cachedMeta = JSON.parse(await fs.readFile(metaPath, 'utf-8'));
@@ -360,6 +370,7 @@ export class DependencyPreBundler {
                 input[name] = id;
             }
 
+            mark('entries resolved');
             await getBundler().bundle({
                 input,
                 cwd: root,
@@ -369,29 +380,35 @@ export class DependencyPreBundler {
                 conditions: ['browser', 'import', 'module', 'development', 'default'],
                 plugins: [{
                     name: 'lunx:prebundle',
-                    resolveId(id: string) {
-                        if (virtualCode.has(id)) return id;
-                        const bare = id.replace(/^node:/, '');
-                        if (builtins.has(bare) || builtins.has(bare.split('/')[0]!)) return BUILTIN + bare;
-                        return null;
+                    // Filters keep Rolldown from calling into JS for every other module: on a first
+                    // start the main thread is busy loading lunx, and each call waited for it.
+                    resolveId: {
+                        filter: { id: new RegExp(`^(\\0lunx-dep:|node:|(${[...builtins].map((b) => b.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|')})(/|$))`) },
+                        handler(id: string) {
+                            if (virtualCode.has(id)) return id;
+                            const bare = id.replace(/^node:/, '');
+                            if (builtins.has(bare) || builtins.has(bare.split('/')[0]!)) return BUILTIN + bare;
+                            return null;
+                        },
                     },
-                    load(id: string) {
+                    load: { filter: { id: /^\0lunx-(dep|builtin):/ }, handler(id: string) {
                         if (virtualCode.has(id)) return virtualCode.get(id)!;
                         if (!id.startsWith(BUILTIN)) return null;
                         // A Node built-in reached from browser code (usually a
                         // server-only branch): a stub that throws only if used.
                         const name = id.slice(BUILTIN.length);
                         return { code: `const stub = new Proxy({}, { get(_, key) { if (typeof key === 'symbol' || key === '__esModule' || key === 'then') return undefined; throw new Error('Module "${name}" is a Node built-in, not available in the browser (accessed .' + String(key) + ')'); } });\nmodule.exports = stub;\n`, moduleType: 'js' };
-                    },
+                    } },
                 }],
             }, {
                 dir: cacheDir,
                 format: 'es',
                 entryFileNames: '[name].js',
                 chunkFileNames: 'chunks/[name]-[hash].js',
-                sourcemap: true,
+                sourcemap: this.sourcemap,
             }, true);
 
+            mark('bundled');
             const depMap: Record<string, string> = {};
             for (const dep of deps) {
                 const normalizedName = dep.replace(/[/@]/g, '_');
@@ -410,9 +427,10 @@ export class DependencyPreBundler {
                 timestamp: Date.now()
             }, null, 2));
 
-            // Phase 1.10: persist bundles into native SQLite for future warm starts
+            // Phase 1.10: persist bundles into native SQLite for future warm starts, after the
+            // page has them (~50 ms the first visit no longer waits for).
             const nativeForPut = getNative();
-            if (nativeForPut) {
+            if (nativeForPut) setImmediate(async () => {
                 try {
                     const pkgJsonRaw = await fs.readFile(path.join(this.root, 'package.json'), 'utf-8').catch(() => '{}');
                     const pkgJsonParsed = JSON.parse(pkgJsonRaw);
@@ -435,8 +453,9 @@ export class DependencyPreBundler {
                 } catch (e: any) {
                     log.debug(`[lunx:prebundle] Native persist skipped: ${e.message}`);
                 }
-            }
+            });
 
+            mark('done');
             log.info(`✓ Pre-bundled ${bundledDeps.size} dependencies`);
             return bundledDeps;
 
@@ -480,9 +499,33 @@ function isEsmSource(file: string, source: string): boolean {
 }
 
 /** Static export names of a CommonJS module, for re-exporting as ESM. */
+/**
+ * `exports.x = …` names read from the source, following a `module.exports = require('./x.development.js')`
+ * entry (React's): null when the module builds its exports any other way. Loading React's
+ * development build in Node to list them cost ~30-60 ms of every first start.
+ */
+export function staticExportNames(file: string, source: string): string[] | null {
+    // `if (NODE_ENV === 'production') { …; module.exports = require(prod) } else { module.exports = require(dev) }` at the end.
+    const target = /if\s*\(process\.env\.NODE_ENV\s*===\s*['"]production['"]\)\s*\{[^{}]*?module\.exports\s*=\s*require\(['"][^'"]+['"]\);?\s*\}\s*else\s*\{\s*module\.exports\s*=\s*require\(['"]([^'"]+)['"]\);?\s*\}\s*$/.exec(source);
+    if (target && (source.match(/\bmodule\.exports\b/g) ?? []).length === 2) {
+        const dev = path.resolve(path.dirname(file), target[1]!);
+        let code: string;
+        try {
+            code = require('fs').readFileSync(dev.endsWith('.js') ? dev : dev + '.js', 'utf8');
+        } catch {
+            return null;
+        }
+        return staticExportNames(dev, code);
+    }
+    // Anything that replaces or copies into `exports` wholesale needs the real module.
+    if (/\bmodule\.exports\s*=|\bexports\s*=[^=]|__exportStar|Object\.assign\(\s*(?:module\.)?exports\b|\bexports\[/.test(source)) return null;
+    const names = [...source.matchAll(/(?<![\w$.])exports\.([A-Za-z_$][\w$]*)\s*=(?!=)/g)].map((m) => m[1]!);
+    return names.length ? names : null;
+}
+
 function commonJsExportNames(file: string, source: string): string[] {
-    let keys: string[] = [];
-    try {
+    let keys: string[] = staticExportNames(file, source) ?? [];
+    if (!keys.length) try {
         const mod = require(file);
         if (mod && (typeof mod === 'object' || typeof mod === 'function')) keys = Object.keys(mod);
     } catch {
