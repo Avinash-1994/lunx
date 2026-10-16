@@ -1,5 +1,5 @@
 {
-  "tarball": "lunx-dev-1.1.0.tgz",
+  "tarball": "lunx-dev-1.2.0.tgz",
   "node": "v22.22.0",
   "results": [
     {
@@ -30,7 +30,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 9
+      "seconds": 11
     },
     {
       "template": "react",
@@ -40,7 +40,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 9
+      "seconds": 10
     },
     {
       "template": "react --no-ts",
@@ -90,7 +90,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 11
     },
     {
       "template": "vue --no-ts --tailwind",
@@ -100,7 +100,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 9
+      "seconds": 10
     },
     {
       "template": "svelte",
@@ -110,7 +110,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 9
+      "seconds": 10
     },
     {
       "template": "svelte --no-ts",
@@ -130,7 +130,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 11
     },
     {
       "template": "solid",
@@ -140,7 +140,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 10
+      "seconds": 11
     },
     {
       "template": "solid --no-ts",
@@ -150,7 +150,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 8
+      "seconds": 9
     },
     {
       "template": "lit",
@@ -160,7 +160,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 8
+      "seconds": 9
     },
     {
       "template": "lit --no-ts",
@@ -200,7 +200,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 16
+      "seconds": 19
     },
     {
       "template": "qwik",
@@ -210,7 +210,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 12
+      "seconds": 14
     },
     {
       "template": "next",
@@ -220,7 +220,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 39
+      "seconds": 50
     },
     {
       "template": "nuxt",
@@ -230,7 +230,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 46
+      "seconds": 71
     },
     {
       "template": "sveltekit",
@@ -240,7 +240,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 17
+      "seconds": 18
     },
     {
       "template": "astro",
@@ -250,7 +250,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 20
+      "seconds": 26
     },
     {
       "template": "react-router",
@@ -260,7 +260,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 16
+      "seconds": 19
     },
     {
       "template": "tanstack-start",
@@ -270,7 +270,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 17
+      "seconds": 21
     },
     {
       "template": "solidstart",
@@ -280,7 +280,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 35
+      "seconds": 40
     },
     {
       "template": "qwik-city",
@@ -290,7 +290,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 16
+      "seconds": 17
     },
     {
       "template": "vitepress",
@@ -300,7 +300,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 17
+      "seconds": 21
     },
     {
       "template": "waku",
@@ -310,7 +310,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 16
+      "seconds": 18
     },
     {
       "template": "analog",
@@ -320,7 +320,8 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 55
+      "seconds": 51,
+      "note": "npm 10.9.4 crashes resolving @angular/build@21 optional peers (vitest 4.1.11 peer set) as of 2026-10-16, with or without lunx; this row is the rerun with npm 11.21.1"
     },
     {
       "template": "remix",
@@ -330,7 +331,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 24
+      "seconds": 30
     },
     {
       "template": "docusaurus",
@@ -340,7 +341,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 59
+      "seconds": 72
     },
     {
       "template": "marko-run",
@@ -350,7 +351,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 17
+      "seconds": 20
     },
     {
       "template": "library",
@@ -400,7 +401,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 14
+      "seconds": 24
     },
     {
       "template": "electron --no-ts",
@@ -410,7 +411,7 @@
       "build": "pass",
       "dev": "pass",
       "preview": "pass",
-      "seconds": 12
+      "seconds": 13
     }
   ]
 }
