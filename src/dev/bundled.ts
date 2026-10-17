@@ -44,6 +44,8 @@ export interface BundledDevOptions {
     log: { info(msg: string): void; error(msg: string): void };
     /** After each build that produced bundles. */
     onOutput?(): void;
+    /** Rolldown plugins that run before lunx's (webpack loaders). */
+    plugins?: any[];
 }
 
 export interface BundledDev {
@@ -296,7 +298,7 @@ import.meta.hot?.accept();
                 ...(options.jsx ? { jsx: { runtime: 'automatic', importSource: options.jsx.importSource, development: true, refresh: options.jsx.refresh } } : {}),
             },
             ...(external ? { external } : {}),
-            plugins: [lunxPlugin, viteImportGlobPlugin({ root })],
+            plugins: [...(options.plugins ?? []), lunxPlugin, viteImportGlobPlugin({ root })],
             moduleTypes: { '.vue': 'js', '.svelte': 'js' },
             experimental: { devMode: { implement: CLIENT_RUNTIME } },
             onLog(level: string, logItem: any) {

@@ -35,6 +35,7 @@ import { wasmEsmModule, wasmInitModule } from './wasm-init.js';
 import { SVG_COMPONENT_QUERY, svgComponent, svgRuntimeFor } from './svg-component.js';
 import { pwaFiles, pwaHeadTags, pwaOptions, writeServiceWorker } from './pwa.js';
 import type { AppPlugins } from '../plugin-host/app-plugins.js';
+import type { LoaderRule } from './webpack-loaders.js';
 import { log } from '../utils/logger.js';
 
 // zlib (~8ms to load) is first needed after the bundle; the engine-busy hook loads it while Rolldown works.
@@ -404,7 +405,10 @@ export async function productionBuild(config: BuildConfig, framework: string, op
     });
 
     const cjsPlugin = cjsTreeShakingPlugin(cjsMode);
+    const loaderRules = (config as any).loaders as LoaderRule[] | undefined;
     const plugins: any[] = [
+        // `loaders` (webpack's module.rules): their output is the module, before anything else sees the file.
+        ...(loaderRules?.length ? [await webpackLoadersPlugin(root, loaderRules, base, config.mode === 'production' ? 'production' : 'development')] : []),
         // Vite's order: `enforce: 'pre'`, the built-ins, the rest, `enforce: 'post'`.
         ...(vp ? vp.forRolldown(app!, app!.pre, pluginCss) : []),
         ...(b.commonjsTreeShaking === false ? [] : [cjsPlugin]),
@@ -832,6 +836,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         'import.meta.env': JSON.stringify(metaEnv),
         ...Object.fromEntries(Object.entries(metaEnv).map(([k, v]) => [`import.meta.env.${k}`, JSON.stringify(v)])),
         ...((config as any).define ?? {}),
+        // Where file-loader-style loaders' emitted files live.
+        ...((config as any).loaders?.length ? { __webpack_public_path__: JSON.stringify(base) } : {}),
         // What the plugins' `config` hooks added.
         ...Object.fromEntries(Object.entries(app?.config.define ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)])),
     };
@@ -1271,6 +1277,38 @@ function legalCommentsPlugin(): any {
                 const map = chunk.code.lastIndexOf('\n//# sourceMappingURL=');
                 chunk.code = map === -1 ? chunk.code + banner : chunk.code.slice(0, map) + banner + chunk.code.slice(map);
             }
+        },
+    };
+}
+
+/** `loaders`: webpack loaders (src/build/webpack-loaders.ts) on the files their rules match. */
+export async function webpackLoadersPlugin(root: string, rules: LoaderRule[], base: string, mode: 'development' | 'production'): Promise<any> {
+    const { LoaderRunner } = await import('./webpack-loaders.js');
+    const runner = new LoaderRunner(root, rules, {
+        mode,
+        emitFile: () => {
+            throw new Error('emitFile outside a build');
+        },
+        warn: (m) => log.warn(m),
+    });
+    const filter = runner.filter();
+    return {
+        name: 'lunx:webpack-loaders',
+        load: {
+            ...(filter ? { filter: { id: filter } } : {}),
+            async handler(this: any, id: string) {
+                if (id.startsWith('\0')) return null;
+                const [file, query = ''] = id.split(/(?=\?)/) as [string, string?];
+                const matched = runner.rulesFor(file, query);
+                if (!matched.length || !fs.existsSync(file)) return null;
+                const out = await runner.run(file, query, matched, (name, content) => {
+                    this.emitFile({ type: 'asset', fileName: name, source: content });
+                    return base + name;
+                });
+                for (const dep of out.dependencies) if (dep !== file) this.addWatchFile(dep);
+                // A JS / TS file stays one (its loaders' output is compiled as such); anything else is now JS.
+                return { code: out.code, map: out.map ?? null, ...(/\.[mc]?[jt]sx?$/.test(file) ? {} : { moduleType: 'js' }) };
+            },
         },
     };
 }

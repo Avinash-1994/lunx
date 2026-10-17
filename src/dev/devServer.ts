@@ -15,6 +15,8 @@ import { compile, parse as parseModule } from '../engines/index.js';
 // /@lunx-deps/preact.js?v=1 and /@lunx-deps/preact.js as two modules -- two
 // copies of Preact or React, broken hooks. Responses are no-cache instead.
 
+/** Files a `loaders` rule matches: their imports are modules the loaders produce (set by the dev server). */
+let loaderImport: ((file: string) => boolean) | null = null;
 /** Imported from JS, these resolve to their URL (`import logo from './logo.svg'`). */
 const DEV_ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|aac|m4a|pdf|txt|wasm)$/i;
 import { anomalyDetector } from '../security/anomaly.js';
@@ -127,7 +129,9 @@ async function rewriteImports(code: string, rootDir: string, preBundledDeps?: Ma
           // Handle relative CSS/JSON 
           // By the file's extension, query aside (`./pixel.png?w=4` is an image import too).
           const bare = specifier.split('?')[0]!;
-          if (CSS_LANGS.test(bare) || bare.endsWith('.json') || DEV_ASSET_EXT.test(bare)) {
+          const viaLoader = loaderImport && !/\.[mc]?[jt]sx?$/.test(bare) && (specifier.startsWith('.') || specifier.startsWith('/'))
+            && loaderImport(specifier.startsWith('/') ? path.join(rootDir, bare) : path.resolve(path.dirname(importer ?? path.join(rootDir, 'index.html')), bare));
+          if (viaLoader || CSS_LANGS.test(bare) || bare.endsWith('.json') || DEV_ASSET_EXT.test(bare)) {
             replacements.push({
               start: node.start,
               end: node.end,
@@ -316,6 +320,27 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
     'process.env.NODE_ENV': '"development"',
     ...devDefines,
     ...((cfg as any).define ?? {}),
+  };
+
+  // `loaders` (webpack's module.rules): imports of the files they match are the modules the
+  // loaders produce; the files they emit are served from memory.
+  const loaderRunner = (cfg as any).loaders?.length
+    ? new (await import('../build/webpack-loaders.js')).LoaderRunner(cfg.root, (cfg as any).loaders, {
+        mode: 'development',
+        emitFile: (name, content) => {
+          loaderFiles.set('/' + name.replace(/^\/+/, ''), Buffer.from(content));
+          return '/' + name.replace(/^\/+/, '');
+        },
+        warn: (m) => log.warn(m),
+      })
+    : null;
+  const loaderFiles = new Map<string, Buffer>();
+  loaderImport = loaderRunner ? (file) => loaderRunner.rulesFor(file).length > 0 : null;
+  if (loaderRunner) devDefines['__webpack_public_path__'] = '"/"';
+  /** The query a rule sees: lunx's own `import` marker left out. */
+  const loaderQuery = (url: string) => {
+    const q = url.includes('?') ? url.slice(url.indexOf('?') + 1).split('&').filter((p) => p && p !== 'import').join('&') : '';
+    return q ? `?${q}` : '';
   };
   const aliases = collectAliases(cfg.root, (cfg as any).resolve?.alias);
 
@@ -671,6 +696,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         log: { info: (m) => log.info(m, { category: 'build' }), error: (m) => log.error(m) },
         // writeToDisk: each new build of the bundles goes to disk too.
         onOutput: () => crawlSoon(),
+        plugins: (cfg as any).loaders?.length ? [await (await import('../build/production.js')).webpackLoadersPlugin(cfg.root, (cfg as any).loaders, '/', 'development')] : [],
         packages: (cfg as any).prebundle?.enabled === false ? [] : bundlePackages(cfg.root, (name) => SERVER_ONLY_PACKAGES.has(name) || excluded.has(name)),
         // Imports the scan did not see: pre-bundled with the rest, as Vite's optimizer re-runs
         // (chained now, so a request for one of them waits for it).
@@ -1109,6 +1135,14 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       return;
     }
 
+    // A file a webpack loader emitted (file-loader…).
+    if (loaderFiles.has(reqPath)) {
+      const ext = path.extname(reqPath).slice(1).toLowerCase();
+      const types: Record<string, string> = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', woff2: 'font/woff2', css: 'text/css', js: 'application/javascript', json: 'application/json', txt: 'text/plain' };
+      res.writeHead(200, { 'Content-Type': types[ext] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
+      res.end(loaderFiles.get(reqPath));
+      return;
+    }
     if (bundled && reqPath.startsWith(BUNDLE_PREFIX)) {
       const file = await bundled.serve(req.url || '/');
       if (!file) {
@@ -1945,6 +1979,16 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       }
 
       const ext = path.extname(filePath);
+      const loaderRules = loaderRunner?.rulesFor(filePath, loaderQuery(url)) ?? [];
+      // A file only loaders turn into a module (yaml, markdown, svg…): imported, it is their output.
+      if (loaderRules.length && !/\.[mc]?[jt]sx?$/.test(ext) && /[?&]import\b/.test(url)) {
+        const out = await loaderRunner!.run(filePath, loaderQuery(url), loaderRules);
+        const { toBrowserModule } = await import('../build/webpack-loaders.js');
+        const compiled = await universalTransformer.transform({ filePath: filePath + '.js', code: toBrowserModule(out.code), framework: primaryFramework, root: cfg.root, isDev: true, define: devDefines });
+        res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
+        res.end(await rewriteImports(compiled.code, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath));
+        return;
+      }
 
         // `import MyWorker from './worker.js?worker'` (Vite's): a constructor for the
         // worker, which loads the module itself as a module worker.
@@ -1961,7 +2005,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
         if (ext === '.ts' || ext === '.tsx' || ext === '.jsx' || ext === '.js' || ext === '.mjs' || ext === '.vue' || ext === '.svelte' || ext === '.astro') {
         const moduleStamp = `${stats.mtimeMs}:${stats.size}`;
-        let raw = await fs.readFile(filePath, 'utf-8');
+        // A JS / TS file a `loaders` rule matches (babel-loader…): compiled from their output.
+        let raw = loaderRules.length ? (await loaderRunner!.run(filePath, loaderQuery(url), loaderRules)).code : await fs.readFile(filePath, 'utf-8');
 
         // Native transform fast path for plain JS/TS only.
         // JSX is deliberately excluded: the universal transformer below knows

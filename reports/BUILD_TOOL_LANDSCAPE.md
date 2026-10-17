@@ -259,8 +259,8 @@ Options a production project reaches for. A lunx ❌ means neither
 | Security: CVE gate, SBOM, SRI, secret scan, CSP | ✅ | ❌ | partial (SRI) | ❌ | ❌ |
 | PWA | ✅ built in | 🔌 | 🔌 | 🔌 | ❌ |
 | Electron | ✅ built in | 🔌 | 🔌 | ❌ | ❌ |
-| Plugin ecosystems run unchanged | Vite / Rollup plugins, esbuild plugins | Vite / Rollup | webpack loaders & plugins | Parcel | Bun / esbuild-style |
-| webpack loaders | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Plugin ecosystems run unchanged | Vite / Rollup plugins, esbuild plugins, webpack loaders | Vite / Rollup | webpack loaders & plugins | Parcel | Bun / esbuild-style |
+| webpack loaders | ✅ `loaders` (module.rules: chains, async, raw, pitch, emitFile, asset types; checked with raw-loader, yaml-loader, @svgr/webpack, html-loader, markdown-loader) | ❌ | ✅ | ❌ | ❌ |
 | Node version manager, package manager | ❌ | ✅ `vp env`, `vp install` | ❌ | ❌ | ✅ |
 
 ## 8. Install footprint
@@ -328,7 +328,7 @@ browser, parity and template matrices)
 2. Test runner: browser mode.
 3. Bundled dev for projects with Vite plugins or module federation (they serve
    modules one by one).
-4. webpack loaders; a Node version / package manager (Vite+, Bun).
+4. A Node version / package manager (Vite+, Bun).
 5. The Environment API is partial.
 6. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
 
