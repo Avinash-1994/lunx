@@ -4,7 +4,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
-import { BUNDLE_PREFIX, depUrl, type BundledDev } from './bundled.js';
+import { BUNDLE_PREFIX, type BundledDev } from './bundled.js';
 import { applyAlias, collectAliases, type AliasEntry } from '../config/aliases.js';
 import { CSS_LANGS, compileCss, isCssModule, resolveCssFile } from '../build/css.js';
 import { transformGlobImports } from '../build/glob-import.js';
@@ -359,13 +359,6 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // HMR client are served at once, and only module requests (whose imports
   // must point at the bundled deps) wait for it.
   let prebundleReady: Promise<void> = Promise.resolve();
-  // The packages being pre-bundled, at their URLs (the pre-bundler's naming), once the list
-  // is known: the app's modules are served with them meanwhile, and only requests for the
-  // packages themselves wait for the bundle.
-  let plannedDeps: Map<string, string> | null = null;
-  let markPlanned!: () => void;
-  const prebundlePlanned = new Promise<void>((r) => (markPlanned = r));
-  const depsMap = () => plannedDeps ?? preBundledDeps;
   // Started as soon as the framework is known: on a first visit, module requests wait for it.
   try {
     // 1. Load package.json dependencies
@@ -504,8 +497,6 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
         if (validDeps.size > 0) {
           // 4. Pass to PreBundler
           _mark(`prebundle bundling ${validDeps.size} deps`);
-          plannedDeps = new Map([...validDeps].map((d) => [d, depUrl(d)]));
-          markPlanned();
           await preBundler.preBundleDependencies(Array.from(validDeps)).then(
             (deps) => {
               preBundledDeps = deps;
@@ -514,7 +505,6 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
             },
             (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
           );
-          plannedDeps = null;
         }
       }
     };
@@ -522,12 +512,6 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   } catch (e: any) {
     log.warn(`Dependency pre-bundling failed: ${e.message}`);
   }
-
-  // Whatever happened above, module requests stop waiting once the pre-bundle settles.
-  void prebundleReady.finally(() => {
-    plannedDeps = null;
-    markPlanned();
-  });
 
   let activeAdapter: any = null;
   try {
@@ -1014,7 +998,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       define: devDefines,
     });
     const out = transformed ? compiled.code : await appDev!.transform('post', compiled.code, id);
-    return rewriteImports(out, cfg.root, depsMap(), devFederation, aliases, appDev, onDisk ? file : path.join(cfg.root, 'index.html'));
+    return rewriteImports(out, cfg.root, preBundledDeps, devFederation, aliases, appDev, onDisk ? file : path.join(cfg.root, 'index.html'));
   };
 
   const access = { host: cfg.server?.host, allowedHosts: (cfg.server as any)?.allowedHosts, cors: (cfg.server as any)?.cors };
@@ -1028,8 +1012,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     if (appDev && await appDev.handle(req, res)) return;
     const reqPath = (req.url || '/').split('?')[0]!;
     if (reqPath !== '/' && !reqPath.endsWith('.html') && !reqPath.startsWith('/@lunx/hmr-client') && !reqPath.startsWith('/__lunx')) {
-      // A package waits for the pre-bundle; the app's modules only for its list.
-      await (reqPath.startsWith('/@lunx-deps/') ? prebundleReady : prebundlePlanned);
+      await prebundleReady;
     }
     // CORS for pages on localhost only, unless server.cors says otherwise (as Vite).
     const allowOrigin = corsOrigin(req.headers.origin, access);
@@ -1062,7 +1045,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     const served = req.method === 'GET' ? moduleResponses.get(req.url || '/') : undefined;
     if (served) {
       const st = await fs.stat(served.file).catch(() => null);
-      if (st && `${st.mtimeMs}:${st.size}` === served.stamp && served.deps === depsMap()) {
+      if (st && `${st.mtimeMs}:${st.size}` === served.stamp && served.deps === preBundledDeps) {
         if (cfg.server?.headers) for (const [k, v] of Object.entries(cfg.server.headers)) res.setHeader(k, v as any);
         if (req.headers['if-none-match'] === served.etag) {
           res.writeHead(304, { ETag: served.etag, 'Cache-Control': 'no-cache' });
@@ -1437,8 +1420,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
     // Serve pre-bundled dependencies
     if (url.startsWith('/@lunx-deps/')) {
-      // Bundles and modules reference them before the pre-bundle has finished.
-      await prebundleReady.catch(() => {});
+      // Bundles reference them as they build, before the pre-bundle has finished.
+      if (bundled) await prebundleReady.catch(() => {});
       // Strip query parameters
       const cleanUrl = url.split('?')[0];
       const depFile = cleanUrl.replace('/@lunx-deps/', '');
@@ -1928,11 +1911,11 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
           const compiled = appDev ? await appDev.transform('post', transformResult.code, filePath) : transformResult.code;
           const globbed = transformGlobImports(compiled, filePath, cfg.root);
-          let code = await rewriteImports(globbed ?? compiled, cfg.root, depsMap(), devFederation, aliases, appDev, filePath);
+          let code = await rewriteImports(globbed ?? compiled, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath);
 
           const etag = `"${crypto.createHash('sha1').update(code).digest('base64url')}"`;
           // Vite plugins' transforms may read anything: their output is not kept.
-          if (!appDev && req.method === 'GET') moduleResponses.set(url, { file: filePath, stamp: moduleStamp, deps: depsMap(), code, etag });
+          if (!appDev && req.method === 'GET') moduleResponses.set(url, { file: filePath, stamp: moduleStamp, deps: preBundledDeps, code, etag });
           res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache', ETag: etag });
           res.end(code);
           return;
@@ -2049,7 +2032,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
         if (runtime) {
           const code = svgComponent(await fs.readFile(filePath, 'utf-8'), runtime);
           res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
-          res.end(await rewriteImports(code, cfg.root, depsMap(), devFederation, aliases, appDev, filePath));
+          res.end(await rewriteImports(code, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath));
           return;
         }
       }
@@ -2063,7 +2046,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       if (ext === '.wasm' && /[?&]import\b/.test(url) && !appDev?.app.plugins.some((p: any) => p.name === 'vite-plugin-wasm')) {
         const code = wasmEsmModule(await fs.readFile(filePath), JSON.stringify(url.split('?')[0]));
         res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-cache' });
-        res.end(await rewriteImports(code, cfg.root, depsMap(), devFederation, aliases, appDev, filePath));
+        res.end(await rewriteImports(code, cfg.root, preBundledDeps, devFederation, aliases, appDev, filePath));
         return;
       }
       if (url.includes('?url') || /[?&]import\b/.test(url)) {

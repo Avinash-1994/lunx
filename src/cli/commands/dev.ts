@@ -1,5 +1,4 @@
 import path from 'path';
-import { existsSync } from 'fs';
 import { createRequire } from 'module';
 import { performance } from 'perf_hooks';
 
@@ -84,14 +83,6 @@ export default {
         // The dev server starts from this config instead of loading it again (~50 ms).
         __loadedConfig: userCfg,
       } as any;
-
-      // A first start pre-bundles the dependencies with Rolldown (bundled dev builds with it):
-      // loading it now, while the server starts, takes ~100 ms off the first page. A restart
-      // with the pre-bundle cached does not need it.
-      const cacheMeta = path.join(root, userCfg?.cacheDir ?? path.join('.lunx', 'cache'), '_metadata.json');
-      if (args.bundle || userCfg?.server?.bundle || !existsSync(cacheMeta)) {
-        void Promise.all([import('rolldown'), import('rolldown/experimental')]).catch(() => {});
-      }
 
       mark('config (port)');
       const minimalDevServer = await import('../../dev/devServer.minimal.js');
