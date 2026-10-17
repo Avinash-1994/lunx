@@ -249,7 +249,7 @@ Options a production project reaches for. A lunx ❌ means neither
 | · DOM environment (jsdom / happy-dom) | ✅ | ✅ | ✅ | | ✅ |
 | · Coverage | ✅ V8, source-mapped (text, lcov) | ✅ | ✅ | | ✅ |
 | · Snapshots | ✅ Vitest's format, inline too | ✅ | ✅ | | ✅ |
-| · Browser mode | ❌ | ✅ | ✅ | | ❌ |
+| · Browser mode | ✅ `lunx test --browser` / `test.browser` (Chromium, Firefox, WebKit through Playwright) | ✅ | ✅ | | ❌ |
 | Type check | ✅ `lunx check`, dev overlay | ✅ `vp check` (tsgo) | ❌ | ❌ | ❌ |
 | Lint | ✅ `lunx lint` (Oxlint) | ✅ `vp lint` (Oxlint) | ❌ | ❌ | ❌ |
 | Format | ✅ `lunx fmt` (Oxfmt) | ✅ `vp fmt` (Oxfmt) | ❌ | ❌ | ❌ |
@@ -325,12 +325,11 @@ browser, parity and template matrices)
 
 1. A first start's first page as fast as Rspack's (see §1): the dependency
    pre-bundle is on its critical path.
-2. Test runner: browser mode.
-3. Bundled dev for projects with Vite plugins or module federation (they serve
+2. Bundled dev for projects with Vite plugins or module federation (they serve
    modules one by one).
-4. A Node version / package manager (Vite+, Bun).
-5. The Environment API is partial.
-6. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
+3. A Node version / package manager (Vite+, Bun).
+4. The Environment API is partial.
+5. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
 
 **Where lunx leads**
 

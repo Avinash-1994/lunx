@@ -8,6 +8,7 @@
  *   lunx test --coverage           V8 line coverage: table, coverage/lcov.info
  *   lunx test -u                   update snapshots
  *   lunx test --watch              re-run on changes
+ *   lunx test --browser[=firefox]  in a real browser, through the project's Playwright (--headed to watch)
  *
  * A project with Vitest installed runs Vitest instead (on lunx's engine,
  * through `lunx exec vitest`); `--builtin` keeps lunx's runner.
@@ -43,6 +44,8 @@ interface Options {
     builtin: boolean;
     passWithNoTests: boolean;
     bail: boolean;
+    browser?: 'chromium' | 'firefox' | 'webkit';
+    headed: boolean;
 }
 
 function parseArgs(args: string[]): Options {
@@ -56,6 +59,7 @@ function parseArgs(args: string[]): Options {
         builtin: false,
         passWithNoTests: false,
         bail: false,
+        headed: false,
     };
     for (let i = 0; i < args.length; i++) {
         const a = args[i]!;
@@ -68,6 +72,9 @@ function parseArgs(args: string[]): Options {
         else if (a === '--builtin') opts.builtin = true;
         else if (a === '--passWithNoTests' || a === '--pass-with-no-tests') opts.passWithNoTests = true;
         else if (a === '--bail') opts.bail = true;
+        else if (a === '--browser') opts.browser = 'chromium';
+        else if (a.startsWith('--browser=')) opts.browser = a.slice(10) as Options['browser'];
+        else if (a === '--headed') opts.headed = true;
         else if (a.startsWith('--environment')) opts.environment = value() as Options['environment'];
         else if (a === '-t' || a.startsWith('--testNamePattern') || a.startsWith('--test-name-pattern')) opts.testNamePattern = value();
         else if (!a.startsWith('-')) opts.filters.push(a);
@@ -179,6 +186,22 @@ async function once(root: string, opts: Options, config: any): Promise<boolean> 
     const { environmentOf } = await import('./environment.js');
     const setupFiles = (Array.isArray(config.setupFiles) ? config.setupFiles : config.setupFiles ? [config.setupFiles] : []).map((f: string) => path.resolve(root, f));
     const coverage = opts.coverage || config.coverage === true || config.coverage?.enabled === true;
+    // Browser mode: `--browser`, or `test.browser` ({ enabled, name, headless }) in lunx.config.
+    const browserConfig = config.browser === true ? { enabled: true } : config.browser;
+    const browser = opts.browser ?? (browserConfig?.enabled ? browserConfig.name ?? 'chromium' : undefined);
+    if (browser) {
+        const { runInBrowsers } = await import('./browser.js');
+        const results = await runInBrowsers(root, files, {
+            name: browser,
+            headless: !opts.headed && browserConfig?.headless !== false,
+            executablePath: browserConfig?.executablePath,
+            update: opts.update,
+            ci: opts.ci,
+            testNamePattern: opts.testNamePattern,
+            setupFiles,
+        }, (r) => printFile(root, r));
+        return summarize(results, started, false, config, root);
+    }
     const queue = [...files];
     const results: FileResult[] = [];
     let stop = false;
@@ -200,6 +223,10 @@ async function once(root: string, opts: Options, config: any): Promise<boolean> 
             if (opts.bail && (r.error || r.tests.some((t) => t.status === 'fail'))) stop = true;
         }
     }));
+    return summarize(results, started, coverage, config, root);
+}
+
+async function summarize(results: FileResult[], started: number, coverage: boolean, config: any, root = process.cwd()): Promise<boolean> {
     const tests = results.flatMap((r) => r.tests);
     const count = (s: string) => tests.filter((t) => t.status === s).length;
     const failedFiles = results.filter((r) => r.error || r.tests.some((t) => t.status === 'fail')).length;

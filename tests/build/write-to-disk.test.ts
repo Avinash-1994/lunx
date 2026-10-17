@@ -49,10 +49,11 @@ describe('server.writeToDisk', () => {
         const { child } = await startDev(cli, root);
         try {
             expect(await waitFor(() => read(path.join(dist, '@lunx/bundle/main.js')).includes('first'))).toBe(true);
-            expect(read(path.join(dist, 'index.html'))).toContain('/@lunx/bundle/main.js');
-            expect(fs.existsSync(path.join(dist, '@lunx-deps/react-dom_client.js'))).toBe(true);
-            expect(fs.existsSync(path.join(dist, 'src/logo.svg'))).toBe(true);
-            expect(read(path.join(dist, 'robots.txt'))).toBe('hi');
+            // The crawl writes as it goes: each file in turn.
+            expect(await waitFor(() => read(path.join(dist, 'index.html')).includes('/@lunx/bundle/main.js'))).toBe(true);
+            expect(await waitFor(() => fs.existsSync(path.join(dist, '@lunx-deps/react-dom_client.js')))).toBe(true);
+            expect(await waitFor(() => fs.existsSync(path.join(dist, 'src/logo.svg')))).toBe(true);
+            expect(await waitFor(() => read(path.join(dist, 'robots.txt')) === 'hi')).toBe(true);
             const app = path.join(root, 'src/App.jsx');
             fs.writeFileSync(app, read(app).replace('first', 'second'));
             expect(await waitFor(() => read(path.join(dist, '@lunx/bundle/main.js')).includes('second'))).toBe(true);
@@ -67,8 +68,8 @@ describe('server.writeToDisk', () => {
         const { child } = await startDev(cli, root);
         try {
             expect(await waitFor(() => read(path.join(dist, 'src/App')).includes('first'))).toBe(true);
-            expect(read(path.join(dist, 'src/main.jsx'))).toContain('createRoot');
-            expect(fs.existsSync(path.join(dist, '@lunx-deps/react-dom_client.js'))).toBe(true);
+            expect(await waitFor(() => read(path.join(dist, 'src/main.jsx')).includes('createRoot'))).toBe(true);
+            expect(await waitFor(() => fs.existsSync(path.join(dist, '@lunx-deps/react-dom_client.js')))).toBe(true);
             expect(fs.existsSync(path.join(dist, 'src/logo.svg'))).toBe(false);
         } finally {
             await stopProcess(child);

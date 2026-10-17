@@ -26,7 +26,7 @@ function project(files: Record<string, string>, linkModules = true): string {
 }
 
 function lunx(cwd: string, ...args: string[]) {
-    return spawnSync(process.execPath, [bin, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '', NO_COLOR: '1', LUNX_SKIP_SECURITY: '1', CI: '' } });
+    return spawnSync(process.execPath, [bin, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '', NO_COLOR: '1', LUNX_SKIP_SECURITY: '1', CI: '', ...(chromium ? { CHROMIUM_PATH: chromium } : {}) } });
 }
 
 afterAll(() => {
@@ -91,6 +91,55 @@ describe('lunx test', () => {
         const filtered = lunx(dir, 'test', '--builtin', '-t', 'two');
         expect(filtered.status).toBe(0);
         expect(filtered.stdout).toContain('Tests  1 passed | 1 skipped (2)');
+    }, 120_000);
+});
+
+// Playwright's own Chromium, or the one this machine has (CHROMIUM_PATH).
+const chromium = process.env.CHROMIUM_PATH ?? (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
+
+describe('lunx test --browser', () => {
+    (chromium ? it : it.skip)('runs the files in Chromium: real layout, canvas, CSS imports, React, snapshots', () => {
+        const dir = project({
+            'package.json': '{"name":"b","type":"module"}',
+            'src/box.css': '.box { width: 120px; padding: 10px; box-sizing: content-box; }\n',
+            'src/Hello.tsx': "export function Hello({ name }: { name: string }) { return <p className=\"hi\">Hello {name}</p>; }\n",
+            'src/browser.test.tsx': [
+                "import { it, expect } from 'vitest';",
+                "import { createRoot } from 'react-dom/client';",
+                "import { flushSync } from 'react-dom';",
+                "import './box.css';",
+                "import { Hello } from './Hello';",
+                "it('lays out with the imported CSS', () => {",
+                "  const el = document.createElement('div');",
+                "  el.className = 'box';",
+                "  document.body.appendChild(el);",
+                "  expect(el.getBoundingClientRect().width).toBe(140);",
+                "});",
+                "it('has a real canvas', () => {",
+                "  const ctx = document.createElement('canvas').getContext('2d');",
+                "  expect(ctx).not.toBeNull();",
+                "  expect(navigator.userAgent).toMatch(/Chrome/);",
+                "});",
+                "it('renders a component', () => {",
+                "  const root = document.createElement('div');",
+                "  document.body.appendChild(root);",
+                "  flushSync(() => createRoot(root).render(<Hello name=\"lunx\" />));",
+                "  expect(root.querySelector('.hi')!.textContent).toBe('Hello lunx');",
+                "  expect({ text: root.textContent }).toMatchSnapshot();",
+                "});",
+                '',
+            ].join('\n'),
+        });
+        const r = lunx(dir, 'test', '--builtin', '--browser');
+        expect(r.stdout + r.stderr).toContain('Tests  3 passed (3)');
+        expect(r.status).toBe(0);
+        expect(fs.readFileSync(path.join(dir, 'src/__snapshots__/browser.test.tsx.snap'), 'utf8')).toContain('"text": "Hello lunx"');
+        expect(lunx(dir, 'test', '--builtin', '--browser').stdout).toContain('Tests  3 passed (3)');
+        // A failing test fails the run, with its message.
+        fs.writeFileSync(path.join(dir, 'src/browser.test.tsx'), "import { it, expect } from 'vitest';\nit('bad', () => expect(document.title).toBe('nope'));\n");
+        const bad = lunx(dir, 'test', '--builtin', '--browser');
+        expect(bad.status).toBe(1);
+        expect(bad.stdout).toContain('FAIL bad');
     }, 120_000);
 });
 

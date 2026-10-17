@@ -224,6 +224,8 @@ export const BuildConfigSchema = z.object({
   envDir: z.union([z.string(), z.literal(false)]).optional(),
   /** webpack loaders, as module.rules: [{ test, include, exclude, use: ['raw-loader', { loader, options }], type }]. */
   loaders: z.array(z.any()).optional(),
+  /** `lunx test`: environment, include, exclude, setupFiles, coverage, browser ({ enabled, name, headless, executablePath }). */
+  test: z.any().optional(),
   prebundle: z.object({
     enabled: z.boolean().default(true),
     /** Source maps for the pre-bundled packages (off: faster first page). */
@@ -356,7 +358,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
   'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib',
-  'electron', 'pwa', 'html', 'experimental', 'react', 'envPrefix', 'envDir', 'loaders',
+  'electron', 'pwa', 'html', 'experimental', 'react', 'envPrefix', 'envDir', 'loaders', 'test',
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {
