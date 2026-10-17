@@ -12,6 +12,8 @@ mod watcher;
 mod prebundle;
 // Phase 4 — competitive superiority
 mod task_graph;
+// CommonJS → ESM lexer for production builds (src/build/cjs-lexer.ts)
+mod cjs_lexer;
 
 // Re-export transform module
 pub use transform::{transform_js, transform_css, transform_vue};
@@ -40,6 +42,7 @@ pub use watcher::{NativeWatcher, WatchEvent, start_watcher};
 pub use prebundle::{PrebundleEntry, PrebundleConfig, prebundle, prebundle_put};
 // Phase 4 re-exports
 pub use task_graph::{Task, TaskPlan, plan_build};
+pub use cjs_lexer::lex_cjs_exports;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;

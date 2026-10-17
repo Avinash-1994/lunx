@@ -589,6 +589,7 @@ module.exports.createPlanKey = nativeBinding.createPlanKey
 module.exports.fastHash = nativeBinding.fastHash
 module.exports.getOptimalParallelism = nativeBinding.getOptimalParallelism
 module.exports.helloRust = nativeBinding.helloRust
+module.exports.lexCjsExports = nativeBinding.lexCjsExports
 module.exports.lunxChunk = nativeBinding.lunxChunk
 module.exports.mergeSourceMaps = nativeBinding.mergeSourceMaps
 module.exports.minifySync = nativeBinding.minifySync

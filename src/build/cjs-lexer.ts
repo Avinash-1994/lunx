@@ -12,7 +12,13 @@
  * where the syntax-tree version would too (not a static exports module).
  * Checked against the syntax tree on every CommonJS file in node_modules:
  * where the lexer decides, the output is the same.
+ *
+ * The same lexer runs in Rust when lunx's native binding has it
+ * (native/src/cjs_lexer.rs): a build calls it once, cold, on react-dom's
+ * ~600 KB, ~70 ms here and a few ms there. `LUNX_NATIVE_LEXER=0` keeps it in JS.
  */
+
+import { loadNativeBinding } from '../native/binding.js';
 
 export interface LexedModule {
     /** Top-level `var x = require('…')` declarations: [start, end) and their bindings. */
@@ -486,11 +492,29 @@ function redeclares(code: string, tk: Tokens, from: number, names: Set<string>):
     return false;
 }
 
+let nativeLex: ((code: string) => { status: number } & LexedModule) | null | undefined;
+
+/** Whether the lexer runs in Rust (lunx's native binding has it). */
+export function nativeLexer(): boolean {
+    if (nativeLex === undefined) {
+        const binding = process.env.LUNX_NATIVE_LEXER === '0' ? null : loadNativeBinding().binding;
+        nativeLex = typeof binding?.lexCjsExports === 'function' ? binding.lexCjsExports : null;
+    }
+    return nativeLex !== null;
+}
+
 /**
  * The exports-module shape found by tokens: undefined when unsure (use the syntax tree),
  * null when it is not one.
  */
 export function lexExportsModule(code: string): LexedModule | null | undefined {
+    if (!nativeLexer()) return lexExportsModuleJs(code);
+    const out = nativeLex!(code);
+    return out.status === 0 ? undefined : out.status === 1 ? null : { requires: out.requires, exportRefs: out.exportRefs };
+}
+
+/** lexExportsModule in JavaScript (where the native binding is missing or older). */
+export function lexExportsModuleJs(code: string): LexedModule | null | undefined {
     const tk = tokenize(code);
     if (!tk) return undefined;
     const { count, kind, start, end, punct, fnDepth, marks } = tk;

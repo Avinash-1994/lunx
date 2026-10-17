@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { lightningcss as loadLightningcss } from '../lib/lightningcss.js';
+import { loadNativeBinding } from './binding.js';
 
 /**
  * Inlined JS fallback graph analyzer.
@@ -352,127 +353,18 @@ function getJSFallback() {
     };
 }
 
-function looksLikeNativeBinding(mod: any): boolean {
-    if (!mod || typeof mod !== 'object') return false;
-    if (typeof mod.helloRust !== 'function') return false;
-    try {
-        return String(mod.helloRust()) !== 'JS fallback';
-    } catch {
-        return false;
-    }
-}
-
-function platformNativeName(): string {
-    const { platform, arch } = process;
-    // Mirror napi-rs binary naming (gnu linux is the common CI/publish target).
-    if (platform === 'linux' && arch === 'x64') return 'lunx_native.linux-x64-gnu.node';
-    if (platform === 'linux' && arch === 'arm64') return 'lunx_native.linux-arm64-gnu.node';
-    if (platform === 'darwin' && arch === 'x64') return 'lunx_native.darwin-x64.node';
-    if (platform === 'darwin' && arch === 'arm64') return 'lunx_native.darwin-arm64.node';
-    if (platform === 'win32' && arch === 'x64') return 'lunx_native.win32-x64-msvc.node';
-    return 'lunx_native.node';
-}
-
-function platformOptionalPackage(): string | null {
-    const { platform, arch } = process;
-    if (platform === 'linux' && arch === 'x64') return '@lunx/native-linux-x64-gnu';
-    if (platform === 'linux' && arch === 'arm64') return '@lunx/native-linux-arm64-gnu';
-    if (platform === 'darwin' && arch === 'arm64') return '@lunx/native-darwin-arm64';
-    if (platform === 'darwin' && arch === 'x64') return '@lunx/native-darwin-x64';
-    if (platform === 'win32' && arch === 'x64') return '@lunx/native-win32-x64-msvc';
-    return null;
-}
-
-function tryLoadOptionalNativePackage(): any | null {
-    const pkgName = platformOptionalPackage();
-    if (!pkgName) return null;
-    try {
-        const loaded = _require(pkgName);
-        if (looksLikeNativeBinding(loaded)) return loaded;
-    } catch {
-        // optionalDependency may be missing on unsupported platforms — OK
-    }
-    // Monorepo / pre-publish: packages/lunx-native-* next to the tool root
-    try {
-        const short = pkgName.replace('@lunx/', '');
-        const candidates = [
-            path.resolve(__dirname, `../../../packages/${short}/index.js`),
-            path.resolve(__dirname, `../../packages/${short}/index.js`),
-            path.resolve(process.cwd(), `packages/${short}/index.js`),
-            path.resolve(process.cwd(), `node_modules/${pkgName}/index.js`),
-        ];
-        for (const c of candidates) {
-            if (!fs.existsSync(c)) continue;
-            const loaded = _require(c);
-            if (looksLikeNativeBinding(loaded)) return loaded;
-        }
-    } catch { /* ignore */ }
-    return null;
-}
-
 try {
-    const platName = platformNativeName();
-    let foundNative = '';
-    let loadError: unknown = null;
-
-    // 1) Preferred: optional platform package (keeps lunx-dev ≤1.6MB on npm)
-    const fromOptional = tryLoadOptionalNativePackage();
-    if (fromOptional) {
-        native = fromOptional;
-        foundNative = platformOptionalPackage() || 'optional-native';
+    const found = loadNativeBinding();
+    if (found.binding) {
+        native = found.binding;
         engineUsed = 'native';
-    }
-
-    // 2) Local/dev fallback: lunx_native.node beside the repo (cargo build)
-    if (!foundNative) {
-        const searchRoots = [
-            __dirname,
-            path.resolve(__dirname, '..'),
-            path.resolve(__dirname, '../..'),
-            path.resolve(__dirname, '../../..'),
-            path.resolve(__dirname, '../../../native'),
-            path.resolve(__dirname, '../../native'),
-            path.resolve(__dirname, '../native'),
-            process.cwd(),
-            path.resolve(process.cwd(), 'dist'),
-            path.resolve(process.cwd(), 'dist/native'),
-            path.resolve(process.cwd(), 'native'),
-        ];
-
-        const nativeCandidates: string[] = [];
-        for (const root of searchRoots) {
-            nativeCandidates.push(
-                path.join(root, 'lunx_native.node'),
-                path.join(root, platName),
-            );
-        }
-
-        for (const c of nativeCandidates) {
-            if (!fs.existsSync(c)) continue;
-            try {
-                const loaded = _require(c);
-                if (!looksLikeNativeBinding(loaded)) {
-                    loadError = new Error(`${c} loaded but is not the Rust N-API binding`);
-                    continue;
-                }
-                native = loaded;
-                foundNative = c;
-                engineUsed = 'native';
-                break;
-            } catch (err) {
-                loadError = err;
-            }
-        }
-    }
-
-    if (!foundNative) {
-        if (loadError) {
-            console.warn(`⚠️  [LUNX EXECUTOR] Native binary found but failed to load: ${loadError instanceof Error ? loadError.message : String(loadError)}`);
+        console.log('[lunx] engine: rust-native');
+    } else {
+        if (found.error) {
+            console.warn(`⚠️  [LUNX EXECUTOR] Native binary found but failed to load: ${found.error instanceof Error ? found.error.message : String(found.error)}`);
         }
         native = getJSFallback();
         engineUsed = 'js';
-    } else {
-        console.log('[lunx] engine: rust-native');
     }
 } catch (e) {
     console.warn(`⚠️  [LUNX EXECUTOR] Engine failure: ${e instanceof Error ? e.message : String(e)}`);

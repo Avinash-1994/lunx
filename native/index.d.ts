@@ -166,6 +166,29 @@ export interface CircularDependency {
   entryPoint: string
 }
 
+export interface CjsLexBinding {
+  name: string
+  spec: string
+}
+
+export interface CjsLexExportRef {
+  start: number
+  end: number
+  name: string
+}
+
+export interface CjsLexRequire {
+  start: number
+  end: number
+  bindings: Array<CjsLexBinding>
+}
+
+export interface CjsLexResult {
+  status: number
+  requires: Array<CjsLexRequire>
+  exportRefs: Array<CjsLexExportRef>
+}
+
 export declare function createArtifactKey(artifactId: string, target: string): string
 
 export declare function createGraphKey(graphHash: string): string
@@ -208,6 +231,9 @@ export interface GraphNode {
 
 /** Simple function to test native bindings */
 export declare function helloRust(): string
+
+/** `lexExportsModule` of src/build/cjs-lexer.ts. */
+export declare function lexCjsExports(code: string): CjsLexResult
 
 export declare function lunxChunk(graphJson: string, config: ChunkerConfig): ChunkerResult
 

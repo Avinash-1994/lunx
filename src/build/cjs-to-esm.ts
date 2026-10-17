@@ -17,7 +17,7 @@
  *    and calls to them (React's `checkDCE`). It re-exports the branch for
  *    the build's mode.
  */
-import { lexExportsModule } from './cjs-lexer.js';
+import { lexExportsModule, nativeLexer } from './cjs-lexer.js';
 import { requireEsm } from '../engines/require-esm.js';
 
 // Loaded on first use: the lexer handles large modules without it, and the prefetch worker
@@ -55,9 +55,11 @@ export function mayConvert(code: string): boolean {
 
 /** The ES module for `code`, or null when it is not one of the static shapes. */
 export function cjsToEsm(code: string, file: string, mode: string): string | null {
-    if (code.length > LEX_ABOVE) {
+    // The native lexer is quicker than a syntax tree at any size: below LEX_ABOVE it is
+    // taken when it converts (an entry module's `module.exports = require(…)` needs the tree).
+    if (code.length > LEX_ABOVE || nativeLexer()) {
         const lexed = exportsModuleByLexer(code);
-        if (lexed !== undefined) return lexed;
+        if (lexed !== undefined && (lexed !== null || code.length > LEX_ABOVE)) return lexed;
     }
     return cjsToEsmByTree(code, file, mode);
 }
@@ -262,9 +264,44 @@ function exportsModule(ast: Node, code: string): string | null {
  * string only gives up early.
  */
 function namespaceAssigned(code: string, name: string, skip: Edit[]): boolean {
-    let rest = code;
-    for (const e of skip) rest = rest.slice(0, e.start) + ' '.repeat(e.end - e.start) + rest.slice(e.end);
-    return new RegExp(`(^|[^.\\w$])${name}\\s*(=(?![=>])|[-+*/%&|^]=|\\*\\*=|<<=|>>>?=|&&=|\\|\\|=|\\?\\?=|\\+\\+|--)|(\\+\\+|--)\\s*${name}(?![\\w$])`).test(rest);
+    // As /(^|[^.\w$])NAME\s*(ASSIGN_OP|\+\+|--)|(\+\+|--)\s*NAME(?![\w$])/ on the code with `skip`
+    // blanked, by indexOf: the regex (and the copies) took ~20 ms per name on react-dom.
+    const n = code.length;
+    const ch = (j: number): number => {
+        if (j < 0 || j >= n) return -1;
+        for (const e of skip) if (j >= e.start && j < e.end) return 32;
+        return code.charCodeAt(j);
+    };
+    const isWordChar = (c: number) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36;
+    for (let i = code.indexOf(name); i !== -1; i = code.indexOf(name, i + 1)) {
+        const end = i + name.length;
+        if (skip.some((e) => e.start < end && e.end > i)) continue;
+        // NAME, spaces, then an assignment operator, `++` or `--`.
+        const before = ch(i - 1);
+        if (before === -1 || (before !== 46 && !isWordChar(before))) {
+            let p = end;
+            while (isSpace(ch(p))) p++;
+            const c = ch(p), d = ch(p + 1), e = ch(p + 2), f = ch(p + 3);
+            if (c === 61 ? d !== 61 && d !== 62
+                : (d === 61 && (c === 45 || c === 43 || c === 42 || c === 47 || c === 37 || c === 38 || c === 124 || c === 94))
+                || ((c === 43 || c === 45) && d === c)
+                || (e === 61 && ((c === 42 && d === 42) || (c === 60 && d === 60) || (c === 62 && d === 62) || (c === 38 && d === 38) || (c === 124 && d === 124) || (c === 63 && d === 63)))
+                || (c === 62 && d === 62 && e === 62 && f === 61)) return true;
+        }
+        // `++` or `--`, spaces, then NAME as a whole word.
+        if (!isWordChar(ch(end))) {
+            let p = i - 1;
+            while (isSpace(ch(p))) p--;
+            const c = ch(p);
+            if ((c === 43 || c === 45) && ch(p - 1) === c) return true;
+        }
+    }
+    return false;
+}
+
+/** JavaScript's `\s`. */
+function isSpace(c: number): boolean {
+    return c === 32 || (c >= 9 && c <= 13) || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a) || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff;
 }
 
 /** The ES module: the imports and export variables on the first line (line numbers stay), the body with `edits`, the exports. */

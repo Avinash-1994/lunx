@@ -8,6 +8,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { cjsToEsm, cjsToEsmByTree, exportsModuleByLexer, mayConvert } from '../../src/build/cjs-to-esm.js';
+import { lexExportsModule, lexExportsModuleJs } from '../../src/build/cjs-lexer.js';
+import { loadNativeBinding } from '../../src/native/binding.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -79,6 +81,29 @@ describe('CommonJS to ES modules', () => {
             // Whichever path runs, cjsToEsm gives the tree's answer.
             expect(cjsToEsm(big, 'm.js', 'production')).toBe(tree);
         }
+    });
+
+    it('the native lexer (when the binding has it) decides as the JavaScript one, to the offset', () => {
+        const pad = '\n' + '// padding\n'.repeat(4000);
+        const sources = [
+            ...['react-dom/cjs/react-dom-client.production.js', 'react/cjs/react.production.js', 'scheduler/cjs/scheduler.production.js', 'react/cjs/react-jsx-runtime.development.js'].map((rel) =>
+                fs.readFileSync(path.join(repo, 'node_modules', rel), 'utf8'),
+            ),
+            // Non-ASCII in strings and comments: offsets are UTF-16 indexes.
+            'var a = require("a");\nvar s = "héllo 😀 ✓"; // ünïcode\nexports.x = `😀${s}`;\nexports.y = /é/.test(s);\n',
+            'exports.a = 1;\nexports.b = function () { return "😀"; };\nmodule.exports.c = 2;\n',
+            'var x = require("x"), y = require("y");\nexports.z = x.a + y.b;\n',
+            'exports.e = é;\n', // a non-ASCII identifier: unsure
+            '"use strict";\nexports.__esModule = true;\n',
+            'exports.q = a ? { exports: 1 } : b; exports.r = c ?. d; exports.t = `a${`b${c}`}`;\n',
+            'var React = require("react");\nvar { React: R } = z;\nexports.f = R;\n',
+            'class A { m() { return 1; } }\nexports.A = A;\nfor (const k of o) exports[k] = 1;\n',
+            'exports.u = "unterminated',
+        ];
+        for (const src of sources) {
+            for (const code of [src, src + pad]) expect(lexExportsModule(code)).toEqual(lexExportsModuleJs(code));
+        }
+        if (loadNativeBinding().binding?.lexCjsExports) expect(lexExportsModule('exports.a = 1;')).toEqual({ requires: [], exportRefs: [{ start: 0, end: 9, name: 'a' }] });
     });
 
     it('treats an arrow function at the top level as the module scope for `this`', () => {
