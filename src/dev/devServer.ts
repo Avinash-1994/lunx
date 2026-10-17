@@ -669,6 +669,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           hmrContext: false,
         }),
         log: { info: (m) => log.info(m, { category: 'build' }), error: (m) => log.error(m) },
+        // writeToDisk: each new build of the bundles goes to disk too.
+        onOutput: () => crawlSoon(),
         packages: (cfg as any).prebundle?.enabled === false ? [] : bundlePackages(cfg.root, (name) => SERVER_ONLY_PACKAGES.has(name) || excluded.has(name)),
         // Imports the scan did not see: pre-bundled with the rest, as Vite's optimizer re-runs
         // (chained now, so a request for one of them waits for it).
@@ -994,6 +996,87 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     return rewriteImports(out, cfg.root, preBundledDeps, devFederation, aliases, appDev, onDisk ? file : path.join(cfg.root, 'index.html'));
   };
 
+  // `server.writeToDisk` (Rsbuild's `dev.writeToDisk`): what the server serves is also written
+  // to outDir at its URL path (a function picks the files). With server.bundle that folder,
+  // served statically, is the whole app: the page, its bundles and the pre-bundled packages.
+  const writeToDisk = (cfg.server as any)?.writeToDisk;
+  const diskDir = writeToDisk ? path.resolve(cfg.root, cfg.outDir || 'dist') : null;
+  const toDisk = (urlPath: string, body: Buffer) => {
+    let rel = decodeURIComponent(urlPath.split('?')[0]!).replace(/^\/+/, '');
+    if (!rel || rel.endsWith('/')) rel += 'index.html';
+    const file = path.resolve(diskDir!, rel);
+    if (!file.startsWith(diskDir! + path.sep)) return;
+    if (typeof writeToDisk === 'function' && !writeToDisk(file)) return;
+    void fs.mkdir(path.dirname(file), { recursive: true }).then(() => fs.writeFile(file, body)).catch(() => {});
+  };
+  const captureForDisk = (urlPath: string, res: http.ServerResponse) => {
+    const chunks: Buffer[] = [];
+    const write = res.write.bind(res) as any;
+    const end = res.end.bind(res) as any;
+    const keep = (chunk: any, encoding?: any) => {
+      if (chunk != null && typeof chunk !== 'function') chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, (typeof encoding === 'string' ? encoding : 'utf8') as BufferEncoding));
+    };
+    (res as any).write = (chunk: any, ...rest: any[]) => (keep(chunk, rest[0]), write(chunk, ...rest));
+    (res as any).end = (chunk?: any, ...rest: any[]) => {
+      keep(chunk, rest[0]);
+      if (res.statusCode === 200) toDisk(urlPath, Buffer.concat(chunks));
+      return end(chunk, ...rest);
+    };
+  };
+  /** Requests the page and everything it loads (scripts, styles, imports), so all of it is on disk. */
+  const crawlToDisk = async (start: string[]) => {
+    if (!diskDir || (cfg.server as any)?.middlewareMode) return;
+    const seen = new Set<string>();
+    const queue = [...start];
+    const get = (url: string) => new Promise<{ status: number; type: string; body: string }>((resolve) => {
+      http.get({ host: '127.0.0.1', port, path: url, headers: { accept: url === '/' || url.endsWith('.html') ? 'text/html' : '*/*', host: 'localhost' } }, (r) => {
+        let body = '';
+        r.setEncoding('utf8');
+        r.on('data', (d) => (body += d));
+        r.on('end', () => resolve({ status: r.statusCode ?? 0, type: String(r.headers['content-type'] ?? ''), body }));
+      }).on('error', () => resolve({ status: 0, type: '', body: '' }));
+    });
+    while (queue.length) {
+      await Promise.all(queue.splice(0, 8).map(async (url) => {
+        if (seen.has(url)) return;
+        seen.add(url);
+        const { status, type, body } = await get(url);
+        if (status !== 200) return;
+        const imports = (code: string) => [
+          ...[...code.matchAll(/(?:\bimport|\bexport)\s*(?:[^'"`;]*?\sfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g)].map((m) => (m[1] ?? m[2])!),
+          // Asset URLs the code holds as strings (`import logo from './logo.svg'` → "/src/logo.svg").
+          ...[...code.matchAll(/["'](\/[^"'\s]+\.(?:png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|mp4|webm|mp3|wav|wasm|json))["']/gi)].map((m) => m[1]!),
+        ];
+        const refs = type.includes('html')
+          ? [
+              ...[...body.matchAll(/<(?:script|link|img)\b[^>]*\b(?:src|href)=["']([^"']+)["']/gi)].map((m) => m[1]!),
+              ...[...body.matchAll(/<script\b[^>]*type=["']module["'][^>]*>([\s\S]*?)<\/script>/gi)].flatMap((m) => imports(m[1]!)),
+            ]
+          : type.includes('javascript') ? imports(body) : [];
+        for (const ref of refs) {
+          if (!/^(\/(?!\/)|\.)/.test(ref)) continue;
+          const next = new URL(ref, `http://localhost${url}`);
+          if (next.pathname.startsWith('/__lunx')) continue;
+          const target = next.pathname + next.search;
+          if (!seen.has(target)) queue.push(target);
+        }
+      }));
+    }
+  };
+  let crawlTimer: ReturnType<typeof setTimeout> | null = null;
+  let publicCopied = false;
+  const crawlSoon = (start: string[] = ['/']) => {
+    if (!diskDir) return;
+    // public/ is served as it is: on disk, it is copied once.
+    if (!publicCopied) {
+      publicCopied = true;
+      const publicDir = path.resolve(cfg.root, (cfg as any).publicDir || 'public');
+      if (existsSync(publicDir)) void fs.cp(publicDir, diskDir, { recursive: true }).catch(() => {});
+    }
+    if (crawlTimer) clearTimeout(crawlTimer);
+    crawlTimer = setTimeout(() => void crawlToDisk(start), 50);
+  };
+
   const access = { host: cfg.server?.host, allowedHosts: (cfg.server as any)?.allowedHosts, cors: (cfg.server as any)?.cors };
   const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     // DNS rebinding: a page on another domain must not reach this server through it.
@@ -1001,6 +1084,10 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end(`Blocked request. This host (${JSON.stringify(req.headers.host)}) is not allowed.\nTo allow it, add it to server.allowedHosts in lunx.config.`);
       return;
+    }
+    if (diskDir && req.method === 'GET') {
+      const p = (req.url || '/').split('?')[0]!;
+      if (!p.startsWith('/__lunx') && !p.startsWith(BUNDLE_PREFIX + 'hmr/')) captureForDisk(req.url || '/', res);
     }
     if (appDev && await appDev.handle(req, res)) return;
     const reqPath = (req.url || '/').split('?')[0]!;
@@ -2238,6 +2325,10 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
   // A short batch: editors write a save as one or two events, and each ms is HMR latency.
   const watcher = new DevWatcher(cfg.root);
   watcher.on('change', async (files: string[]) => {
+    // What writeToDisk writes is not a source change.
+    if (diskDir) files = files.filter((f) => !f.startsWith(diskDir + path.sep));
+    if (!files.length) return;
+    if (diskDir && !bundled) crawlSoon(['/', ...files.filter((f) => f.startsWith(cfg.root + path.sep)).map((f) => '/' + path.relative(cfg.root, f).split(path.sep).join('/'))]);
     moduleResponses.clear();
     // Bundled: Rolldown watches the bundles' sources (component templates too) and sends patches; a page reloads for its HTML.
     if (bundled) {
@@ -2444,6 +2535,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
       appDev?.listening();
       void startElectron();
       void warmup();
+      if (diskDir) void prebundleReady.then(() => crawlSoon());
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;
       // Phase 5.1 — print timing breakdown to stderr
@@ -2457,6 +2549,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     appDev?.listening();
     void startElectron();
     void warmup();
+    if (diskDir) void prebundleReady.then(() => crawlSoon());
     if (cfg.server?.open) {
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;

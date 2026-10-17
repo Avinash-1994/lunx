@@ -42,6 +42,8 @@ export interface BundledDevOptions {
      */
     dependencies(specifiers: string[]): Promise<void>;
     log: { info(msg: string): void; error(msg: string): void };
+    /** After each build that produced bundles. */
+    onOutput?(): void;
 }
 
 export interface BundledDev {
@@ -323,6 +325,7 @@ import.meta.hot?.accept();
                         files.set(o.fileName, o.type === 'chunk' ? o.code : String(o.source));
                         if (o.type === 'chunk') prebundle(o.code);
                     }
+                    options.onOutput?.();
                 }
                 settle();
             },

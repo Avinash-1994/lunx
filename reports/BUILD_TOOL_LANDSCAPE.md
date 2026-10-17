@@ -236,7 +236,7 @@ Options a production project reaches for. A lunx ❌ means neither
 | `server.warmup` | ✅ | ✅ | n/a |
 | `css.preprocessorOptions` (`additionalData`), `css.modules` (`generateScopedName`, `localsConvention`) | ✅ | ✅ | ✅ |
 | `middlewareMode` (embed in Express) | ✅ | ✅ | ✅ |
-| `writeToDisk` in dev | ❌ | ❌ | ✅ |
+| `writeToDisk` in dev | ✅ `server.writeToDisk` (with `server.bundle`, a complete static copy) | ❌ | ✅ |
 | Environment API (client + SSR + edge in one config) | partial (plugin host) | ✅ | ✅ `environments` |
 | JS API (`build()`, `createServer()`) | ✅ | ✅ | ✅ |
 
@@ -329,7 +329,7 @@ browser, parity and template matrices)
 3. Bundled dev for projects with Vite plugins or module federation (they serve
    modules one by one).
 4. webpack loaders; a Node version / package manager (Vite+, Bun).
-5. `writeToDisk` in dev; the Environment API is partial.
+5. The Environment API is partial.
 6. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
 
 **Where lunx leads**

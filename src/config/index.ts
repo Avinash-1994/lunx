@@ -212,6 +212,8 @@ export const BuildConfigSchema = z.object({
     typecheck: z.boolean().optional(),
     /** Serve the app as bundles from Rolldown's dev engine (one request per page, not per module). */
     bundle: z.boolean().optional(),
+    /** Write what the dev server serves to outDir (or the files a function accepts), as Rsbuild's dev.writeToDisk. */
+    writeToDisk: z.any().optional(),
     /** Modules compiled ahead of the first request (Vite's `server.warmup`): globs from the root. */
     warmup: z.object({ clientFiles: z.array(z.string()).optional(), ssrFiles: z.array(z.string()).optional() }).optional(),
   }).optional(),
