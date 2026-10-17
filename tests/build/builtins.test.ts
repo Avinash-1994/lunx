@@ -135,11 +135,12 @@ describe('built-ins: lunx dev', () => {
     let root: string;
     let dev: ChildProcess;
     let port: number;
+    let output: () => string;
     const get = (url: string) => fetch(`http://localhost:${port}${url}`, { headers: { accept: url === '/' ? 'text/html' : '*/*' } }).then(async (r) => ({ status: r.status, type: r.headers.get('content-type') ?? '', body: await r.text() }));
 
     beforeAll(async () => {
         root = project();
-        ({ child: dev, port } = await startDev(cli, root));
+        ({ child: dev, port, output } = await startDev(cli, root));
     }, 60_000);
     afterAll(async () => {
         await stopProcess(dev);
@@ -149,6 +150,13 @@ describe('built-ins: lunx dev', () => {
     it('replaces %ENV% in the page', async () => {
         expect((await get('/')).body).toContain('<title>Built in (development)</title>');
     });
+
+    it('says it is ready (the line tools wait for)', async () => {
+        // The server's start used to silence console.log while the CLI printed it.
+        const deadline = Date.now() + 10_000;
+        while (!output().includes('ready in') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+        expect(output()).toMatch(/ready in \d+ms/);
+    }, 15_000);
 
     it('marks the imports and serves the SVG as a component', async () => {
         const main = await get('/src/main.jsx');

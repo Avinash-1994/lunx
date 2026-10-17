@@ -145,12 +145,10 @@ export async function startDevServer(cfg: BuildConfig) {
 
             // Detect adapter for startup banner (FIX-1: use priority map directly)
             try {
-                const fsSync = (await import('fs')).default;
-                const pathMod = (await import('path')).default;
                 const rootDir = cfg.root || process.cwd();
                 let pkg: Record<string, any> = {};
                 try {
-                    pkg = JSON.parse(fsSync.readFileSync(pathMod.join(rootDir, 'package.json'), 'utf-8'));
+                    pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8'));
                 } catch (e) {}
                 const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
                 const PRIORITY = [

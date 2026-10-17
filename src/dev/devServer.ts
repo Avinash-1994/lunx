@@ -292,17 +292,13 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   }
 
   // 2. Load Environment Variables (silently)
+  // (console.log was silenced across this import: the CLI's "ready in" line, printed
+  // meanwhile, was swallowed. lib/dotenv prints nothing.)
   try {
-    // Suppress dotenv's verbose output
-    const originalLog = console.log;
-    console.log = () => { }; // Silence console temporarily
-
     const { config: loadEnv } = await import('../lib/dotenv.js');
     // .env.local wins over .env, so load it second with override.
     loadEnv({ path: path.join(cfg.root, '.env') });
     loadEnv({ path: path.join(cfg.root, '.env.local'), override: true });
-
-    console.log = originalLog; // Restore console
   } catch (e) { }
 
   // Filter public env vars — also loads .env / .env.development / .env.local files
