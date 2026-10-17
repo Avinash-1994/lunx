@@ -3,12 +3,13 @@ import { BuildArtifact } from '../core/engine/types.js';
 import { log } from '../utils/logger.js';
 import kleur from '../lib/colors.js';
 
-export function printBundleStats(artifacts: BuildArtifact[]) {
+export function printBundleStats(artifacts: BuildArtifact[], options: { compressed?: boolean } = {}) {
+    const compressed = options.compressed !== false;
     console.log(kleur.bold().cyan('\n📦 Production Bundle Statistics'));
     console.log(kleur.gray('--------------------------------------------------'));
 
     const items = artifacts
-        .filter(a => !a.fileName.endsWith('.map'))
+        .filter(a => !a.fileName.endsWith('.map') && (compressed || !/\.(gz|br)$/.test(a.fileName)))
         .map(a => {
             const size = a.source ? (typeof a.source === 'string' ? Buffer.byteLength(a.source) : a.source.length) : 0;
             return {

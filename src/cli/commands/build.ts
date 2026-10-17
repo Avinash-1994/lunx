@@ -245,7 +245,7 @@ export default {
 
       // Env loading
       const { loadEnv, warnSensitiveEnv } = await import('../../env.js');
-      const env = loadEnv(config.mode as 'development' | 'production' | 'test', root);
+      const env = loadEnv(config.mode as 'development' | 'production' | 'test', root, { prefix: (config as any).envPrefix, dir: (config as any).envDir });
       warnSensitiveEnv(env);
       (config as any).__envDefines = { ...env.define, ...env.metaEnv };
 

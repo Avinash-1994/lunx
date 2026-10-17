@@ -4,6 +4,8 @@ import path from 'path'
 export interface EnvConfig {
   /** Variables with these prefixes reach client code. Default: LUNX_, VITE_, REACT_APP_, PUBLIC_ */
   prefix?: string | string[]
+  /** Directory of the .env files (default: the root); false loads none (Vite's `envDir`). */
+  dir?: string | false
   files?: string[]
 }
 
@@ -79,6 +81,11 @@ export function loadEnv(
   // VITE_ and REACT_APP_ are accepted so Vite and CRA apps work unchanged;
   // every one of these prefixes means "public" in its own ecosystem.
   const prefixes = ([] as string[]).concat(config.prefix ?? ['LUNX_', 'VITE_', 'REACT_APP_', 'PUBLIC_'])
+  // As Vite: an empty prefix would hand every environment variable (secrets included) to the browser.
+  if (prefixes.includes('')) {
+    throw new Error("envPrefix contains '', which would expose every environment variable to client code.")
+  }
+  const envDir = config.dir === false ? null : path.resolve(root, config.dir ?? '.')
 
   // Files to load in order (later files override earlier ones)
   const defaultFiles = [
@@ -88,11 +95,11 @@ export function loadEnv(
     `.env.${mode}.local`,      // mode-specific local overrides
   ]
 
-  const filesToLoad = config.files ?? defaultFiles
+  const filesToLoad = envDir === null ? [] : config.files ?? defaultFiles
   const loaded: Record<string, string> = {}
 
   for (const file of filesToLoad) {
-    const filePath = path.resolve(root, file)
+    const filePath = path.resolve(envDir!, file)
     if (fs.existsSync(filePath)) {
       try {
         const content = fs.readFileSync(filePath, 'utf-8')

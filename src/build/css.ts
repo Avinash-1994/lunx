@@ -10,6 +10,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { lightningcss } from '../lib/lightningcss.js';
+import { cssOptions } from './css-options.js';
 
 export interface CompiledCss {
     code: string;
@@ -40,6 +41,14 @@ export const isCssModule = (file: string) => /\.module\.(css|pcss|postcss|scss|s
 /** Sass / Less / Stylus, loaded from the project when it uses them. */
 async function preprocess(root: string, file: string, source: string): Promise<{ css: string; dependencies: string[] }> {
     const ext = path.extname(file).toLowerCase();
+    const lang = ext === '.styl' ? 'stylus' : ext.slice(1);
+    // `css.preprocessorOptions[lang]`: `additionalData` before the source, the rest to the compiler.
+    const { additionalData, api: _api, ...options } = cssOptions(root).preprocessorOptions?.[lang] ?? {};
+    if (typeof additionalData === 'string') source = `${additionalData}\n${source}`;
+    else if (typeof additionalData === 'function') {
+        const out = await additionalData(source, file);
+        source = typeof out === 'string' ? out : out?.content ?? source;
+    }
     const req = createRequire(path.join(root, 'package.json'));
     const load = async (pkg: string) => {
         try {
@@ -57,21 +66,22 @@ async function preprocess(root: string, file: string, source: string): Promise<{
             sass = await load('sass');
         }
         const result = await sass.compileStringAsync(source, {
+            ...options,
             syntax: ext === '.sass' ? 'indented' : 'scss',
             url: pathToFileURL(file),
-            loadPaths: [path.dirname(file), path.join(root, 'node_modules')],
+            loadPaths: [path.dirname(file), ...(options.loadPaths ?? []), path.join(root, 'node_modules')],
         });
         return { css: result.css, dependencies: (result.loadedUrls ?? []).filter((u: URL) => u.protocol === 'file:').map((u: URL) => u.pathname) };
     }
     if (ext === '.less') {
         const less = await load('less');
-        const result = await less.render(source, { filename: file, paths: [path.dirname(file), path.join(root, 'node_modules')] });
+        const result = await less.render(source, { ...options, filename: file, paths: [path.dirname(file), ...(options.paths ?? []), path.join(root, 'node_modules')] });
         return { css: result.css, dependencies: result.imports ?? [] };
     }
     if (ext === '.styl' || ext === '.stylus') {
         const stylus = await load('stylus');
         const css = await new Promise<string>((resolve, reject) =>
-            stylus(source).set('filename', file).render((err: Error | null, out: string) => (err ? reject(err) : resolve(out))),
+            stylus(source, options).set('filename', file).render((err: Error | null, out: string) => (err ? reject(err) : resolve(out))),
         );
         return { css, dependencies: [] };
     }
@@ -96,11 +106,14 @@ export async function compileCss(opts: CompileCssOptions): Promise<CompiledCss> 
     }
 
     const { transform } = lightningcss();
+    const modulesOptions = cssOptions(opts.root).modules;
+    // css-loader's `[hash:base64:5]` is LightningCSS's `[hash]`.
+    const pattern = modulesOptions?.generateScopedName?.replace(/\[hash(?::[^\]]*)?\]/g, '[hash]') ?? '[local]_[hash]';
     const result = transform({
         filename: opts.file,
         code: Buffer.from(input),
         minify: opts.minify,
-        cssModules: opts.modules ? { pattern: '[local]_[hash]' } : false,
+        cssModules: opts.modules ? { pattern } : false,
         analyzeDependencies: true,
         errorRecovery: true,
         drafts: { customMedia: true },
@@ -127,7 +140,7 @@ export async function compileCss(opts: CompileCssOptions): Promise<CompiledCss> 
         code = imported + code.replace(/@import\s+[^;]+;/g, (stmt) => (/https?:\/\//.test(stmt) ? stmt : ''));
     }
 
-    const exports = result.exports
+    let exports = result.exports
         ? Object.fromEntries(
               Object.entries(result.exports as Record<string, any>).map(([k, v]) => [
                   k,
@@ -135,6 +148,14 @@ export async function compileCss(opts: CompileCssOptions): Promise<CompiledCss> 
               ]),
           )
         : undefined;
+    const convention = modulesOptions?.localsConvention;
+    if (exports && convention) {
+        const convert = convention.startsWith('camelCase')
+            ? (k: string) => k.replace(/[-_]+(\w)/g, (_m, c: string) => c.toUpperCase())
+            : (k: string) => k.replace(/-+(\w)/g, (_m, c: string) => c.toUpperCase());
+        const only = convention.endsWith('Only');
+        exports = Object.fromEntries(Object.entries(exports).flatMap(([k, v]) => (only ? [[convert(k), v]] : [[k, v], [convert(k), v]])));
+    }
     return { code, exports, dependencies };
 }
 

@@ -114,3 +114,132 @@ describe('dev server access', () => {
         expect(corsOrigin('https://app.test', { cors: { origin: ['https://app.test'] } })).toBe('https://app.test');
     });
 });
+
+/** A project with the repo's node_modules (React) beside its own files. */
+function buildWith(files: Record<string, string>, extraNodeModules: Record<string, string> = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lunx-options-'));
+    dirs.push(dir);
+    const all: Record<string, string> = {
+        'package.json': '{"type":"module","dependencies":{"react":"*"}}',
+        'index.html': '<!DOCTYPE html><html><head><title>x</title></head><body><script type="module" src="/src/main.js"></script></body></html>',
+        ...files,
+    };
+    for (const [rel, content] of Object.entries(all)) {
+        fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+        fs.writeFileSync(path.join(dir, rel), content);
+    }
+    fs.mkdirSync(path.join(dir, 'node_modules'));
+    for (const pkg of ['react']) fs.symlinkSync(path.join(repo, 'node_modules', pkg), path.join(dir, 'node_modules', pkg), 'dir');
+    for (const [rel, content] of Object.entries(extraNodeModules)) {
+        fs.mkdirSync(path.dirname(path.join(dir, 'node_modules', rel)), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'node_modules', rel), content);
+    }
+    const r = spawnSync(process.execPath, [cli, 'build'], { cwd: dir, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '', LUNX_SKIP_SECURITY: '1', LUNX_BUILD_CACHE: '0' } });
+    const dist = path.join(dir, 'dist');
+    const list = r.status === 0 ? (fs.readdirSync(dist, { recursive: true }) as string[]).map((f) => f.split(path.sep).join('/')).filter((f) => !/\.(gz|br)$/.test(f)) : [];
+    const js = list.filter((f) => f.endsWith('.js'));
+    return { ok: r.status === 0, list, js, read: (f: string) => fs.readFileSync(path.join(dist, f), 'utf8'), log: r.stdout + r.stderr };
+}
+
+describe('env, chunk and CSS options', () => {
+    const main = "import { useState } from 'react';\ndocument.title = String(useState);\nimport('./lazy.js').then((m) => m.run());\n";
+    const lazy = { 'src/lazy.js': 'export const run = () => document.body.dataset.x;\n' };
+
+    it('exposes envPrefix variables from envDir only, and refuses an empty prefix', () => {
+        const files = {
+            'lunx.config.js': "export default { envPrefix: 'APP_', envDir: 'env' };",
+            'env/.env': 'APP_KEY=from-env-dir\nVITE_KEY=not-exposed\n',
+            '.env': 'APP_OTHER=root-file\n',
+            'src/main.js': 'document.title = [import.meta.env.APP_KEY, import.meta.env.VITE_KEY, import.meta.env.APP_OTHER].join("|");\n',
+        };
+        const out = buildWith(files);
+        expect(out.ok).toBe(true);
+        const code = out.js.map(out.read).join('\n');
+        expect(code).toContain('from-env-dir');
+        expect(code).not.toContain('not-exposed');
+        expect(code).not.toContain('root-file');
+        const empty = buildWith({ ...files, 'lunx.config.js': "export default { envPrefix: '' };" });
+        expect(empty.ok).toBe(false);
+        expect(empty.log).toContain("envPrefix contains ''");
+    }, 60_000);
+
+    it('splits node_modules by strategy', () => {
+        const vendor = buildWith({ 'lunx.config.js': "export default { build: { splitChunks: 'single-vendor' } };", 'src/main.js': main, ...lazy });
+        expect(vendor.js.some((f) => /\/vendor\.[^/]+\.js$/.test(f))).toBe(true);
+        const perPackage = buildWith({ 'lunx.config.js': "export default { build: { splitChunks: 'split-by-module' } };", 'src/main.js': main, ...lazy });
+        expect(perPackage.js.some((f) => /\/lib-react\.[^/]+\.js$/.test(f))).toBe(true);
+        const one = buildWith({ 'lunx.config.js': "export default { build: { splitChunks: 'all-in-one', reportCompressedSize: false } };", 'src/main.js': main, ...lazy });
+        expect(one.js).toHaveLength(1);
+        expect(one.read(one.js[0]!)).toContain('dataset.x');
+        expect(one.log).not.toContain('Gzip Transferred');
+    }, 120_000);
+
+    it("reads a vite.config's manualChunks function", () => {
+        const out = buildWith({
+            'vite.config.js': "export default { build: { rollupOptions: { output: { manualChunks(id) { return id.includes('node_modules') ? 'deps' : undefined; } } } } };",
+            'src/main.js': main,
+            ...lazy,
+        });
+        expect(out.ok).toBe(true);
+        expect(out.js.some((f) => /\/deps\.[^/]+\.js$/.test(f))).toBe(true);
+    }, 60_000);
+
+    it('passes css.preprocessorOptions (additionalData included) and css.modules options', () => {
+        const out = buildWith({
+            'lunx.config.js': `export default { css: {
+  preprocessorOptions: { less: { additionalData: '@brand: teal;', math: 'always' } },
+  modules: { generateScopedName: 'x-[local]-[hash:base64:5]', localsConvention: 'camelCaseOnly' },
+} };`,
+            'src/main.js': "import './a.less';\nimport s from './b.module.css';\ndocument.title = s.fooBar;\n",
+            'src/a.less': '.a { color: @brand; }\n',
+            'src/b.module.css': '.foo-bar { color: red; }\n',
+        }, {
+            // A stand-in for less: it echoes what it was given.
+            'less/package.json': '{"name":"less","main":"index.js"}',
+            'less/index.js': "module.exports = { render: async (src, opts) => ({ css: src.replace(/@brand: (\\w+);/, '').replace('@brand', /@brand: (\\w+);/.exec(src)[1]) + `.math-${opts.math} { color: blue; }`, imports: [] }) };",
+        });
+        expect(out.log).not.toContain('Error');
+        expect(out.ok).toBe(true);
+        const css = out.list.filter((f) => f.endsWith('.css')).map(out.read).join('\n');
+        expect(css).toMatch(/\.a\s*\{\s*color:\s*teal/);
+        expect(css).toContain('.math-always');
+        expect(css).toMatch(/\.x-foo-bar-[\w-]+\s*\{/);
+        const code = out.js.map(out.read).join('\n');
+        expect(code).toMatch(/fooBar/);
+        expect(code).not.toMatch(/"foo-bar"/);
+    }, 60_000);
+});
+
+describe('server.warmup', () => {
+    it('compiles clientFiles once the server is up', async () => {
+        const { freePort, stopProcess } = await import('./dev-process.js');
+        const { spawn } = await import('child_process');
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lunx-warmup-'));
+        dirs.push(dir);
+        const files: Record<string, string> = {
+            'package.json': '{"type":"module"}',
+            'index.html': '<!DOCTYPE html><html><head></head><body><script type="module" src="/src/main.js"></script></body></html>',
+            'lunx.config.js': "export default { server: { warmup: { clientFiles: ['./src/*.js', 'src/deep/**/*.ts'] } } };",
+            'src/main.js': 'document.title = "a";\n',
+            'src/other.js': 'export const b = 1;\n',
+            'src/deep/x/y.ts': 'export const c: number = 2;\n',
+            'src/skip.css': 'a{}',
+        };
+        for (const [rel, content] of Object.entries(files)) {
+            fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+            fs.writeFileSync(path.join(dir, rel), content);
+        }
+        const port = await freePort();
+        const child = spawn(process.execPath, [cli, 'dev', '--port', String(port)], { cwd: dir, env: { ...process.env, NODE_OPTIONS: '', DEBUG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        let output = '';
+        child.stdout!.on('data', (d) => (output += d));
+        child.stderr!.on('data', (d) => (output += d));
+        try {
+            const deadline = Date.now() + 30_000;
+            while (!/warmed \d+ modules/.test(output) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+            expect(output).toMatch(/warmed 3 modules/);
+        } finally {
+            await stopProcess(child);
+        }
+    }, 40_000);
+});

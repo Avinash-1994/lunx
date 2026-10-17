@@ -107,8 +107,11 @@ export interface BundleOutputOptions {
     legalComments?: boolean;
     sourcemap?: boolean | 'inline' | 'hidden';
     inlineDynamicImports?: boolean;
-    /** Named chunks: modules whose id matches go into that chunk. */
-    chunkGroups?: Array<{ name: string; test: RegExp }>;
+    /**
+     * Chunk groups (Rolldown's `advancedChunks.groups`): modules whose id matches `test` go into
+     * the chunk `name` (a function names it per module); priority, minSize, maxSize… as Rolldown's.
+     */
+    chunkGroups?: Array<{ name: string | ((id: string, ctx: any) => string | null | undefined); test?: RegExp | ((id: string) => boolean); [option: string]: unknown }>;
 }
 
 export interface OutputChunk {

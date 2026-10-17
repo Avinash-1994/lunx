@@ -77,6 +77,13 @@ export const BuildConfigSchema = z.object({
     healthCheck: z.string().optional(),
   }).optional(),
   css: z.object({
+    /** Per language (scss, sass, less, stylus): `additionalData` and the compiler's options, as Vite's. */
+    preprocessorOptions: z.record(z.string(), z.record(z.string(), z.any())).optional(),
+    /** CSS Modules: `generateScopedName` pattern, `localsConvention`. */
+    modules: z.object({
+      generateScopedName: z.string().optional(),
+      localsConvention: z.enum(['camelCase', 'camelCaseOnly', 'dashes', 'dashesOnly']).optional(),
+    }).optional(),
     framework: z.enum(['tailwind', 'bootstrap', 'bulma', 'material', 'none']).optional(),
     purge: z.boolean().optional(),
     critical: z.boolean().optional(),
@@ -141,6 +148,18 @@ export const BuildConfigSchema = z.object({
     /** Browsers to compile CSS for, when they differ from `target`. */
     cssTarget: z.union([z.string(), z.array(z.string())]).optional(),
     manualChunks: z.record(z.string(), z.array(z.string())).optional(),
+    /**
+     * How node_modules split into chunks (Rsbuild's strategies): 'default' (by the import graph),
+     * 'split-by-experience' (React, router, Vue and polyfill chunks apart), 'single-vendor' (one
+     * vendor chunk), 'split-by-module' (a chunk per package), 'all-in-one' (one file, lazy imports
+     * inlined), or { groups } for Rolldown's advancedChunks groups.
+     */
+    splitChunks: z.union([
+      z.enum(['split-by-experience', 'single-vendor', 'split-by-module', 'all-in-one', 'default']),
+      z.object({ groups: z.array(z.record(z.string(), z.any())) }),
+    ]).optional(),
+    /** Print gzip / brotli sizes after a build (default true). */
+    reportCompressedSize: z.boolean().optional(),
     /** Production bundler: 'rolldown' (Rust, default) or the 'legacy' JS engine. */
     bundler: z.enum(['rolldown', 'legacy']).optional(),
     /** Assets smaller than this many bytes are inlined as data URLs (default 4096; 0 disables). */
@@ -193,8 +212,14 @@ export const BuildConfigSchema = z.object({
     typecheck: z.boolean().optional(),
     /** Serve the app as bundles from Rolldown's dev engine (one request per page, not per module). */
     bundle: z.boolean().optional(),
+    /** Modules compiled ahead of the first request (Vite's `server.warmup`): globs from the root. */
+    warmup: z.object({ clientFiles: z.array(z.string()).optional(), ssrFiles: z.array(z.string()).optional() }).optional(),
   }).optional(),
   cacheDir: z.string().optional(),
+  /** Prefixes of the environment variables client code sees (default LUNX_, VITE_, REACT_APP_, PUBLIC_). */
+  envPrefix: z.union([z.string(), z.array(z.string())]).optional(),
+  /** Directory of the .env files (default: the root); false loads none. */
+  envDir: z.union([z.string(), z.literal(false)]).optional(),
   prebundle: z.object({
     enabled: z.boolean().default(true),
     /** Source maps for the pre-bundled packages (off: faster first page). */
@@ -258,6 +283,8 @@ export type BuildConfig = {
     cssModules?: boolean;
     targets?: string[];
     manualChunks?: Record<string, string[]>;
+    splitChunks?: 'split-by-experience' | 'single-vendor' | 'split-by-module' | 'all-in-one' | 'default' | { groups: Array<Record<string, any>> };
+    reportCompressedSize?: boolean;
     bundler?: 'rolldown' | 'legacy';
     assetsInlineLimit?: number;
   };
@@ -278,6 +305,10 @@ export type BuildConfig = {
   };
   /** Phase 1.10 — cache root dir (relative to project root). Default: .lunx/cache */
   cacheDir?: string;
+  /** Prefixes of the environment variables client code sees (default LUNX_, VITE_, REACT_APP_, PUBLIC_). */
+  envPrefix?: string | string[];
+  /** Directory of the .env files (default: the root); false loads none. */
+  envDir?: string | false;
   prebundle?: {
     enabled?: boolean;
     /** Source maps for the pre-bundled packages (off by default: faster first page). */
@@ -321,7 +352,7 @@ const VALID_TOP_LEVEL_KEYS = [
   'root', 'base', 'publicDir', 'cacheDir', 'plugins', 'esbuildPlugins',
   'build', 'server', 'css', 'federation', 'security', 'adapter',
   'prebundle', 'cache', 'compatRollup', 'define', 'resolve', 'delegate', 'lib',
-  'electron', 'pwa', 'html', 'experimental', 'react',
+  'electron', 'pwa', 'html', 'experimental', 'react', 'envPrefix', 'envDir',
 ];
 
 function validateConfigKeys(raw: Record<string, unknown>) {
@@ -583,6 +614,7 @@ export async function loadConfig(cwd: string): Promise<BuildConfig> {
 
     const config = result.data as BuildConfig;
     const root = config.root || cwd;
+    (await import('../build/css-options.js')).setCssOptions(root, (config as any).css);
     if (foreign?.plugins.length) {
       (config as any).__vitePlugins = foreign.plugins;
       (config as any).__viteConfig = foreign.vite;

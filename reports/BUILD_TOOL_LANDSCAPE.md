@@ -215,7 +215,7 @@ Options a production project reaches for. A lunx ❌ means neither
 | option | lunx | Vite | Rsbuild |
 |---|---|---|---|
 | `base`, `outDir`, `publicDir`, `define`, `alias`, env files | ✅ | ✅ | ✅ |
-| `envPrefix`, `envDir` | partial | ✅ | ✅ |
+| `envPrefix`, `envDir` | ✅ | ✅ | ✅ |
 | `sourcemap` (inline, hidden, external) | ✅ | ✅ | ✅ |
 | `minify` on/off | ✅ | ✅ | ✅ |
 | `cssMinify`, `cssTarget` | ✅ | ✅ | ✅ |
@@ -224,8 +224,8 @@ Options a production project reaches for. A lunx ❌ means neither
 | `emptyOutDir` / `cleanDistPath` | ✅ | ✅ | ✅ |
 | `copyPublicDir` / `copy` | ✅ | ✅ | ✅ |
 | Output file name templates | ✅ entry / chunk / asset | ✅ | ✅ |
-| Chunk splitting | `manualChunks` by package | ✅ `advancedChunks` | ✅ strategies |
-| `chunkSizeWarningLimit`, `reportCompressedSize` | ✅ / always reported | ✅ | ✅ |
+| Chunk splitting | ✅ `build.splitChunks` strategies (single-vendor, split-by-module, split-by-experience, all-in-one), Rolldown groups, `manualChunks` (object or function) | ✅ `advancedChunks` | ✅ strategies |
+| `chunkSizeWarningLimit`, `reportCompressedSize` | ✅ | ✅ | ✅ |
 | Preload / prefetch / preconnect hints | ✅ | ✅ | ✅ |
 | `externals` in apps | ✅ `build.external` | ✅ | ✅ |
 | HTML: title, meta, favicon, tags | ✅ `html` | 🔌 | ✅ |
@@ -233,7 +233,8 @@ Options a production project reaches for. A lunx ❌ means neither
 | SRI | ✅ default | ❌ | ✅ |
 | `server.proxy`, `https`, `cors`, `headers`, `open`, `strictPort` | ✅ | ✅ | ✅ |
 | `server.allowedHosts` (DNS rebinding guard) | ✅ on by default, localhost-only CORS | ✅ | ✅ |
-| `server.warmup` | via plugin host | ✅ | n/a |
+| `server.warmup` | ✅ | ✅ | n/a |
+| `css.preprocessorOptions` (`additionalData`), `css.modules` (`generateScopedName`, `localsConvention`) | ✅ | ✅ | ✅ |
 | `middlewareMode` (embed in Express) | ✅ | ✅ | ✅ |
 | `writeToDisk` in dev | ❌ | ❌ | ✅ |
 | Environment API (client + SSR + edge in one config) | partial (plugin host) | ✅ | ✅ `environments` |
@@ -328,8 +329,7 @@ browser, parity and template matrices)
 3. Bundled dev for projects with Vite plugins or module federation (they serve
    modules one by one).
 4. webpack loaders; a Node version / package manager (Vite+, Bun).
-5. `writeToDisk` in dev; `envPrefix` / `envDir` and the Environment API are
-   partial.
+5. `writeToDisk` in dev; the Environment API is partial.
 6. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
 
 **Where lunx leads**

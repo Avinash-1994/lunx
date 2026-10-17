@@ -294,29 +294,22 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   // 2. Load Environment Variables (silently)
   // (console.log was silenced across this import: the CLI's "ready in" line, printed
   // meanwhile, was swallowed. lib/dotenv prints nothing.)
+  const envDir = (cfg as any).envDir === false ? null : path.resolve(cfg.root, (cfg as any).envDir ?? '.');
   try {
     const { config: loadEnv } = await import('../lib/dotenv.js');
     // .env.local wins over .env, so load it second with override.
-    loadEnv({ path: path.join(cfg.root, '.env') });
-    loadEnv({ path: path.join(cfg.root, '.env.local'), override: true });
+    if (envDir) {
+      loadEnv({ path: path.join(envDir, '.env') });
+      loadEnv({ path: path.join(envDir, '.env.local'), override: true });
+    }
   } catch (e) { }
 
-  // Filter public env vars — also loads .env / .env.development / .env.local files
+  // The variables client code sees: `envPrefix` ones from process.env and the .env files.
   let devDefines: Record<string, string> = {};
-  let publicEnv: Record<string, string | undefined> = Object.keys(process.env)
-    .filter(key => key.startsWith('LUNX_') || key.startsWith('PUBLIC_') || key === 'NODE_ENV')
-    .reduce((acc, key) => ({ ...acc, [key]: process.env[key] }), {
-      NODE_ENV: process.env.NODE_ENV || 'development'
-    });
-
-  try {
+  {
     const { loadEnv } = await import('../env.js');
-    const loaded = loadEnv('development', cfg.root);
-    // Merge .env file vars on top (higher priority than process.env)
-    publicEnv = { ...publicEnv, ...loaded.raw };
+    const loaded = loadEnv('development', cfg.root, { prefix: (cfg as any).envPrefix, dir: (cfg as any).envDir });
     devDefines = { ...loaded.define, ...loaded.metaEnv };
-  } catch {
-    // env.ts not available — fall back to process.env only
   }
 
   devDefines = {
@@ -326,7 +319,7 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
   };
   const aliases = collectAliases(cfg.root, (cfg as any).resolve?.alias);
 
-  log.debug('Loaded Environment Variables', { category: 'server', count: Object.keys(publicEnv).length });
+  log.debug('Loaded Environment Variables', { category: 'server', count: Object.keys(devDefines).length });
 
   // 3. Detect Framework (Universal Support)
   const { FrameworkDetector } = await import('../core/framework-detector.js');
@@ -2418,10 +2411,39 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     }
   };
 
+  // `server.warmup.clientFiles` (Vite's): those modules are compiled once the pre-bundle is
+  // done (work beside it delays the first page), so their first request is a cache read.
+  const warmup = async () => {
+    const globs: string[] = (cfg.server as any)?.warmup?.clientFiles ?? [];
+    if (!globs.length || (cfg.server as any)?.middlewareMode) return;
+    await prebundleReady.catch(() => {});
+    const { globToRegExp } = await import('../lib/watcher.js');
+    const patterns = globs.map((g) => globToRegExp(g.replace(/^\.\//, '')));
+    const files: string[] = [];
+    const walk = (dir: string, rel: string) => {
+      let entries: import('fs').Dirent[];
+      try { entries = require('fs').readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (files.length >= 1000) return;
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) {
+          if (!['node_modules', '.git', 'dist', '.lunx'].includes(e.name) && !e.name.startsWith('.')) walk(path.join(dir, e.name), r);
+        } else if (patterns.some((re) => re.test(r))) files.push(r);
+      }
+    };
+    walk(cfg.root, '');
+    const get = (url: string) => new Promise<void>((resolve) => {
+      http.get({ host: '127.0.0.1', port, path: url, headers: { accept: '*/*', host: 'localhost' } }, (r) => { r.resume(); r.on('end', resolve); }).on('error', () => resolve());
+    });
+    for (let i = 0; i < files.length; i += 4) await Promise.all(files.slice(i, i + 4).map((f) => get('/' + f)));
+    log.debug(`warmed ${files.length} modules`, { category: 'server' });
+  };
+
   if (!existingServer) {
     server.listen(port, () => {
       appDev?.listening();
       void startElectron();
+      void warmup();
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;
       // Phase 5.1 — print timing breakdown to stderr
@@ -2434,6 +2456,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
     // We just handle the 'open' browser request here if needed.
     appDev?.listening();
     void startElectron();
+    void warmup();
     if (cfg.server?.open) {
       const protocol = httpsOptions ? 'https' : 'http';
       const url = `${protocol}://${host}:${port}`;

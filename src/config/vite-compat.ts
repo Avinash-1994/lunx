@@ -95,7 +95,7 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
     }
 
     const server: Record<string, any> = {};
-    for (const key of ['port', 'host', 'strictPort', 'open', 'proxy', 'cors', 'headers', 'allowedHosts'] as const) {
+    for (const key of ['port', 'host', 'strictPort', 'open', 'proxy', 'cors', 'headers', 'allowedHosts', 'warmup'] as const) {
         const value = vite.server?.[key];
         if (value === undefined) continue;
         server[key] = key === 'host' && value === true ? '0.0.0.0' : value;
@@ -121,6 +121,16 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
     if (b.cssMinify === false) build.cssMinify = false;
     const out = b.rolldownOptions?.output ?? b.rollupOptions?.output;
     for (const key of ['entryFileNames', 'chunkFileNames', 'assetFileNames'] as const) if (typeof out?.[key] === 'string') build[key] = out[key];
+    // Chunk splitting: `manualChunks` (name → packages, or a function of the module id) and
+    // Rolldown's `advancedChunks` groups.
+    const manual = Array.isArray(out) ? undefined : out?.manualChunks;
+    if (manual && typeof manual === 'object' && Object.values(manual).every((v) => Array.isArray(v))) build.manualChunks = manual;
+    else if (typeof manual === 'function') {
+        build.splitChunks = { groups: [{ name: (id: string, ctx: any) => manual(id, { getModuleInfo: (m: string) => ctx?.getModuleInfo?.(m) ?? null, getModuleIds: () => [][Symbol.iterator]() }) ?? null }] };
+    }
+    const advanced = Array.isArray(out) ? undefined : out?.advancedChunks;
+    if (advanced?.groups) build.splitChunks = { groups: [...(build.splitChunks?.groups ?? []), ...advanced.groups] };
+    if (b.reportCompressedSize === false) build.reportCompressedSize = false;
     if (!b.lib) {
         const external = b.rolldownOptions?.external ?? b.rollupOptions?.external;
         if (typeof external === 'string' || external instanceof RegExp || Array.isArray(external)) build.external = external;
@@ -149,8 +159,18 @@ export async function readViteConfig(root: string, command: 'build' | 'serve' = 
             ...(b.sourcemap ? { sourcemap: true } : {}),
         };
     }
-    if (vite.envPrefix) notes.push(`envPrefix ${JSON.stringify(vite.envPrefix)}: lunx exposes LUNX_, VITE_, REACT_APP_ and PUBLIC_ variables`);
-    if (vite.css?.preprocessorOptions) notes.push('css.preprocessorOptions is not mapped');
+    // Vite's own default is VITE_ alone; lunx's (LUNX_, VITE_, REACT_APP_, PUBLIC_) includes it.
+    if (vite.envPrefix !== undefined) config.envPrefix = vite.envPrefix;
+    if (vite.envDir !== undefined) config.envDir = vite.envDir;
+    if (vite.css?.preprocessorOptions || vite.css?.modules) {
+        config.css = {
+            ...(config.css ?? {}),
+            ...(vite.css.preprocessorOptions ? { preprocessorOptions: vite.css.preprocessorOptions } : {}),
+            ...(vite.css.modules && (typeof vite.css.modules.generateScopedName === 'string' || vite.css.modules.localsConvention)
+                ? { modules: { ...(typeof vite.css.modules.generateScopedName === 'string' ? { generateScopedName: vite.css.modules.generateScopedName } : {}), ...(vite.css.modules.localsConvention ? { localsConvention: vite.css.modules.localsConvention } : {}) } }
+                : {}),
+        };
+    }
 
     const plugins: any[] = [];
     for (const plugin of await resolvePlugins(vite.plugins ?? [])) {

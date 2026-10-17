@@ -371,7 +371,7 @@ export async function build(rawConfig: BuildConfig) {
       const { printBundleStats } = await import('./bundle-stats.js');
       // Extract artifacts from targets
       const artifacts = (result as any).targets ? (result as any).targets.flatMap((t: any) => t.artifacts) : (result as any).artifacts || [];
-      printBundleStats(artifacts);
+      printBundleStats(artifacts, { compressed: (config.build as any)?.reportCompressedSize !== false });
     }
 
     // Step 6: run adapter post-build hook

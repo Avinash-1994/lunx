@@ -848,6 +848,7 @@ export async function productionBuild(config: BuildConfig, framework: string, op
         : null;
 
     const manualChunks = build.manualChunks;
+    const chunkGroups = splitChunkGroups(b.splitChunks, manualChunks);
     // Import maps hold URLs: the chunks' own (a CDN prefix or the base), so a function from renderBuiltUrl rules it out.
     const chunkImportMap = !!b.chunkImportMap && !renderBuiltUrl && !federation;
     const chunkImportMapBase = b.assetPrefix ? String(b.assetPrefix).replace(/\/?$/, '/') : base;
@@ -884,12 +885,8 @@ export async function productionBuild(config: BuildConfig, framework: string, op
             : minify,
         legalComments: legalComments === 'inline',
         sourcemap: sourcemapOption(build.sourcemap),
-        chunkGroups: manualChunks
-            ? Object.entries(manualChunks).map(([name, pkgs]) => ({
-                  name,
-                  test: new RegExp(`[\\\\/]node_modules[\\\\/](${pkgs.map(escapeRe).join('|')})[\\\\/]`),
-              }))
-            : undefined,
+        chunkGroups,
+        ...(b.splitChunks === 'all-in-one' ? { inlineDynamicImports: true } : {}),
     }, true).finally(() => Promise.all([compilePool?.close(), compileCache?.flush(), ngAot?.flush()]));
 
     // Vite's `build.chunkSizeWarningLimit` (kB, default 500): a hint to split a chunk that big.
@@ -1276,6 +1273,41 @@ function legalCommentsPlugin(): any {
             }
         },
     };
+}
+
+/** A module's package name ('react', '@scope/pkg'), from the last node_modules in its path (pnpm included). */
+function packageOf(id: string): string | null {
+    const m = /.*[\\/]node_modules[\\/]((?:@[^\\/]+[\\/])?[^\\/]+)/.exec(id);
+    return m ? m[1]!.replace(/\\/g, '/') : null;
+}
+
+/** Packages per `split-by-experience` chunk (Rsbuild's). */
+const EXPERIENCE_GROUPS: Array<[string, string[]]> = [
+    ['lib-react', ['react', 'react-dom', 'scheduler', 'react-is']],
+    ['lib-router', ['react-router', 'react-router-dom', '@remix-run/router', 'history', 'vue-router', '@tanstack/react-router']],
+    ['lib-vue', ['vue', '@vue/runtime-dom', '@vue/runtime-core', '@vue/reactivity', '@vue/shared']],
+    ['lib-polyfill', ['core-js', 'tslib', '@swc/helpers', 'regenerator-runtime', '@babel/runtime']],
+];
+
+/** Rolldown chunk groups for `build.manualChunks` (name → packages) and `build.splitChunks`. */
+function splitChunkGroups(strategy: any, manualChunks: Record<string, string[]> | undefined): any[] | undefined {
+    const groups: any[] = [];
+    const byPackages = (name: string, pkgs: string[], priority = 0) => ({
+        name,
+        // A scoped name's `/` is either separator (Windows paths).
+        test: new RegExp(`[\\\\/]node_modules[\\\\/](${pkgs.map((p) => escapeRe(p).replace(/\//g, '[\\\\/]')).join('|')})[\\\\/]`),
+        ...(priority ? { priority } : {}),
+    });
+    // Explicit chunks come first: they win over a strategy's.
+    if (manualChunks) for (const [name, pkgs] of Object.entries(manualChunks)) groups.push(byPackages(name, pkgs, 20));
+    if (strategy && typeof strategy === 'object' && Array.isArray(strategy.groups)) groups.push(...strategy.groups);
+    else if (strategy === 'single-vendor') groups.push({ name: 'vendor', test: /[\\/]node_modules[\\/]/ });
+    else if (strategy === 'split-by-module') {
+        groups.push({ name: (id: string) => { const pkg = packageOf(id); return pkg ? `lib-${pkg.replace('@', '').replace('/', '-')}` : null; }, test: /[\\/]node_modules[\\/]/ });
+    } else if (strategy === 'split-by-experience') {
+        for (const [name, pkgs] of EXPERIENCE_GROUPS) groups.push(byPackages(name, pkgs, 10));
+    }
+    return groups.length ? groups : undefined;
 }
 
 /**
