@@ -1,6 +1,6 @@
 # lunx against every build tool, in every area
 
-Measured on 2026-10-16 (Linux, Node 22.22, 4 cores) with the versions below.
+Measured on 2026-10-17 (Linux, Node 22.22, 4 cores) with the versions below.
 Speed, size and install numbers come from running each tool here
 (`npm run bench:arena`, `scripts/footprint.sh`). The feature tables come from
 running lunx and reading each tool's installed type definitions (Vite's
@@ -27,81 +27,106 @@ there since Next 16), and Vercel has not released the standalone bundler.
 
 ## 1. Speed
 
-One React 19 + TypeScript app. Medians of 7 runs (5 at 2,000 components).
-HMR = save `App.tsx` until Chromium shows the change.
+One React 19 + TypeScript app, every tool run round by round (interleaved,
+so a slow spell of the machine hits them all). Medians of 5 runs (3 at
+2,000 components, 2 at 10,000). Caches are cleared before each first start
+and kept for the restart. **First page** = spawn → Chromium shows the app on
+a first start; **restart** = the same with the caches the first start left;
+**HMR** = save `App.tsx` → Chromium shows it. `lunx --bundle` is
+`server.bundle` (bundled dev).
 
 **Small app**
 
-| tool | dev boot | HMR | build cold | build warm |
-|---|---|---|---|---|
-| **lunx** | **248 ms** | **30 ms** | **369 ms** | 385 ms |
-| Vite | 409 ms | 40 ms | 663 ms | 487 ms |
-| Rspack | 376 ms | 208 ms | 386 ms | **370 ms** |
-| Rsbuild | 432 ms | 86 ms | 511 ms | 487 ms |
-| Farm | 1,230 ms | 48 ms | 1,908 ms | 1,411 ms |
-| Parcel | 1,449 ms | 35 ms | 1,693 ms | 1,761 ms |
-| webpack | 1,578 ms | 275 ms | 4,313 ms | 4,066 ms |
-| esbuild | – | – | 66 ms | 65 ms |
-| Bun | – | – | **41 ms** | **46 ms** |
-| Rolldown | – | – | 233 ms | 256 ms |
+| tool | dev boot | first page | restart | HMR | build cold | build warm |
+|---|---|---|---|---|---|---|
+| **lunx** | **364 ms** | 1,224 ms | **657 ms** | 42 ms | 654 ms | 116 ms |
+| lunx --bundle | 372 ms | 1,281 ms | 704 ms | **33 ms** | – | – |
+| Vite | 525 ms | 1,538 ms | 1,021 ms | 45 ms | 693 ms | 606 ms |
+| Rspack | 473 ms | **804 ms** | 833 ms | 239 ms | 498 ms | 435 ms |
+| Rsbuild | 558 ms | 834 ms | 859 ms | 88 ms | 687 ms | 694 ms |
+| Farm | 1,634 ms | 1,964 ms | 1,883 ms | 57 ms | 2,396 ms | 1,652 ms |
+| Parcel | 1,796 ms | 2,067 ms | 2,148 ms | 41 ms | 2,232 ms | 2,291 ms |
+| webpack | 2,244 ms | 2,787 ms | 2,658 ms | 347 ms | 5,367 ms | 5,272 ms |
+| esbuild | – | – | – | – | 79 ms | 94 ms |
+| Bun | – | – | – | – | **63 ms** | **57 ms** |
+| Rolldown | – | – | – | – | 527 ms | 335 ms |
 
 **2,000 components**
 
-| tool | dev boot | first module | HMR | build cold | build warm |
-|---|---|---|---|---|---|
-| **lunx** | **243 ms** | **247 ms** | **151 ms** | **583 ms** | **547 ms** |
-| Vite | 389 ms | 717 ms | 161 ms | 829 ms | 651 ms |
-| Rspack | 700 ms | 839 ms | 656 ms | 804 ms | 878 ms |
-| Rsbuild | 944 ms | 1,062 ms | 440 ms | 777 ms | 754 ms |
-| Parcel | 4,523 ms | 4,542 ms | 177 ms | 5,042 ms | 5,060 ms |
-| webpack | 4,268 ms | 4,522 ms | 1,113 ms | 8,763 ms | 8,715 ms |
-| Farm | failed¹ | | | | |
-| esbuild | – | – | – | 145 ms | 144 ms |
-| Bun | – | – | – | **106 ms** | **82 ms** |
-| Rolldown | – | – | – | 397 ms | 731 ms |
+| tool | dev boot | first module | first page | restart | HMR | build cold | build warm |
+|---|---|---|---|---|---|---|---|
+| **lunx** | 393 ms | **446 ms** | 7,943 ms | 6,847 ms | 202 ms | 1,174 ms | 187 ms |
+| lunx --bundle | **356 ms** | 1,786 ms | 2,554 ms | **1,636 ms** | **167 ms** | – | – |
+| Vite | 493 ms | 931 ms | 8,657 ms | 7,671 ms | 220 ms | 964 ms | 893 ms |
+| Rspack | 878 ms | 1,038 ms | **1,824 ms** | 1,803 ms | 863 ms | 1,189 ms | 1,082 ms |
+| Rsbuild | 1,222 ms | 1,348 ms | 2,205 ms | 2,196 ms | 556 ms | 1,057 ms | 950 ms |
+| Parcel | 6,917 ms | 6,979 ms | 7,721 ms | 7,318 ms | 239 ms | 6,963 ms | 6,904 ms |
+| webpack | 5,501 ms | 5,850 ms | 6,744 ms | 6,628 ms | 1,301 ms | 12,528 ms | 11,855 ms |
+| Farm | failed¹ | | | | | | |
+| esbuild | – | – | – | – | – | 189 ms | 186 ms |
+| Bun | – | – | – | – | – | **120 ms** | **117 ms** |
+| Rolldown | – | – | – | – | – | 1,189 ms | 496 ms |
+
+**10,000 components** (the five dev servers)
+
+| tool | dev boot | first page | restart | HMR | build cold | build warm |
+|---|---|---|---|---|---|---|
+| **lunx** | **390 ms** | 30,329 ms | 29,852 ms | 692 ms | 3,525 ms | **243 ms** |
+| lunx --bundle | 468 ms | 7,905 ms | **5,114 ms** | **431 ms** | – | – |
+| Vite | 535 ms | 35,998 ms | 33,579 ms | 696 ms | **2,929 ms** | 2,699 ms |
+| Rspack | 2,687 ms | **5,636 ms** | 5,509 ms | 2,788 ms | 3,941 ms | 3,867 ms |
+| Rsbuild | 3,629 ms | 7,219 ms | 7,408 ms | 1,871 ms | 3,532 ms | 3,660 ms |
 
 ¹ Farm 1.7 cannot resolve `react/jsx-dev-runtime` through a symlinked
-`node_modules` (the scaled app shares the small app's).
+`node_modules` (the scaled apps share the small app's).
 
-The container was busier than on 2026-10-15 (every tool measured slower);
-the ranking is unchanged.
+Cold builds swing up to 2× between runs on this machine; with 3 samples
+the 2,000-component ranking is within noise. Measured 8 times interleaved
+on the same app, lunx's cold build was 768 ms (median) against Vite's
+979 ms.
 
-**Verdict.** Among tools with a dev server, lunx is fastest at boot, HMR and
-cold build on both apps, and at warm build on the large one. Rspack's warm
-build of the small app is 15 ms faster, within run-to-run noise. esbuild and
-Bun build faster, but they are bundlers with no HMR dev server, CSS pipeline
-or framework compilers.
+**Verdict.** lunx boots fastest at every size, restarts fastest (unbundled
+on the small app, bundled from 2,000 components on), has the fastest HMR at
+every size, and the fastest warm build of every tool with a dev server
+(4–15× faster). It loses two columns:
+
+- **First page of a first start**, to Rspack and Rsbuild: 1.2 s vs 0.8 s on
+  the small app, 2.6 s vs 1.8 s at 2,000 components (bundled), 7.9 s vs
+  5.6 s at 10,000. A first visit waits for the dependency pre-bundle
+  (React's development build through Rolldown, ~0.2–0.5 s; esbuild needs
+  ~0.13 s) and, bundled, for the app's own build. The restart, with both
+  cached, is faster than theirs.
+- **Cold build of the small app**, to Rspack (654 ms vs 498 ms). lunx also
+  tree-shakes inside React's CommonJS, which is why its output is the
+  smallest; that pass now lexes in Rust (~16 ms, ~75 ms before).
+
+esbuild and Bun build faster, but they are bundlers with no HMR dev server,
+CSS pipeline or framework compilers.
 
 ## 2. Build output
 
-What the browser downloads: JS, gzip -9.
+What the browser downloads: JS, gzip -9 (license files excluded).
 
-| tool | small app | 2,000 components |
-|---|---|---|
-| Bun | **65,552 B** | **82,445 B** |
-| **lunx** | 67,776 B | 85,410 B |
-| Vite | 68,006 B | 85,702 B |
-| Rolldown | 68,130 B | 86,322 B |
-| esbuild | 68,967 B | 87,231 B |
-| Rspack | 69,026 B | 91,460 B |
-| Rsbuild | 69,256 B | 90,591 B |
-| Parcel | 69,675 B | 91,079 B |
-| webpack | 70,359 B | 89,442 B |
-| Farm | 72,422 B | failed |
+| tool | small app | 2,000 components | 10,000 components |
+|---|---|---|---|
+| **lunx** | **63,925 B** | **80,986 B** | **148,606 B** |
+| Bun | 65,544 B | 82,437 B | |
+| Vite | 67,988 B | 85,684 B | 154,512 B |
+| Rolldown | 68,116 B | 86,308 B | |
+| esbuild | 68,959 B | 87,223 B | |
+| Rspack | 69,018 B | 91,455 B | 180,032 B |
+| Rsbuild | 69,096 B | 90,602 B | 176,974 B |
+| Parcel | 69,639 B | 91,037 B | |
+| webpack | 70,368 B | 89,463 B | |
+| Farm | 70,581 B | failed | |
 
-(Raw bytes rank differently: Rsbuild and Rspack are slightly smaller than
-lunx uncompressed but larger after gzip.)
-
-**lunx is now second, behind Bun only.** 1.2.0 moves third-party license
-notices into `<chunk>.LICENSE.txt` (`build.legalComments: 'linked'`, the
-default), which took ~280 B off the small app and put lunx ahead of Vite.
-
-**Why Bun is still smaller (3–4%).** Bun removes more unused code inside
-React's CommonJS files: functions and `Symbol.for(…)` constants that React
-defines but the app never reaches. Rolldown keeps a CommonJS module's body
-whole. Binding React's exports to local names (as Bun prints them) was tried:
-6% fewer raw bytes, no gzip change, so it was dropped. Closing the rest needs
-CommonJS tree shaking in Rolldown itself.
+**lunx is smallest at every size, Bun included.** lunx rewrites
+dependencies' CommonJS modules with a static shape (React, ReactDOM, the
+scheduler) as ES modules, so Rolldown drops the exports the app never uses
+(`build.commonjsTreeShaking`, on by default): ~5 KB of React DOM on the
+small app. Bun removed that code before; now lunx removes more. License
+notices go to `<chunk>.LICENSE.txt` (`build.legalComments: 'linked'`, the
+default).
 
 **Per framework, lunx is smallest.** In `npm run test:parity` (vanilla,
 React, Preact, Vue, Svelte, Solid, Lit, a two-page app), lunx's gzip JS is
@@ -283,8 +308,9 @@ browser, parity and template matrices)
 
 - Output: tree shaking inside CommonJS dependencies (`build.commonjsTreeShaking`,
   on by default; large modules read by a lexer checked against the syntax tree on
-  18,822 CommonJS files). lunx's output is now the smallest of every tool, Bun
-  included.
+  18,822 CommonJS files, and run in Rust when the native binding has it: the same
+  decisions on all 19,020 CommonJS files in node_modules). lunx's output is now
+  the smallest of every tool, Bun included.
 - Bundler: chunk import maps (`build.chunkImportMap`), a legacy `nomodule`
   build (`build.legacy`), single-file executables (`lunx compile`), unchanged
   builds in ~40 ms.
@@ -296,19 +322,21 @@ browser, parity and template matrices)
 
 **Still missing**
 
-1. Test runner: browser mode.
-2. Bundled dev for projects with Vite plugins or module federation (they serve
+1. A first start's first page as fast as Rspack's (see §1): the dependency
+   pre-bundle is on its critical path.
+2. Test runner: browser mode.
+3. Bundled dev for projects with Vite plugins or module federation (they serve
    modules one by one).
-3. webpack loaders; a Node version / package manager (Vite+, Bun).
-4. `writeToDisk` in dev; `envPrefix` / `envDir` and the Environment API are
+4. webpack loaders; a Node version / package manager (Vite+, Bun).
+5. `writeToDisk` in dev; `envPrefix` / `envDir` and the Environment API are
    partial.
-5. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
+6. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
 
 **Where lunx leads**
 
-Fastest dev boot, HMR and cold build of every tool with a dev server, at
-both sizes · smallest output after Bun, and smaller per framework than Vite
-and the meta-frameworks' own CLIs · the widest framework list built by one
+Fastest dev boot, restart, HMR and warm build of every tool with a dev
+server, at every size · the smallest output of every tool, Bun included,
+and smaller per framework than Vite and the meta-frameworks' own CLIs · the widest framework list built by one
 tool (10 app frameworks, 12 meta-frameworks built, 5 delegated, plus
 Storybook and Vitest on its engine) · module federation interoperable with
 webpack and Rspack, with the `@module-federation` runtime API · supply-chain

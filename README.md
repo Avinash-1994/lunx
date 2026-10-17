@@ -283,7 +283,7 @@ export default defineConfig({
 lunx dev --bundle        # or server: { bundle: true } in lunx.config
 ```
 
-The page loads a few bundles from Rolldown's dev engine instead of one request per module (packages load pre-bundled beside them, cached across restarts), and each save arrives as a patch of the changed modules, with React Fast Refresh keeping component state. At 2,000 components the first visit renders in 1.4 s, against 1.7 s for Rspack and 6–12 s for Vite. A vite.config's `experimental.bundledDev` turns it on too. Projects with Vite plugins, module federation or SSR serve modules one by one.
+The page loads a few bundles from Rolldown's dev engine instead of one request per module (packages load pre-bundled beside them, cached across restarts), and each save arrives as a patch of the changed modules, with React Fast Refresh keeping component state. At 2,000 components the first visit renders in 2.6 s (Rspack 1.8 s, Vite 8.7 s), a restart in 1.6 s (Rspack 1.8 s), and a save in 167 ms (Rspack 863 ms). A vite.config's `experimental.bundledDev` turns it on too. Projects with Vite plugins, module federation or SSR serve modules one by one.
 
 ### Vite-based tools: `lunx exec`
 
@@ -511,33 +511,33 @@ Plugins that ask for permissions (`fs:write`, `env:read`, network) run in lunx's
 
 ## 📊 Performance Benchmarks
 
-Every tool installed from npm, same React + TypeScript app, median of 7 runs, all in one session on a Linux cloud container (`npx tsx scripts/bench-arena.mjs --hmr --runs 7 [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **HMR** is the time from saving `App.tsx` to Chromium showing the change. Compare ratios, not absolute times.
+Every tool installed from npm, same React + TypeScript app, run round by round in one session on a 4-core Linux cloud container, medians of 5 runs (3 at 2,000 components; `npx tsx scripts/bench-arena.mjs --hmr --runs 5 [--scale 2000]`; results in `reports/BENCH_ARENA*.json`). **First page** is spawn → Chromium shows the app on a first start (caches cleared); **restart** is the same with the caches the first start left; **HMR** is saving `App.tsx` → Chromium shows it. Compare ratios, not absolute times.
 
 **Small app**
 
-| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS (gzip) |
-|---|---|---|---|---|---|---|
-| **lunx** | 248 ms | 252 ms | 30 ms | 369 ms | 385 ms | 66.2 KB |
-| Vite 8 | 409 ms | 491 ms | 40 ms | 663 ms | 487 ms | 66.4 KB |
-| Rsbuild 2 | 432 ms | 459 ms | 86 ms | 511 ms | 487 ms | 67.6 KB |
-| Rspack 2 | 376 ms | 414 ms | 208 ms | 386 ms | 370 ms | 67.4 KB |
-| Parcel | 1449 ms | 1458 ms | 35 ms | 1693 ms | 1761 ms | 68.0 KB |
-| webpack | 1578 ms | 1745 ms | 275 ms | 4313 ms | 4066 ms | 68.7 KB |
-| esbuild (bundler only) | – | – | – | 66 ms | 65 ms | 67.3 KB |
-| Bun (bundler only) | – | – | – | 41 ms | 46 ms | 64.0 KB |
+| Tool | Dev boot | First page | Restart | HMR | Build (cold) | Build (warm) | JS (gzip) |
+|---|---|---|---|---|---|---|---|
+| **lunx** | **364 ms** | 1224 ms | **657 ms** | **42 ms** | 654 ms | **116 ms** | **63.9 KB** |
+| Vite 8 | 525 ms | 1538 ms | 1021 ms | 45 ms | 693 ms | 606 ms | 68.0 KB |
+| Rsbuild 2 | 558 ms | 834 ms | 859 ms | 88 ms | 687 ms | 694 ms | 69.1 KB |
+| Rspack 2 | 473 ms | **804 ms** | 833 ms | 239 ms | **498 ms** | 435 ms | 69.0 KB |
+| Parcel | 1796 ms | 2067 ms | 2148 ms | 41 ms | 2232 ms | 2291 ms | 69.6 KB |
+| webpack | 2244 ms | 2787 ms | 2658 ms | 347 ms | 5367 ms | 5272 ms | 70.4 KB |
+| esbuild (bundler only) | – | – | – | – | 79 ms | 94 ms | 69.0 KB |
+| Bun (bundler only) | – | – | – | – | 63 ms | 57 ms | 65.5 KB |
 
-**Large app: 2,000 components** (`--scale 2000`)
+**Large app: 2,000 components** (`--scale 2000`; lunx with `server.bundle`)
 
-| Tool | Dev boot | App code ready | HMR | Build (cold) | Build (warm) | JS (gzip) |
-|---|---|---|---|---|---|---|
-| **lunx** | 243 ms | 247 ms | 151 ms | 583 ms | 547 ms | 83.4 KB |
-| Vite 8 | 389 ms | 717 ms | 161 ms | 829 ms | 651 ms | 83.7 KB |
-| Rsbuild 2 | 944 ms | 1062 ms | 440 ms | 777 ms | 754 ms | 88.5 KB |
-| Rspack 2 | 700 ms | 839 ms | 656 ms | 804 ms | 878 ms | 89.3 KB |
-| Parcel | 4523 ms | 4542 ms | 177 ms | 5042 ms | 5060 ms | 88.9 KB |
-| webpack | 4268 ms | 4522 ms | 1113 ms | 8763 ms | 8715 ms | 87.3 KB |
-| esbuild (bundler only) | – | – | – | 145 ms | 144 ms | 85.2 KB |
-| Bun (bundler only) | – | – | – | 106 ms | 82 ms | 80.5 KB |
+| Tool | Dev boot | First page | Restart | HMR | Build (cold) | Build (warm) | JS (gzip) |
+|---|---|---|---|---|---|---|---|
+| **lunx** | **356 ms** | 2554 ms | **1636 ms** | **167 ms** | 1174 ms | **187 ms** | **81.0 KB** |
+| Vite 8 | 493 ms | 8657 ms | 7671 ms | 220 ms | **964 ms** | 893 ms | 85.7 KB |
+| Rsbuild 2 | 1222 ms | 2205 ms | 2196 ms | 556 ms | 1057 ms | 950 ms | 90.6 KB |
+| Rspack 2 | 878 ms | **1824 ms** | 1803 ms | 863 ms | 1189 ms | 1082 ms | 91.5 KB |
+| Parcel | 6917 ms | 7721 ms | 7318 ms | 239 ms | 6963 ms | 6904 ms | 91.0 KB |
+| webpack | 5501 ms | 6744 ms | 6628 ms | 1301 ms | 12528 ms | 11855 ms | 89.5 KB |
+| esbuild (bundler only) | – | – | – | – | 189 ms | 186 ms | 87.2 KB |
+| Bun (bundler only) | – | – | – | – | 120 ms | 117 ms | 82.4 KB |
 
 **Build output against Vite 8** (same app per framework, both built and run in Chromium; `npm run test:parity`, `reports/OUTPUT_PARITY.json`). Each app has a component with state, global CSS, a CSS module, an emitted image, a JSON named import, a lazy chunk, a worker, an env value and dev-only code; the `app` row adds two pages, base `/sub/`, source maps, lazy routes with their own CSS, CSS `@import` / `url()` and `public/`. Every probe passes for both tools.
 
@@ -550,7 +550,7 @@ Every tool installed from npm, same React + TypeScript app, median of 7 runs, al
 
 CSS is within a few bytes of Vite's in every app, and CSS that only lazy chunks import loads with them (`build.cssCodeSplit: false` for one file). Vite's extra kilobyte in the small apps is its modulepreload polyfill, which lunx leaves out (every browser that runs ES modules supports modulepreload).
 
-Where lunx is behind: esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support; Bun's JS is 3–4% smaller (it removes more unused code inside React's CommonJS files); on the small app Rspack's warm build (370 vs 385 ms) is within run-to-run noise (±30% on shared cores) of lunx's. `lunx build` also writes gzip/brotli copies, license files, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
+Where lunx is behind: the first page of a first start, which waits for the dependency pre-bundle (Rspack and Rsbuild show it sooner; the restart, with caches, is fastest with lunx); the small app's cold build, where Rspack is ~150 ms faster; esbuild and Bun bundle several times faster, though without a dev server, HMR or framework support. Cold builds swing up to 2× here: measured 8 times interleaved, lunx's 2,000-component cold build was 768 ms against Vite's 979 ms. `lunx build` also writes gzip/brotli copies, license files, an SBOM and SRI/CSP data and checks the lockfile and known CVEs, which the others do not; the checks run while Rolldown is still minifying. Vue / Svelte projects with 100+ components compile on worker threads (`LUNX_COMPILE_WORKERS=0` turns it off).
 
 ---
 
