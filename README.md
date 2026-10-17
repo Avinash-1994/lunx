@@ -283,7 +283,7 @@ export default defineConfig({
 lunx dev --bundle        # or server: { bundle: true } in lunx.config
 ```
 
-The page loads a few bundles from Rolldown's dev engine (node_modules included) instead of one request per module, and each save arrives as a patch of the changed modules, with React Fast Refresh keeping component state. At 2,000 components the first visit renders in 1.4 s, against 1.7 s for Rspack and 6–12 s for Vite. A vite.config's `experimental.bundledDev` turns it on too. Projects with Vite plugins, module federation or SSR serve modules one by one.
+The page loads a few bundles from Rolldown's dev engine instead of one request per module (packages load pre-bundled beside them, cached across restarts), and each save arrives as a patch of the changed modules, with React Fast Refresh keeping component state. At 2,000 components the first visit renders in 1.4 s, against 1.7 s for Rspack and 6–12 s for Vite. A vite.config's `experimental.bundledDev` turns it on too. Projects with Vite plugins, module federation or SSR serve modules one by one.
 
 ### Vite-based tools: `lunx exec`
 

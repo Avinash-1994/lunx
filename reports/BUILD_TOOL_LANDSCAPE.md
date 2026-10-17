@@ -9,7 +9,7 @@ documentation instead, it says so.
 
 | tool | version | kind |
 |---|---|---|
-| **lunx** | 1.2.0 | dev server + build, Rolldown/Oxc |
+| **lunx** | 1.2.0 + master (unreleased) | dev server + build, Rolldown/Oxc |
 | Vite | 8.3.4 | dev server + build, Rolldown/Oxc |
 | Rsbuild | 2.2.13 | dev server + build on Rspack |
 | Rspack | 2.2.9 | bundler (webpack API, Rust) |
@@ -152,7 +152,7 @@ Competitor cells follow each tool's own documentation.
 | Type hints for remotes (`dts`) | ✅ `@mf-types.zip`, same layout as the MF dts plugin | ✅ | ✅ | ✅ |
 | `shareStrategy`, `shareScope`, `import: false` | ✅ | ✅ | ✅ | ✅ |
 | Remote as object (`{ entry, type }`) | ✅ | ✅ | ✅ | ✅ |
-| Chrome DevTools extension | ❌ | ✅ | ✅ | ✅ |
+| Chrome DevTools extension | ✅ module graph, shared packages, remote overrides | ✅ | ✅ | ✅ |
 
 ## 5. Bundler features
 
@@ -168,10 +168,10 @@ Competitor cells follow each tool's own documentation.
 | `.wasm?init` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
 | Wasm ESM import (`import { f } from './a.wasm'`) | ✅ | ✅ (8.1) | ✅ | ✅ | ❌ | ❌ | partial |
 | Syntax lowering for older browsers (`build.target` / browserslist) | ✅ default: Baseline widely available | ✅ | ✅ | ✅ | ✅ | ✅ | partial |
-| Polyfills (core-js usage, legacy `nomodule`) | ✅ `build.polyfill` entry / usage; no `nomodule` | 🔌 `plugin-legacy` | ✅ `output.polyfill` | ✅ | ✅ differential | ❌ | ❌ |
+| Polyfills (core-js usage, legacy `nomodule`) | ✅ `build.polyfill` entry / usage; `build.legacy` (`nomodule`, ES2015 or ES5) | 🔌 `plugin-legacy` | ✅ `output.polyfill` | ✅ | ✅ differential | ❌ | ❌ |
 | `build.manifest` (Laravel, Rails, Django backends) | ✅ | ✅ | ✅ | 🔌 | ✅ | ✅ metafile | ❌ |
 | `ssrManifest` | ✅ | ✅ | ✅ | 🔌 | ❌ | ❌ | ❌ |
-| Chunk import map (stable hashes) | ❌ | ✅ (8.1) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Chunk import map (stable hashes) | ✅ `build.chunkImportMap` | ✅ (8.1) | ❌ | ❌ | ❌ | ❌ | ❌ |
 | CDN URLs per asset (`renderBuiltUrl` / `assetPrefix`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Drop `console` / `debugger` | ✅ `build.drop` | via minifier options | ✅ `removeConsole` | ✅ (Terser) | ❌ | ✅ `drop` | ✅ |
 | Legal comments (measured) | `.LICENSE.txt` per chunk (`build.legalComments`) | dropped | Rsbuild: `.LICENSE.txt`; Rspack: dropped | dropped | dropped | kept inline | dropped |
@@ -179,8 +179,8 @@ Competitor cells follow each tool's own documentation.
 | Persistent build cache | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Remote (shared) cache | ✅ `cache.remote` (HTTP, S3) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Precompressed .gz / .br | ✅ | 🔌 | 🔌 | 🔌 | ✅ | ❌ | ❌ |
-| Bundled dev mode for 10k+ module apps | ❌ | ✅ experimental (8.1) | n/a (bundler) | n/a | n/a | n/a | n/a |
-| Single-file executable | ❌ | ❌ (Vite+: `vp pack`) | ❌ | ❌ | ❌ | ❌ | ✅ `--compile` |
+| Bundled dev mode for 10k+ module apps | ✅ `server.bundle` / `--bundle` (Rolldown dev engine, patch HMR, React Refresh) | ✅ experimental (8.1) | n/a (bundler) | n/a | n/a | n/a | n/a |
+| Single-file executable | ✅ `lunx compile` (Node SEA) | ❌ (Vite+: `vp pack`) | ❌ | ❌ | ❌ | ❌ | ✅ `--compile` |
 
 ## 6. Advanced options
 
@@ -219,15 +219,15 @@ Options a production project reaches for. A lunx ❌ means neither
 | | lunx | Vite (+ Vite+) | Rstack | Parcel | Bun |
 |---|---|---|---|---|---|
 | Scaffolding | ✅ `lunx create`, 27 templates | ✅ `create-vite`, `vp create` | ✅ | ❌ | ✅ |
-| Test runner | basic `lunx test`; Vitest runs on lunx via `lunx exec vitest` | ✅ Vitest | ✅ Rstest | ❌ | ✅ `bun test` |
-| · DOM environment (jsdom / happy-dom) | ❌ | ✅ | ✅ | | ✅ |
-| · Coverage | ❌ | ✅ | ✅ | | ✅ |
-| · Snapshots | ❌ | ✅ | ✅ | | ✅ |
+| Test runner | ✅ `lunx test` (Vitest's API, worker threads); Vitest itself when installed | ✅ Vitest | ✅ Rstest | ❌ | ✅ `bun test` |
+| · DOM environment (jsdom / happy-dom) | ✅ | ✅ | ✅ | | ✅ |
+| · Coverage | ✅ V8, source-mapped (text, lcov) | ✅ | ✅ | | ✅ |
+| · Snapshots | ✅ Vitest's format, inline too | ✅ | ✅ | | ✅ |
 | · Browser mode | ❌ | ✅ | ✅ | | ❌ |
 | Type check | ✅ `lunx check`, dev overlay | ✅ `vp check` (tsgo) | ❌ | ❌ | ❌ |
-| Lint | ❌ | ✅ `vp lint` (Oxlint) | ❌ | ❌ | ❌ |
-| Format | ❌ | ✅ `vp fmt` (Oxfmt) | ❌ | ❌ | ❌ |
-| Monorepo task runner with cache | ❌ | ✅ `vp run` | ❌ | ❌ | partial (workspaces) |
+| Lint | ✅ `lunx lint` (Oxlint) | ✅ `vp lint` (Oxlint) | ❌ | ❌ | ❌ |
+| Format | ✅ `lunx fmt` (Oxfmt) | ✅ `vp fmt` (Oxfmt) | ❌ | ❌ | ❌ |
+| Monorepo task runner with cache | ✅ `lunx run` | ✅ `vp run` | ❌ | ❌ | partial (workspaces) |
 | Bundle analysis | ✅ `lunx analyze`, `lunx why` | 🔌 | ✅ Rsdoctor | ❌ | ❌ |
 | DevTools UI | `lunx inspect` | ✅ Vite DevTools | ✅ Rsdoctor | ❌ | ❌ |
 | Security: CVE gate, SBOM, SRI, secret scan, CSP | ✅ | ❌ | partial (SRI) | ❌ | ❌ |
@@ -279,18 +279,30 @@ browser, parity and template matrices)
   runtime plugins, `shareStrategy`, `import: false` and object remotes, Wasm
   ESM imports, core-js polyfills (`build.polyfill`).
 
+**Closed since 1.2.0** (on master, unreleased; tested in `tests/build/*.test.ts` and the matrices)
+
+- Output: tree shaking inside CommonJS dependencies (`build.commonjsTreeShaking`,
+  on by default; large modules read by a lexer checked against the syntax tree on
+  18,822 CommonJS files). lunx's output is now the smallest of every tool, Bun
+  included.
+- Bundler: chunk import maps (`build.chunkImportMap`), a legacy `nomodule`
+  build (`build.legacy`), single-file executables (`lunx compile`), unchanged
+  builds in ~40 ms.
+- Dev: bundled dev mode (`server.bundle`, `lunx dev --bundle`): the browser
+  matrix passes 133/133 with it.
+- Federation: the Module Federation Chrome DevTools extension.
+- Toolchain: `lunx test` with DOM environments, coverage and snapshots;
+  `lunx lint` / `lunx fmt`; `lunx run` (workspace tasks with a cache).
+
 **Still missing**
 
-1. Output: CommonJS tree shaking inside dependencies (Bun's 3–4% lead).
-   Needs Rolldown.
-2. Bundler: chunk import maps (stable hashes, Vite 8.1); a legacy
-   `nomodule` build for browsers without ES modules; bundled dev mode for
-   10k+ module apps.
-3. Federation: the Module Federation Chrome DevTools extension.
-4. Toolchain (Vite+ and Bun): `lunx test` without DOM environment, coverage,
-   snapshots or browser mode (Vitest runs through `lunx exec vitest`); lint
-   (Oxlint) and format (Oxfmt); monorepo task runner with cache;
-   single-file executables.
+1. Test runner: browser mode.
+2. Bundled dev for projects with Vite plugins or module federation (they serve
+   modules one by one).
+3. webpack loaders; a Node version / package manager (Vite+, Bun).
+4. `writeToDisk` in dev; `envPrefix` / `envDir` and the Environment API are
+   partial.
+5. Next.js, Docusaurus, Gatsby, RedwoodJS and Stencil still run their own CLIs.
 
 **Where lunx leads**
 

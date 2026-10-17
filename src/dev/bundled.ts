@@ -32,10 +32,15 @@ export interface BundledDevOptions {
     /** lunx's dev compile of one source file (framework compilers, React Refresh). */
     compile(file: string, code: string): Promise<{ code: string; map?: string | null }>;
     /**
-     * The URL of a package's pre-bundled copy (`/@lunx-deps/…`), or null. Those load as
-     * modules beside the bundles: built once (cached across restarts), out of every rebuild.
+     * Packages kept out of the bundles: a native external (no JS hook runs per import),
+     * loaded pre-bundled beside them.
      */
-    dependency(specifier: string): Promise<string | null>;
+    packages: string[];
+    /**
+     * Pre-bundles the imports among these not yet built, served at `depUrl(spec)`: built
+     * once (cached across restarts), out of every rebuild. Requests for them wait for it.
+     */
+    dependencies(specifiers: string[]): Promise<void>;
     log: { info(msg: string): void; error(msg: string): void };
 }
 
@@ -66,6 +71,45 @@ export function moduleEntries(root: string, html: string, htmlFile: string): Map
         if (fs.existsSync(file)) entries.set(src, file);
     }
     return entries;
+}
+
+/** Where the dev server serves a package import's pre-bundled copy (the pre-bundler's naming). */
+export const depUrl = (spec: string) => `/@lunx-deps/${spec.replace(/[/@]/g, '_')}.js`;
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The dependencies of a project's package.json that load as packages: installed in a
+ * node_modules (not a linked workspace package, whose sources stay in the bundles with
+ * their hot updates) and whose entry is JavaScript (a CSS-only package bundles as CSS).
+ */
+export function bundlePackages(root: string, skip: (name: string) => boolean): string[] {
+    let pkg: any;
+    try {
+        pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    } catch {
+        return [];
+    }
+    const names = new Set(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies }));
+    const out: string[] = [];
+    for (const name of names) {
+        if (name.startsWith('@types/') || skip(name)) continue;
+        for (let dir = root; ; ) {
+            const pkgDir = path.join(dir, 'node_modules', name);
+            if (fs.existsSync(path.join(pkgDir, 'package.json'))) {
+                try {
+                    if (!fs.realpathSync(pkgDir).includes(`${path.sep}node_modules${path.sep}`)) break;
+                    const meta = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+                    const entry = meta.module ?? meta.main ?? (meta.exports || meta.browser ? '' : meta.style ?? '');
+                    if (!/\.(css|scss|sass|less|styl)$/.test(typeof entry === 'string' ? entry : '')) out.push(name);
+                } catch { /* unreadable: bundled */ }
+                break;
+            }
+            const parent = path.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
+        }
+    }
+    return out;
 }
 
 export async function startBundledDev(options: BundledDevOptions): Promise<BundledDev | null> {
@@ -101,18 +145,55 @@ export async function startBundledDev(options: BundledDevOptions): Promise<Bundl
         for (const c of clients.values()) c.send(data);
     };
 
-    const aliased = (spec: string) => options.aliases.some((a) => spec === a.find || spec.startsWith(a.find.endsWith('/') ? a.find : a.find + '/'));
+    // A package or a JS subpath of one (react, react-dom/client, lit/html.js); its CSS and assets bundle.
+    const aliased = (name: string) => options.aliases.some((a) => name === a.find || a.find.startsWith(name + '/'));
+    const kept = options.packages.filter((name) => !aliased(name));
+    const external = kept.length ? new RegExp(`^(?:${kept.map(escapeRe).join('|')})(?:/(?:[^.?]*|[^?]*\\.[mc]?js))?$`) : null;
+    // Rolldown hoists a chunk's package imports to its top, and a patch's to the top of each
+    // module's region (`//#region <id>`); import() stays in place. Only there are imports read.
+    const HEADER = /\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/|import\s*(?:[^'"`;]*?\sfrom\s*)?(["'])([^"']+)\1\s*;?)/y;
+    const REGION = /^\/\/#region [^\n]*\n/gm;
+    const DYNAMIC = /\bimport\(\s*(["'])([^"'./][^"']*)\1\s*\)/g;
+    const requested = new Set<string>(); // package imports handed to the pre-bundle
+    /** Each package import (its spec and where its quoted spec starts) in code Rolldown wrote. */
+    function* packageImports(code: string): Generator<{ spec: string; at: number }> {
+        const starts = [0];
+        for (const m of code.matchAll(REGION)) starts.push(m.index + m[0].length);
+        for (const from of starts) {
+            HEADER.lastIndex = from;
+            for (let m; (m = HEADER.exec(code)); ) {
+                if (m[2] && external?.test(m[2])) yield { spec: m[2], at: m.index + m[0].lastIndexOf(m[1]! + m[2] + m[1]!) };
+            }
+        }
+        for (const m of code.matchAll(DYNAMIC)) if (external?.test(m[2]!)) yield { spec: m[2]!, at: m.index + m[0].indexOf(m[1]!) };
+    }
+    /** Pre-bundles the package imports of some code not seen before. */
+    const prebundle = (code: string) => {
+        const specs: string[] = [];
+        for (const { spec } of packageImports(code)) {
+            if (requested.has(spec)) continue;
+            requested.add(spec);
+            specs.push(spec);
+        }
+        if (specs.length) void options.dependencies(specs).catch(() => {});
+    };
+    /** The code with its package imports pointing at their pre-bundled copies (no parse). */
+    const finalize = (code: string): string => {
+        if (!external) return code;
+        const edits = [...packageImports(code)].sort((a, b) => a.at - b.at);
+        if (!edits.length) return code;
+        let out = '';
+        let at = 0;
+        for (const edit of edits) {
+            if (edit.at < at) continue;
+            const q = code[edit.at]!;
+            out += code.slice(at, edit.at) + q + depUrl(edit.spec) + q;
+            at = edit.at + edit.spec.length + 2;
+        }
+        return out + code.slice(at);
+    };
     const lunxPlugin = {
         name: 'lunx:bundled-dev',
-        resolveId: {
-            // Bare imports: the pre-bundled package when there is one (React and co. stay out of the bundles).
-            filter: { id: /^(?![./\0]|[a-zA-Z]:|virtual:|https?:)/ },
-            async handler(id: string) {
-                if (id.includes('?') || aliased(id)) return null;
-                const url = await options.dependency(id);
-                return url ? { id: url, external: true } : null;
-            },
-        },
         load: {
           // Only what Rolldown cannot load itself: a JS hook call per module costs ~0.5 ms.
           filter: { id: new RegExp(`${CSS_LANGS.source.replace(/\$$/, '')}(\\?|$)|${ASSET.source.replace(/\$$/, '')}(\\?|$)|\\?`, 'i') },
@@ -212,6 +293,7 @@ import.meta.hot?.accept();
                 define: options.defines,
                 ...(options.jsx ? { jsx: { runtime: 'automatic', importSource: options.jsx.importSource, development: true, refresh: options.jsx.refresh } } : {}),
             },
+            ...(external ? { external } : {}),
             plugins: [lunxPlugin, viteImportGlobPlugin({ root })],
             moduleTypes: { '.vue': 'js', '.svelte': 'js' },
             experimental: { devMode: { implement: CLIENT_RUNTIME } },
@@ -237,7 +319,10 @@ import.meta.hot?.accept();
                 } else {
                     buildError = null;
                     files.clear();
-                    for (const o of result.output) files.set(o.fileName, o.type === 'chunk' ? o.code : String(o.source));
+                    for (const o of result.output) {
+                        files.set(o.fileName, o.type === 'chunk' ? o.code : String(o.source));
+                        if (o.type === 'chunk') prebundle(o.code);
+                    }
                 }
                 settle();
             },
@@ -257,6 +342,7 @@ import.meta.hot?.accept();
                     if (update.type === 'Patch') {
                         patches.set(`${clientId}/${update.filename}`, update.code);
                         if (update.sourcemap && update.sourcemapFilename) patches.set(`${clientId}/${update.sourcemapFilename}`, update.sourcemap);
+                        prebundle(update.code); // a package new to the app
                         client.send(JSON.stringify({ type: 'lunx:bundle-patch', url: `${BUNDLE_PREFIX}hmr/${clientId}/${update.filename}`, filename: update.filename, changedIds: update.changedIds }));
                     } else if (update.type === 'FullReload') {
                         client.send(JSON.stringify({ type: 'lunx:bundle-reload', reason: update.reason }));
@@ -293,7 +379,8 @@ import.meta.hot?.accept();
             const rel = decodeURIComponent(url.split('?')[0]!.slice(BUNDLE_PREFIX.length));
             if (rel.startsWith('hmr/')) {
                 const body = patches.get(rel.slice(4));
-                return body === undefined ? null : { body, type: rel.endsWith('.map') ? 'application/json' : 'application/javascript' };
+                if (body === undefined) return null;
+                return rel.endsWith('.map') ? { body, type: 'application/json' } : { body: finalize(body), type: 'application/javascript' };
             }
             await current();
             const body = files.get(rel);
@@ -304,7 +391,8 @@ import.meta.hot?.accept();
                 }
                 return null;
             }
-            return { body, type: rel.endsWith('.map') ? 'application/json' : rel.endsWith('.css') ? 'text/css' : 'application/javascript' };
+            if (rel.endsWith('.map')) return { body, type: 'application/json' };
+            return rel.endsWith('.css') ? { body, type: 'text/css' } : { body: finalize(body), type: 'application/javascript' };
         },
         attach(ws) {
             let id: string | null = null;

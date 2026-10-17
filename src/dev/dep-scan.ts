@@ -63,14 +63,21 @@ export async function scanDeps(root: string, entries: string[], aliases: AliasEn
         }
     }
 
+    // Sync reads, a slice at a time: one awaited read per file made the scan of 2,000
+    // files ~0.75 s (beside a build on 4 cores); between slices the server answers.
+    let sinceYield = 0;
     while (queue.length > 0 && seen.size < limit) {
         const file = queue.pop()!;
         if (seen.has(file) || file.includes(`${path.sep}node_modules${path.sep}`)) continue;
         seen.add(file);
         if (!SOURCE_EXT.includes(path.extname(file))) continue;
+        if (++sinceYield === 256) {
+            sinceYield = 0;
+            await new Promise((r) => setImmediate(r));
+        }
         let code: string;
         try {
-            code = await fsp.readFile(file, 'utf8');
+            code = fs.readFileSync(file, 'utf8');
         } catch {
             continue;
         }

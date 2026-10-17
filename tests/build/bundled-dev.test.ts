@@ -91,6 +91,9 @@ describe('server.bundle', () => {
         const code = await (await get(patch.url)).text();
         expect(code).toContain('registerFactory("src/App.jsx"');
         expect(code).toContain('second ');
+        // Its package imports point at the pre-bundled copies, as the bundle's do.
+        expect(code).toMatch(/^import \* as \w+ from "\/@lunx-deps\/react\.js";$/m);
+        expect(code).not.toMatch(/from "react"/);
         socket.send(JSON.stringify({ type: 'lunx:bundle-delivered', filename: patch.filename }));
 
         // A broken save reaches the page as an error (the overlay).

@@ -43,6 +43,36 @@ import { ConfigWatcher } from './configWatcher.js';
 import { StatusHandler } from './statusHandler.js';
 import { LiveConfigManager } from '../config/live-config.js';
 
+// ── Server-only packages that must NEVER be pre-bundled as browser ESM ──
+// These packages use Node.js built-ins (node:fs, node:url, etc.) and are
+// only used in the server/build pipeline, not in browser code.
+// Lunx understands the SSR boundary better than any other build tool.
+const SERVER_ONLY_PACKAGES = new Set([
+  // Meta-framework cores (all Node.js SSR engines)
+  'astro', '@astrojs/compiler', '@astrojs/prism',
+  '@sveltejs/kit', '@sveltejs/vite-plugin-svelte',
+  'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
+  'next', '@next/env', '@next/swc',
+  'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
+  // (@angular/core and @builder.io/qwik are browser runtimes: excluding
+  // them made other packages bundle private copies of them.)
+  '@angular/cli', '@angular/compiler-cli', '@angular/build',
+  '@analogjs/platform', '@analogjs/vite-plugin-angular',
+  '@builder.io/qwik-city',
+  'waku', '@waku/dev-server',
+  'vitepress', 'vite',
+  '@solidjs/start',
+  '@tanstack/start', '@tanstack/router-vite-plugin',
+  'electron', 'electron-builder',
+  '@tauri-apps/cli', '@tauri-apps/api',
+  // Build tools (never browser code)
+  'esbuild', 'rollup', 'webpack', 'parcel',
+  'typescript', 'ts-node', 'tsx',
+  // Node-only utilities
+  'chokidar', 'better-sqlite3', 'ws',
+  'express', 'koa', 'fastify', 'hono',
+]);
+
 /**
  * Rewrite bare module imports to node_modules paths
  * Converts: import React from 'react'
@@ -436,35 +466,6 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           ...(prebundleConfig.include || [])
         ]);
 
-        // ── Server-only packages that must NEVER be pre-bundled as browser ESM ──
-        // These packages use Node.js built-ins (node:fs, node:url, etc.) and are
-        // only used in the server/build pipeline, not in browser code.
-        // Lunx understands the SSR boundary better than any other build tool.
-        const SERVER_ONLY_PACKAGES = new Set([
-          // Meta-framework cores (all Node.js SSR engines)
-          'astro', '@astrojs/compiler', '@astrojs/prism',
-          '@sveltejs/kit', '@sveltejs/vite-plugin-svelte',
-          'nuxt', '@nuxt/kit', '@nuxt/schema', 'nitro', 'nitropack',
-          'next', '@next/env', '@next/swc',
-          'remix', '@remix-run/node', '@remix-run/server-runtime', '@remix-run/dev',
-          // (@angular/core and @builder.io/qwik are browser runtimes: excluding
-          // them made other packages bundle private copies of them.)
-          '@angular/cli', '@angular/compiler-cli', '@angular/build',
-          '@analogjs/platform', '@analogjs/vite-plugin-angular',
-          '@builder.io/qwik-city',
-          'waku', '@waku/dev-server',
-          'vitepress', 'vite',
-          '@solidjs/start',
-          '@tanstack/start', '@tanstack/router-vite-plugin',
-          'electron', 'electron-builder',
-          '@tauri-apps/cli', '@tauri-apps/api',
-          // Build tools (never browser code)
-          'esbuild', 'rollup', 'webpack', 'parcel',
-          'typescript', 'ts-node', 'tsx',
-          // Node-only utilities
-          'chokidar', 'better-sqlite3', 'ws',
-          'express', 'koa', 'fastify', 'hono',
-        ]);
 
         // Filter 1: Must verify existence in node_modules (Avoid resolve errors)
         const validDeps = new Set<string>();
@@ -655,7 +656,8 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
 
   try {
     if (bundleRequested && !bundleBlocker) {
-      const { startBundledDev } = await import('./bundled.js');
+      const { startBundledDev, bundlePackages } = await import('./bundled.js');
+      const excluded = new Set<string>((cfg as any).prebundle?.enabled === false ? [] : (cfg as any).prebundle?.exclude ?? []);
       bundled = await startBundledDev({
         root: cfg.root,
         html: path.join(cfg.root, 'index.html'),
@@ -678,10 +680,17 @@ export async function startDevServer(cliCfg: BuildConfig, existingServer?: any) 
           hmrContext: false,
         }),
         log: { info: (m) => log.info(m, { category: 'build' }), error: (m) => log.error(m) },
-        dependency: async (spec) => {
-          await prebundleReady.catch(() => {});
-          return preBundledDeps.get(spec) ?? null;
-        },
+        packages: (cfg as any).prebundle?.enabled === false ? [] : bundlePackages(cfg.root, (name) => SERVER_ONLY_PACKAGES.has(name) || excluded.has(name)),
+        // Imports the scan did not see: pre-bundled with the rest, as Vite's optimizer re-runs
+        // (chained now, so a request for one of them waits for it).
+        dependencies: (specs) => (prebundleReady = prebundleReady.catch(() => {}).then(async () => {
+          const missing = specs.filter((s) => !preBundledDeps.has(s));
+          if (!missing.length) return;
+          await preBundler.preBundleDependencies([...new Set([...preBundledDeps.keys(), ...missing])]).then(
+            (deps) => { preBundledDeps = deps; },
+            (e: any) => log.warn(`Dependency pre-bundling failed: ${e.message}`),
+          );
+        })),
       }).catch((e: any) => {
         log.warn(`server.bundle failed to start (${e.message}): serving modules unbundled`, { category: 'server' });
         return null;
@@ -1329,7 +1338,6 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
         let clientScript = bundled ? '' : `
     <script type="module" src="/@lunx/hmr-client"></script>
         `;
-        if (bundled) data = bundled.rewriteHtml(data);
 
         // Module federation needs nothing in the page: its runtime is imported by the modules that use it.
         const federationRuntime = '';
@@ -1386,6 +1394,7 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
           // Fallback if no head tag found
           data = registryScript + federationRuntime + clientScript + data;
         }
+        if (bundled) data = bundled.rewriteHtml(data);
         // `html.cspNonce`: on every script and stylesheet, lunx's own included.
         if ((cfg as any).html?.cspNonce) data = addNonce(data, (cfg as any).html.cspNonce);
 
@@ -1415,6 +1424,8 @@ export default ${compiled.exports ? JSON.stringify(compiled.exports) : JSON.stri
 
     // Serve pre-bundled dependencies
     if (url.startsWith('/@lunx-deps/')) {
+      // Bundles reference them as they build, before the pre-bundle has finished.
+      if (bundled) await prebundleReady.catch(() => {});
       // Strip query parameters
       const cleanUrl = url.split('?')[0];
       const depFile = cleanUrl.replace('/@lunx-deps/', '');
